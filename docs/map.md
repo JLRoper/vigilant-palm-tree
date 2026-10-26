@@ -1,6 +1,6 @@
 # Map
 
-<!-- docs:verified 2026-10-17 -->
+<!-- docs:verified 2026-10-26 -->
 
 The world the heroes move through. Hex grid, isometric rendering, procedurally generated.
 
@@ -135,6 +135,8 @@ Non-visible hexes are covered with a semi-transparent fog overlay on the map and
 **Uncharted mode (2026-10-17).** Games created with the New Game "Uncharted mode" toggle (`lobby.uncharted`) replace the two-state fog with **three visibility tiers**, maintained per player: **visible** (current hero/settlement vision rings), **revealed** (explored earlier, now shaded under the translucent fog overlay), and **uncharted** (never explored by that seat — painted fully opaque black, so the map reads as a hole rather than fog). Each player's reveal is the persisted `Player.revealedTiles` list (`"q,r"` keys, seeded at game creation from the seat's starting vision and merged server-side on moves, charter travel, captures, and end of turn), accumulated client-side per session by `src/render/reveal.ts` and rendered as the `unchartedHex` scene node; without the option, games keep the original two-state fog.
 
 **Unexplored tiles reveal no terrain info until seen** (locked decision, 2026-09-29 playtest fixes): the tile popup on a fogged tile shows coordinates + "Unexplored" only — `TileInfo.terrain` is null and the terrain/move-cost/deposit/settlement/heroes/charter/territory lines are all suppressed (`src/screens/adventure/tileInfo.ts`; the existing exception — tiles you own stay visible — is kept). Similarly, hover path previews (`AdventureView.updatePath()`) and click path/attack resolution (`resolveAdventureClick`) filter `occupiedHexes` and enemy targets through `computeVisionFromState` (`src/render/fog.ts`), so unseen fogged heroes never block path previews or leak an attack intent. The server-side `tiles` table still holds the full grid; the gate is a client presentation rule, not an information-model change.
+
+**The popup follows the pointer** (2026-10-26): pointing at a hex inspects it, exactly as clicking one does — `AdventureView.flushPointerState` reports the hovered hex through the same `onTileInspect` channel the click handler uses (`src/screens/adventure/adventureView.ts`), so the panel answers for the hex under the cursor without a click that would also select, move or attack. The dashed selection ring marks the inspected hex, so the ring and the panel always describe the same hex; the panel keeps the last hex once the pointer leaves the map or moves over the minimap, and its own × dismisses it until the pointer settles on another hex. The panel's text is built by `tilePanelTitle` / `tilePanelLines` (`src/screens/adventure/tileInfoPanel.ts`) — the strings as data, separated from the DOM, so the panel's exact wording is pinned by `test/screens/adventure/tileInfoPanel.test.ts`.
 
 ## Cross-references
 

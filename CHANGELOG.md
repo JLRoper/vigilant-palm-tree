@@ -10,7 +10,7 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.36.1] - 2026-10-26
+## [0.36.4] - 2026-10-26
 
 Five playthrough findings, all in the charter/persistence lane. Acceptance first:
 each one carries the failing case it was written from, and the fix that closes it.
@@ -47,6 +47,40 @@ each one carries the failing case it was written from, and the fix that closes i
   state is `emptyGameState()` — no players, heroes or settlements — rather than a
   locally generated three-seat world matching no database row while
   `activeGameName` was still null and `/api/games` had never been asked.
+
+## [0.36.3] - 2026-10-26
+
+Four city-UI findings from the consolidated playthrough report. No engine or economy
+code changed: every one is what the client renders.
+
+- **The Build palette's "Cart:" line is a charge, not a running total.** It printed the
+  cart's internal net (a placement counts positive) tinted green whenever the settlement
+  could afford it, so spending read as income; and it kept accumulating against the
+  palette-open baseline after the placement had already been paid for. It now shows what
+  the cart still owes -- a cost signed negative in the cost amber, a destroy refund
+  positive in green, red only for a charge the treasury cannot cover -- and clears once
+  the charge has landed (`buildingPlacer.ts`, `netCost.ts`).
+- **The palette list keeps its scroll offset** across a selection and a placement. Both
+  re-render the list, which replaced the scrolling element and threw the viewer back to
+  the top, so the Production and Civilian rows were a scroll away after every placement.
+- **The Load Game row reads the round, not `games.turn`.** That column is written once at
+  creation and never advances, so a game on round 37 advertised itself as "turn 1"
+  (`loadGameModal.ts`).
+- **The HUD's INCOME pill is pinned to the loaded state.** The reported "40g with no
+  intervening command" was the client swapping its boot starter world for the game the
+  player then created; the readout is now asserted to be the engine's own figure for the
+  state on screen (`hud.test.ts`).
+## [0.36.2] - 2026-10-26
+
+Three settlement-economy fixes from the classic playthrough findings.
+
+- **Workforce (C-MAJOR-2):** an `AssignWorkers` assignment now writes only the building it addresses. The first assignment used to convert the whole settlement to explicit crews and auto-employ the remaining pool, which on a level-1 city (pool 5, 13 buildings) took the advertised daily rates from −3.84 to −12.8 wood, +6.64 to −1.11 stone and +14.33 to −0.53 food from a single click. Untouched settlements keep their legacy full-effort auto-staffing, so a city converts to explicit crews one building at a time.
+- **Building upgrades (C-MAJOR-3):** `startBuildingUpgrade` refuses (`footprint_blocked`) an upgrade whose bigger L2/L3 footprint would claim a cell another building occupies, so a growing hut can no longer swallow a neighbour's cell and hide that neighbour's controls.
+- **Population cap (C-MINOR-2):** `settlementPopulationCap` (level base + district housing) is the one reader of the cap; the settlement panel prints `Population <now> / <cap>` with a tooltip naming the level base and the district-housing part, and `docs/settlements.md` states that same rule instead of a flat 500 / 1,500 / 5,000.
+
+## [0.36.1] - 2026-10-26
+
+The adventure map's tile info panel now follows the pointer: pointing at a hex inspects it exactly as clicking one does (the same onTileInspect channel), so an unrevealed hex reads "Unexplored" and the hex a hero has landed on shows its terrain without a click that would also select, move or attack. Fixes the two map display findings of the movement playthrough (M-MINOR-1, M-MINOR-2) — both were one defect: the panel was click-driven, so hovering produced no panel at all.
 
 ## [0.36.0] - 2026-10-26
 

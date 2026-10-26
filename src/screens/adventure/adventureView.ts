@@ -472,6 +472,15 @@ export class AdventureView {
     }
 
     this.hover = nextHover;
+    // Pointing at a hex inspects it, exactly as clicking one does. Inspection
+    // is the read-only half of a click (see onClick below), so the tile panel
+    // answers for the hex under the pointer without a click that would also
+    // select, move or attack: an unrevealed hex reads "Unexplored" and a seen
+    // one shows its terrain. The panel keeps the last hex once the pointer
+    // leaves the map or the pointer settles somewhere else, and the panel's
+    // own close button still dismisses it -- the pointer has to move to
+    // another hex before a fresh panel is opened for it.
+    if (nextHover) this.setInspectedTile(nextHover);
     this.updatePath();
     this.opts.onHudUpdate();
   }

@@ -86,3 +86,65 @@ export function applyNetToSettlement(state: GameState, settlementId: string, net
   };
   return { ...state, settlements: { ...state.settlements, [settlementId]: updated }, dirty: true };
 }
+
+// ─── the cart's charge readout ────────────────────────────────────────
+//
+// The palette's "Cart:" line is a CHARGE readout, so its sign has to follow
+// the treasury, not the cart's internal accounting: `NetCost` counts a
+// placement as a positive figure (it consumes resources), but a player
+// reading "+150g" next to a green tint sees income. Every figure is therefore
+// printed as the settlement's balance will move -- a cost is negative, a
+// refund (destroy) is positive.
+//
+// Colour carries the same meaning: only a credit is green, because green is
+// what made a cost read as income. A cost uses the codebase's established
+// warning amber (see treasuryCap.ts's TREASURY_CAP_AMBER), and the one thing
+// that legitimately wears red is a charge the treasury cannot cover.
+
+/** How a cart charge reads: a cost, a cost the treasury cannot cover, or a credit. */
+export type CartTone = "cost" | "over" | "credit";
+
+/** The colour each tone is painted with (kept here so the tone and its hue cannot drift apart). */
+export const CART_TONE_COLORS: Record<CartTone, string> = {
+  cost: "#ffb300",
+  over: "#f88",
+  credit: "#8f8",
+};
+
+export interface CartCharge {
+  /** The whole line, e.g. `Cart: -150g -5w` (spent) or `Cart: +75g` (refunded). */
+  text: string;
+  tone: CartTone;
+}
+
+function cartFigure(value: number): string {
+  const rounded = Math.round(value * 100) / 100;
+  return String(Math.abs(rounded));
+}
+
+/**
+ * The palette's cart line for the charge `net` still owes, or null when
+ * nothing is owed (the cart has settled). `affordable` is the caller's
+ * affordability gate for that same charge -- it only softens the colour, never
+ * the number.
+ */
+export function formatCartCharge(net: NetCost, affordable = true): CartCharge | null {
+  const parts: string[] = [];
+  let spends = false;
+  for (const r of NET_COST_RESOURCES) {
+    const v = net[r] ?? 0;
+    if (v === 0) continue;
+    const suffix = r === "gold" ? "g" : r[0];
+    if (v > 0) {
+      spends = true;
+      parts.push(`-${cartFigure(v)}${suffix}`);
+    } else {
+      parts.push(`+${cartFigure(v)}${suffix}`);
+    }
+  }
+  if (parts.length === 0) return null;
+  return {
+    text: `Cart: ${parts.join(" ")}`,
+    tone: !spends ? "credit" : affordable ? "cost" : "over",
+  };
+}

@@ -53,6 +53,16 @@ function closeAllModals(): void {
   overlays.forEach((el) => el.remove());
 }
 
+/**
+ * A saved game's progress line. It reads the ROUND, not `games.turn`: that
+ * column is written once when the game is created and never advances, so a
+ * game on round 37 advertised itself as "turn 1" (C-POLISH-1). `round` is the
+ * same counter the HUD's Round pill and the End Turn cycle move.
+ */
+export function loadRowProgress(server: Game, lastSeenAt: string): string {
+  return `round ${server.round} · ${server.gold}g · seen ${formatTime(lastSeenAt)}`;
+}
+
 function makeLoadRow(entry: UserGameEntry & { server?: Game }, opts: LoadGameModalOptions): HTMLDivElement {
   const row = document.createElement("div");
   row.style.display = "flex";
@@ -73,7 +83,7 @@ function makeLoadRow(entry: UserGameEntry & { server?: Game }, opts: LoadGameMod
   meta.style.opacity = "0.6";
   meta.style.fontSize = "11px";
   if (entry.server) {
-    meta.textContent = `turn ${entry.server.turn} · ${entry.server.gold}g · seen ${formatTime(entry.lastSeenAt)}`;
+    meta.textContent = loadRowProgress(entry.server, entry.lastSeenAt);
   } else {
     meta.textContent = `game no longer exists · seen ${formatTime(entry.lastSeenAt)}`;
   }

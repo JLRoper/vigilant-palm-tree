@@ -12,6 +12,7 @@ import {
   randomFarmFieldStyle,
 } from "@heroes/engine";
 import { buildListSections } from "./buildListSections";
+import { CART_TONE_COLORS, formatCartCharge, netDelta } from "./netCost";
 import { buildConfirmStatus, buildEntryStatus, districtTerrainBlock } from "./buildEntryStatus";
 import { footprintSuffix } from "./footprint";
 import type { ResourceType } from "../../../state/gameState";
@@ -80,6 +81,9 @@ export class BuildingPlacer {
   private affordability: Affordability | null = null;
   /** Net cost already committed server-side since the view opened; canAfford gates only the uncommitted remainder. */
   private committedNet: Partial<Record<ResourceType, number>> = {};
+  /** The palette's scrollable build list, kept so its offset survives the re-render every selection and placement does. */
+  private buildListEl: HTMLElement | null = null;
+  private listScrollTop = 0;
 
   init(size: CityViewSize, center: { gx: number; gy: number } | null, initialBuildings: BuildingDef[], isDistrict = false, districtTerrain: string | null = null, factionId?: FactionId): void {
     this.size = size;
@@ -90,6 +94,8 @@ export class BuildingPlacer {
     this.buildings = [...initialBuildings];
     this.originalBuildings = [...initialBuildings];
     this.committedNet = {};
+    this.buildListEl = null;
+    this.listScrollTop = 0;
     this.active = null;
     this.hoverCell = null;
     this.valid = false;
@@ -209,17 +215,15 @@ export class BuildingPlacer {
     this.committedNet = { ...this.computeNetCost() };
   }
 
-  getNetCostSummary(): string {
-    const net = this.computeNetCost();
-    const parts: string[] = [];
-    for (const [r, v] of Object.entries(net)) {
-      if (v !== 0) {
-        const prefix = r === "gold" ? "g" : r[0];
-        const sign = v > 0 ? `+${v}${prefix}` : `${v}${prefix}`;
-        parts.push(sign);
-      }
-    }
-    return parts.join(" ") || "No changes";
+  /**
+   * What this cart still owes: the net cost of everything staged since the
+   * palette opened, minus what earlier incremental commits already charged.
+   * This is the figure the palette displays and the figure `persistBuildings`
+   * charges (`pendingNetDelta`), so the readout cannot drift from the payment
+   * -- and it returns to nothing as soon as a placement is committed.
+   */
+  getPendingCharge(): Partial<Record<ResourceType, number>> {
+    return netDelta(this.computeNetCost(), this.committedNet);
   }
 
   // ─── palette popup ──────────────────────────────────────────────────
@@ -228,6 +232,10 @@ export class BuildingPlacer {
     this.hidePalette();
     this.paletteMode = "build";
     this.selectedKind = null;
+    // A freshly opened palette starts at the top of the list -- only a
+    // re-render of the OPEN palette carries a scroll offset.
+    this.buildListEl = null;
+    this.listScrollTop = 0;
 
     const palette = createPanel({
       parent,
@@ -266,6 +274,7 @@ export class BuildingPlacer {
 
   private renderPaletteBody(): void {
     if (!this.palette) return;
+    this.rememberListScroll();
     this.palette.clearContent();
 
     const modeRow = document.createElement("div");
@@ -285,13 +294,18 @@ export class BuildingPlacer {
       this.renderDestroyInstructions();
     }
 
-    const costSummary = this.getNetCostSummary();
-    if (costSummary !== "No changes") {
+    // The cart line is a CHARGE, not a running total: it shows what is still
+    // owed and disappears once the placement has been paid for, so a spend can
+    // never appear as a green "+" and the readout cannot keep growing against
+    // the palette-open baseline (C-MINOR-3).
+    const charge = formatCartCharge(this.getPendingCharge(), this.canAfford());
+    if (charge) {
       const summaryDiv = document.createElement("div");
-      summaryDiv.textContent = `Cart: ${costSummary}`;
+      summaryDiv.dataset.testid = "palette-cart";
+      summaryDiv.textContent = charge.text;
       Object.assign(summaryDiv.style, {
         fontSize: "10px",
-        color: this.canAfford() ? "#8f8" : "#f88",
+        color: CART_TONE_COLORS[charge.tone],
         marginTop: "6px",
         padding: "3px 6px",
         background: "rgba(0,0,0,0.3)",
@@ -338,6 +352,22 @@ export class BuildingPlacer {
     actionRow.appendChild(cancelBtn);
 
     this.palette.appendContent(actionRow);
+
+    // Re-rendering replaced the list element, so re-apply the offset the
+    // viewer had scrolled to (C-MINOR-4: selecting a row and placing a
+    // building must not throw the list back to the top).
+    this.restoreListScroll();
+  }
+
+  private rememberListScroll(): void {
+    this.listScrollTop = this.buildListEl ? this.buildListEl.scrollTop : 0;
+    this.buildListEl = null;
+  }
+
+  private restoreListScroll(): void {
+    if (this.buildListEl && this.listScrollTop > 0) {
+      this.buildListEl.scrollTop = this.listScrollTop;
+    }
   }
 
   private makeModeButton(label: string, mode: PaletteMode): HTMLButtonElement {
@@ -380,6 +410,8 @@ export class BuildingPlacer {
       borderRadius: "3px",
       padding: "2px",
     });
+    // Kept so the next re-render can re-apply the viewer's scroll offset.
+    this.buildListEl = scrollWrap;
 
     const sections = buildListSections(this.factionId);
 
@@ -579,6 +611,10 @@ export class BuildingPlacer {
     if (!this.isDistrict && this.center && b.kind === "townHall" && this.isCenterCell(b)) return null;
     this.buildings.splice(idx, 1);
     this.onPlaced?.();
+    // Same refresh the placement path does: a destroy moves the cart's
+    // outstanding charge (it refunds half the price), and a charge line that
+    // keeps the pre-destroy figure is exactly the "cart never settles" report.
+    this.renderPaletteBody();
     return b;
   }
 

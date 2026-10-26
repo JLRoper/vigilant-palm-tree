@@ -52,11 +52,13 @@ If the hero is defeated during travel or construction, all costs are forfeited.
 
 ✅ **Locked.** Three levels ship in v1 UI. Level scales both resource yield and gold tax (population × tax = base gold income), and unlocks a larger city-view grid.
 
-| Level | Tier label | Population cap | Gold tax/turn | City grid |
-|-------|------------|----------------|---------------|-----------|
-| 1     | Settlement | 500            | 1g/head       | 5×5       |
-| 2     | Town       | 1,500          | 2g/head       | 10×10     |
-| 3     | Castle     | 5,000          | 3g/head       | 15×15     |
+| Level | Tier label | Population cap (level base) | Gold tax/turn | City grid |
+|-------|------------|-----------------------------|---------------|-----------|
+| 1     | Settlement | 500                         | 1g/head       | 5×5       |
+| 2     | Town       | 1,500                       | 2g/head       | 10×10     |
+| 3     | Castle     | 5,000                       | 3g/head       | 15×15     |
+
+These figures are the **level base** cap (`POP_BY_LEVEL`, `packages/engine/src/economy/settlementRates.ts`). The cap a settlement actually grows to is the level base **plus** the population every completed house / farmhouse / apartment standing in its **districts** grants (+300 / +1,000 / +1,500 for a House at L1/L2/L3, `populationByLevel` in the building registry) — `settlementPopulationCap` in `packages/engine/src/settlement/populationGrowth.ts`, the same function the settlement panel prints and the weekly growth clamps to. Housing inside the **main city grid** raises no cap: `districtPopulationBonus` walks `s.districts` only. So a level-1 town is capped at 500 with an empty district and at 800 with a single house in one.
 
 Charter-founded settlements always start at Level 1 with population 50 (not 500).
 
@@ -69,7 +71,7 @@ Settlements grow naturally each week, provided they have enough food to sustain 
 - **Schedule:** Weekly during `applyWeeklyUpkeep` (day % 7 === 0)
 - **Condition:** `warehouse.food >= foodRequired(s)` — growth only occurs when food is met
 - **Formula:** `growth = max(1, ceil(population × growthRate))`
-- **Cap:** Level's maximum population (500 / 1,500 / 5,000)
+- **Cap:** `settlementPopulationCap(s)` — the level's base cap (500 / 1,500 / 5,000) **plus** the population granted by housing standing in the settlement's districts (+300 per L1 House, +1,000 at L2, +1,500 at L3; farmhouses +20 × level, apartments +100 × level). Housing in the main city grid contributes nothing. The settlement panel prints exactly this number as `Population <now> / <cap>`, with the breakdown in its tooltip (`populationCapTitle`, `src/screens/settlements/panelRates.ts`), so a capped town says so on screen (C-MINOR-2).
 - **No growth penalty:** When food is short, population simply doesn't grow (morale decay handles the penalty separately)
 
 The growth rate is configurable in Settings; the upgrade population gate is **not** player-configurable — it is the engine-owned constant `UPGRADE_POPULATION_GATE` (85%, `packages/engine/src/settlement/upgradeSettlement.ts`, issue #153):
@@ -94,7 +96,7 @@ Settlements can be upgraded to the next tier through an active construction proc
 | Iron | 20 | 50 |
 | Arcane | — | 20 |
 | Construction | 15 days | 25 days |
-| Req: population | ≥ 85% of level cap | ≥ 85% of level cap |
+| Req: population | ≥ 85% of the level base cap | ≥ 85% of the level base cap |
 | Req: Town Hall level | ≥ 2 | ≥ 3 |
 
 ### Town Hall upgrade costs
@@ -108,7 +110,7 @@ Settlements can be upgraded to the next tier through an active construction proc
 
 ### Process
 
-1. **Pre-requisite check:** Population must meet the gate threshold (85% of level cap — the engine constant `UPGRADE_POPULATION_GATE`, not player-configurable), and Town Hall must be at or above the target level.
+1. **Pre-requisite check:** Population must meet the gate threshold (85% of the level **base** cap — the engine constant `UPGRADE_POPULATION_GATE` applied to `POP_BY_LEVEL`, not the district-boosted `settlementPopulationCap`; upgradeSettlement.ts), and Town Hall must be at or above the target level.
 2. **Initiation:** Player clicks the upgrade button in the settlement info panel. Costs are deducted immediately from the settlement treasury and warehouse.
 3. **Construction:** `daysRemaining` counts down each `advanceRound` — by **`1 + upgradeAccelEffort` days** (2026-10-17) when the settlement's `townHall` or `mageGuild` is **explicitly staffed** (max effort across the two kinds, so up to 2× with a full crew; unassigned/legacy buildings earn no acceleration). Settlement operates normally during construction (production, income, growth continue).
 4. **Completion:** When `daysRemaining` reaches 0:
@@ -118,6 +120,23 @@ Settlements can be upgraded to the next tier through an active construction proc
    - New city spots merged in (pre-computed at initiation)
    - Population and buildings preserved as-is
 5. **Town Hall completion:** The Town Hall building level increments in the `buildings` array.
+
+### Building upgrade footprints (C-MAJOR-3)
+
+An individual building upgrade is a level bump, and some level bumps grow the
+building's footprint: `woodcutterHut`, `granary`, `bank` and `goldMine` are 1×1
+at L1 and 1.5×1.5 from L2 (`buildingFootprintFromRegistry`,
+`packages/engine/src/buildingRegistry.ts`), and the placement path rounds that
+up to a 2×2 block of cells. `startBuildingUpgrade`
+(`packages/engine/src/settlement/upgradeBuilding.ts`) now validates the cells the
+upgrade **newly** claims against every other building in the same container and
+refuses the whole request with `footprint_blocked` before any cost is charged.
+Before that check an L3 hut could swallow a neighbour's cell, after which
+clicking the neighbour opened the hut's menu and the neighbour's own controls
+were unreachable. Cells the building already occupies are its own, and a
+pre-existing overlap elsewhere in the grid does not block an unrelated upgrade.
+The check is start-time only: a neighbour placed *during* the construction
+window is still not validated against the pending footprint (queued).
 
 ### Constraints
 
@@ -182,7 +201,7 @@ Caps are derived (`settlement/capacity.ts`) and **soft**: an addition is clamped
 
 ### Workforce staffing (2026-10-17)
 
-Each settlement derives a worker pool of **`floor(population / 100)`** (`workforcePool` in `packages/engine/src/settlement/workforce.ts`), shared across main-city and district buildings. Workers are assigned per building via the `AssignWorkers` command (`packages/contracts/src/commands/assignWorkers.ts` — reducer in `packages/engine/src/settlement/staffWorkers.ts`, rejection reasons `no_settlement` / `unowned_settlement` / `no_building` / `not_staffable` / `invalid_workers` / `invalid_source` / `pool_exhausted`), emitting a `WorkersAssigned` EngineEvent. An optional `source?: { gx, gy }` (2026-10-18) turns the command into an **atomic one-worker move**: the reducer validates and writes both buildings in a single operation (source loses one, destination gains it), so the press-and-hold drag below never commits a partial transfer; legacy normalization and the legacy source base (display − 1) still apply. `BuildingDef.workers` **undefined = legacy auto-staffed** (effort 1) — an untouched legacy settlement behaves exactly as before, but the **first assignment converts the whole settlement to explicit crews** (normalized 2026-10-18, auto-crew 2026-10-18 late): the touched building receives the chosen count and the remaining pool is auto-employed — job slots first, balanced round-robin across job kinds in priority order (food producers, the other producers, market, recruiters, town hall; within a kind the least-staffed building takes the next worker), then houses/apartments, and only the true surplus stays idle. Construction sites, inert kinds, and pre-existing explicit counts are skipped. New buildings placed into an already-normalized settlement start at `workers: 0`; new buildings in an untouched legacy settlement keep legacy auto-staffing. An explicit number scales the building's effort `min(workers / maxWorkers, 1)` and `0` shuts it down. Role tags per kind — not exclusive, the panel shows all of them (`farmhouse` = producer+recruiter, `mageGuild` = recruiter+upgrade-accel):
+Each settlement derives a worker pool of **`floor(population / 100)`** (`workforcePool` in `packages/engine/src/settlement/workforce.ts`), shared across main-city and district buildings. Workers are assigned per building via the `AssignWorkers` command (`packages/contracts/src/commands/assignWorkers.ts` — reducer in `packages/engine/src/settlement/staffWorkers.ts`, rejection reasons `no_settlement` / `unowned_settlement` / `no_building` / `not_staffable` / `invalid_workers` / `invalid_source` / `pool_exhausted`), emitting a `WorkersAssigned` EngineEvent. An optional `source?: { gx, gy }` (2026-10-18) turns the command into an **atomic one-worker move**: the reducer validates and writes both buildings in a single operation (source loses one, destination gains it), so the press-and-hold drag below never commits a partial transfer; a transfer out of a legacy building still takes the display's count − 1 at the source. `BuildingDef.workers` **undefined = legacy auto-staffed** (effort 1) — an untouched legacy settlement behaves exactly as before. **An assignment writes only the building it addresses** (2026-10-26, C-MAJOR-2): every other building keeps the staffing it already had, so a legacy city stays legacy and converts to explicit crews one building at a time. The first touch used to convert the WHOLE settlement — normalizing every building to an explicit count and auto-employing the remaining pool across job kinds — and with a level-1 pool of 5 spread over 13 buildings that single click left the city advertising −12.8 wood/day where it had advertised −3.84 and turned +6.64 stone into −1.11 and +14.33 food into −0.53 (the measured turn deltas matched). New buildings placed into a settlement that already has an explicit count start at `workers: 0`; new buildings in an untouched legacy settlement keep legacy auto-staffing. An explicit number scales the building's effort `min(workers / maxWorkers, 1)` and `0` shuts it down. Role tags per kind — not exclusive, the panel shows all of them (`farmhouse` = producer+recruiter, `mageGuild` = recruiter+upgrade-accel):
 
 - **Producers** (goldMine, woodcutterHut, stoneMine, ironMine, arcaneFont, farmField, farmhouse, granary): output scales `round(base × cellMultiplier × effort)`.
 - **`market`**: flat `goldPerTurn` × effort lands in the treasury (F2 resolved).
