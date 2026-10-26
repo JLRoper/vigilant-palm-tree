@@ -10,6 +10,44 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.36.1] - 2026-10-26
+
+Five playthrough findings, all in the charter/persistence lane. Acceptance first:
+each one carries the failing case it was written from, and the fix that closes it.
+
+- **A charter survives a reload and can always found** (`C-BLOCKER-1`,
+  `C-MAJOR-1`). `GET /api/games/:name` now returns the game's `charters` rows and
+  `hydrateClientGame` maps them onto `activeCharters`, so a reload no longer
+  hydrates an empty charter list while `heroes.<id>.isChartering` persists — the
+  state that left the chartering hero locked (and starving) for good. A hero
+  flagged `isChartering` with no charter row behind it is unlocked by hydration
+  instead, `GameSessionManager.loadGame` resumes a mid-route charter after a
+  load, and the day tick advances a `traveling` charter one hex server-side
+  (`advanceCharters(state, map)`) so no client cooperation is needed to arrive.
+  The client's own travel walk now POSTs its steps one at a time in route order:
+  the server checks each step's `fromTile` against the hero's persisted hex, so
+  the old concurrent burst was rejected 409 `hero_not_at_fromTile` and left the
+  client believing a charter was constructing while the server still had it
+  traveling.
+- **A resolved combat reloads as the turn, not as BATTLE** (`M-BLOCKER-1`,
+  `M-BLOCKER-2`). The BATTLE phase is re-derived from `lobby.pendingBattle` on
+  every load, and it is now derived only while that marker names a live collision
+  (both heroes present and adjacent) — a marker from a battle that has ended no
+  longer resurrects a phase nothing can leave. The AI driver also offers a given
+  (round, seat, attacker, defender) battle once per turn: re-offering an answered
+  attack kept the pass returning `waiting_for_defender` before any EndTurn, so an
+  AI hero standing next to a living human defender kept the game in BATTLE and
+  the turn could never hand back.
+- **A combat save no longer rewrites `games.settlements`** (`M-MAJOR-2`). The
+  battle persist leaves the settlements JSONB column untouched unless a
+  post-battle capture changed one (`saveHeroesAndSettlements`'s new
+  `skipSettlements`), instead of re-writing it from the granular read path whose
+  shape is normalized on the way in (platoon arrays pad to `ARMY_STACK_SLOTS`).
+- **Booting no longer fabricates a world** (`C-POLISH-2`). The client's boot
+  state is `emptyGameState()` — no players, heroes or settlements — rather than a
+  locally generated three-seat world matching no database row while
+  `activeGameName` was still null and `/api/games` had never been asked.
+
 ## [0.36.0] - 2026-10-26
 
 Two engine rules for buildings.
