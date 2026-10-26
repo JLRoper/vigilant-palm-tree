@@ -33,7 +33,7 @@ console.log(`  All ${SPRITE_FILES.length} registered sprites present.\n`);
 console.log("Validating generated building sprite keys...\n");
 {
   const genTool = fileURLToPath(new URL("./gen-building-sprite-keys.mjs", import.meta.url));
-  const res = spawnSync(process.execPath, [genTool, "--check"], { stdio: "inherit" });
+  const res = spawnSync(process.execPath, [genTool, "--check"], { stdio: "inherit", windowsHide: true });
   if (res.error || res.status !== 0) {
     errors++;
   }
@@ -46,7 +46,7 @@ console.log("Validating generated building sprite keys...\n");
 console.log("Validating generated building anchor overrides...\n");
 {
   const genTool = fileURLToPath(new URL("./gen-building-anchors.mjs", import.meta.url));
-  const res = spawnSync(process.execPath, [genTool, "--check"], { stdio: "inherit" });
+  const res = spawnSync(process.execPath, [genTool, "--check"], { stdio: "inherit", windowsHide: true });
   if (res.error || res.status !== 0) {
     errors++;
   }
@@ -79,7 +79,7 @@ if (pairs.length === 0 && errors === 0) {
   console.log("  No run frames found (descriptors fall back to base sprites).\n");
 } else if (pairs.length > 0) {
   console.log("Validating run-frame alignment...\n");
-  const res = spawnSync(process.execPath, [tuneTool, ...pairs, "--check"], { stdio: "inherit" });
+  const res = spawnSync(process.execPath, [tuneTool, ...pairs, "--check"], { stdio: "inherit", windowsHide: true });
   if (res.error || res.status !== 0) {
     errors++;
   }

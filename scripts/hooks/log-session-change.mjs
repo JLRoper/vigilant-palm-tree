@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 const TRACKED_TOOLS = new Set([
   'apply_patch',
@@ -110,10 +110,11 @@ function toWorkspaceRelative(p, rootDir) {
 
 function getActor(rootDir) {
   try {
-    const name = execSync('git config user.name', {
+    const name = execFileSync('git', ['config', 'user.name'], {
       cwd: rootDir,
       stdio: ['ignore', 'pipe', 'ignore'],
-      encoding: 'utf8'
+      encoding: 'utf8',
+      windowsHide: true
     }).trim();
     if (name) return name;
   } catch {
@@ -121,10 +122,11 @@ function getActor(rootDir) {
   }
 
   try {
-    const email = execSync('git config user.email', {
+    const email = execFileSync('git', ['config', 'user.email'], {
       cwd: rootDir,
       stdio: ['ignore', 'pipe', 'ignore'],
-      encoding: 'utf8'
+      encoding: 'utf8',
+      windowsHide: true
     }).trim();
     if (email) return email;
   } catch {
