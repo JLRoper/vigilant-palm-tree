@@ -1,5 +1,5 @@
-// The Build palette's cart-charge finding, asserted on what the palette
-// actually RENDERS (the established hand-rolled-DOM pattern from
+// The Build palette's two city-view minor findings, asserted on what the
+// palette actually RENDERS (the established hand-rolled-DOM pattern from
 // test/screens/home/settingsMenu.test.ts and the panel-aware mock in
 // test/screens/combat/arena.test.ts) -- the panel code is written to tolerate
 // a DOM stand-in (see FloatingPanel.isPanelVisible).
@@ -10,6 +10,12 @@
 // running total against the palette-open baseline, which never returned to
 // zero once the placement had been paid for. It now prints what the cart still
 // owes, signed against the treasury, and disappears when nothing is owed.
+//
+// C-MINOR-4: selecting a row and placing a building both re-render the list
+// (renderPaletteBody), which replaced the scrolling element and threw the
+// viewer back to the top -- below the fold, "Production" and "Civilian" rows
+// sat out of reach for one placement each. The offset is now carried across
+// the re-render.
 
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
@@ -190,6 +196,11 @@ function cartLine(root: MockNode): MockElement | null {
   return findAll(root, (el) => el.dataset.testid === "palette-cart")[0] ?? null;
 }
 
+/** The scrolling build list (`maxHeight: 240px; overflowY: auto`). */
+function buildList(root: MockNode): MockElement | null {
+  return findAll(root, (el) => el.style.overflowY === "auto" && el.style.maxHeight === "240px")[0] ?? null;
+}
+
 const savedDocument = (globalThis as { document?: unknown }).document;
 const savedWindow = (globalThis as { window?: unknown }).window;
 const savedGetComputedStyle = (globalThis as { getComputedStyle?: unknown }).getComputedStyle;
@@ -326,4 +337,48 @@ test("cart: a destroy refund reads positive and green, the one case that is inco
   assert.ok(line, "a refund is a credit and must be shown");
   assert.equal(line.textContent, `Cart: +${refundGold}g +${refundWood}w`);
   assert.equal(line.style.color, CART_TONE_COLORS.credit);
+});
+
+// ── C-MINOR-4 ─────────────────────────────────────────────────────────
+
+test("scroll: selecting a row keeps the list where the viewer left it", () => {
+  const { placer, body } = openPalette();
+  const list = buildList(body);
+  assert.ok(list, "the build list must be scrollable");
+  list.scrollTop = 150;
+
+  buttonLabelled(body, "House").dispatchEvent("click");
+
+  assert.notEqual(buildList(body), list, "the re-render replaces the list element");
+  assert.equal(buildList(body)?.scrollTop, 150, "the new list must be re-scrolled to the viewer's offset");
+  assert.equal(
+    buttonLabelled(body, "House").style.background,
+    "rgba(60,120,60,0.6)",
+    "the clicked row still shows as selected",
+  );
+  assert.equal(placer.isActive(), true, "the row click still arms a placement");
+});
+
+test("scroll: placing a building keeps the list where the viewer left it", () => {
+  const { placer, body } = openPalette();
+  placer.selectBuilding("house");
+  const list = buildList(body);
+  assert.ok(list);
+  list.scrollTop = 220;
+
+  assert.ok(placeOn(placer, 1, 1), "the placement must land");
+  assert.equal(buildList(body)?.scrollTop, 220, "a placement must not throw the list back to the top");
+});
+
+test("scroll: a freshly opened palette starts at the top", () => {
+  const { placer, body } = openPalette();
+  const list = buildList(body);
+  assert.ok(list);
+  list.scrollTop = 180;
+  buttonLabelled(body, "House").dispatchEvent("click");
+  assert.equal(buildList(body)?.scrollTop, 180);
+
+  placer.hidePalette();
+  placer.showPalette(body as unknown as HTMLElement, 10, 10);
+  assert.equal(buildList(body)?.scrollTop, 0, "reopening the palette is a fresh view, not a restored one");
 });
