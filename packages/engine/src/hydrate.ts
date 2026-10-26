@@ -14,6 +14,7 @@ import type {
 } from "@heroes/contracts";
 import { DEFAULT_GAME_MODE, WAREHOUSE_RESOURCES, isGameMode, resolveGameMode } from "@heroes/contracts";
 import { defaultPopulation, SETTLEMENT_GOLD_TAX } from "./economy/settlementRates";
+import { hexDistance } from "./map/pathfinding";
 import { endpointOwner } from "./logistics";
 import { VALID_HORSE_VARIANTS } from "./horseVariants";
 import { normalizePlatoons } from "./units";
@@ -56,6 +57,35 @@ export function defaultCastleSeedFromMapSeed(mapSeed: number): number {
   return ((mapSeed ^ 0x63617374) >>> 0) || 1;
 }
 
+/**
+ * Is this pending-battle marker still a battle that can be fought?
+ *
+ * Both named heroes must be present and stand on adjacent hexes -- the same
+ * precondition the server re-derives before every battle command
+ * (detectAdjacentEnemy in server/app/commandHandler.ts's ResolveBattle /
+ * SubmitBattleResult cases, and EnterBattle's own write-time check). The BATTLE
+ * phase is not a stored value: it is re-derived from this marker on every load,
+ * so without the check a marker left behind by a battle that has ENDED (the
+ * loser removed, the attacker bounced back to its pre-move hex by cancelMove,
+ * the pair separated since) resurrects a phase nothing can leave -- the client
+ * parks in BATTLE and every command gated on PLAYER_TURN is refused. That is
+ * M-BLOCKER-1 / M-BLOCKER-2 (a reload after a resolved combat landing in BATTLE
+ * instead of PLAYER_TURN).
+ *
+ * Adjacency, not "does the offer look expired": a live offer legitimately sits
+ * unanswered for as long as the defender takes to choose, and the AI driver's
+ * own deadline (defenderWaitTimeoutMs) is the expiry policy for that.
+ */
+export function isLiveCollision(
+  heroes: Record<HeroId, HeroState>,
+  marker: PendingBattleMarker,
+): boolean {
+  const attacker = heroes[marker.attackerId];
+  const defender = heroes[marker.defenderId];
+  if (!attacker || !defender) return false;
+  return hexDistance({ q: attacker.q, r: attacker.r }, { q: defender.q, r: defender.r }) === 1;
+}
+
 export interface HydrateOptions {
   castleSeed?: number;
   castleCount?: number;
@@ -83,6 +113,17 @@ export interface HydratableGameRow {
   map_size?: string;
   next_charter_id?: number;
   next_settlement_id?: number;
+  /**
+   * The game's in-flight charters (games' `charters` table, assembled by
+   * server/persistence/hydrate.ts's granular path and by the API's
+   * GET /games/:name payload, which is where the CLIENT gets them). Optional
+   * and defaulted to [] -- a pre-charter row, a JSONB-fallback read and a
+   * mock fixture all legitimately carry none -- but see
+   * unlockOrphanedCharteringHeroes() below for what that default must do to a
+   * hero still flagged isChartering: leaving the flag set with no charter to
+   * advance is exactly C-BLOCKER-1's permanently locked, starving hero.
+   */
+  activeCharters?: GameState["activeCharters"];
   /**
    * games.trade_routes JSONB (docs/wagons-stockpiles-trade-routes-plan.md
    * §5.2). Deliberately untyped: rows written before the endpoint/payload
@@ -445,12 +486,30 @@ export function hydrateGameState(
       r: raw.r,
     });
   }
+  // In-flight charters: the `charters` table on the granular path, the
+  // GET /games/:name payload on the client's path, [] for a row that predates
+  // charters. A hero left flagged isChartering with no charter record behind
+  // it is unlocked in the same pass -- see unlockOrphanedCharteringHeroes.
+  const charters = row.activeCharters ?? [];
+  unlockOrphanedCharteringHeroes(heroesRecord, charters);
   const settlementCount = Object.keys(settlementsRecord).length;
   // A valid pendingBattle marker overrides the faction-derived phase: the
   // game is mid-battle-offer (the defender must choose), so the turn state
   // the active player's faction would imply is not the truth. Malformed /
   // absent -> the faction-derived behavior below, unchanged.
-  const pendingBattle = readPendingBattle(row);
+  //
+  // Only a marker that still names a LIVE collision counts (isLiveCollision
+  // above): a marker surviving a resolved battle must not resurrect BATTLE,
+  // which is exactly M-BLOCKER-1/M-BLOCKER-2 -- a save+reload after the combat
+  // landed the game in BATTLE with no fight left to fight, and every
+  // PLAYER_TURN-gated command refused.
+  const pendingMarker = readPendingBattle(row);
+  const pendingBattle = pendingMarker && isLiveCollision(heroesRecord, pendingMarker) ? pendingMarker : null;
+  if (pendingMarker && !pendingBattle) {
+    console.warn(
+      `[hydrateGameState] dropping stale pendingBattle marker (${pendingMarker.attackerId} vs ${pendingMarker.defenderId}): the pair is no longer a live collision`,
+    );
+  }
   // The game's mode (SETTLERS-PLAN.md §1): absent/unreadable reads as classic,
   // so nothing below changes for a pre-mode row. Only a NON-default mode is
   // written into the state, which keeps a classic state key-for-key identical
@@ -491,7 +550,7 @@ export function hydrateGameState(
     castleSeed: opts?.castleSeed ?? defaultCastleSeedFromMapSeed(row.seed),
     castleCount: opts?.castleCount ?? CASTLE_COUNT_DEFAULT,
     tradeRoutes,
-    activeCharters: (row as unknown as { activeCharters?: GameState["activeCharters"] }).activeCharters ?? [],
+    activeCharters: charters,
     nextCharterId: row.next_charter_id ?? 0,
     // Derived, not persisted (see deriveNextTradeRouteId): hydrated past
     // the highest existing "route<n>" id so a freshly created route can
@@ -509,4 +568,39 @@ export function hydrateGameState(
     nextSettlementId: Math.max(row.next_settlement_id ?? 0, settlementCount),
     ...(gameMode !== DEFAULT_GAME_MODE ? { gameMode } : {}),
   };
+}
+
+/**
+ * Unlocks heroes whose `isChartering` flag has no charter behind it.
+ *
+ * `isChartering`/`charterId` persist on the hero (heroRepo's columns, and the
+ * legacy JSONB), while the charter itself lives in its own `charters` table
+ * with no JSONB fallback: that asymmetry is C-BLOCKER-1. A read path that
+ * simply doesn't have the charters (the JSONB fallback; any payload that
+ * predates the field; a charter row removed by cleanupDefeatedHeroCharters,
+ * which filters activeCharters and never touches the flag) then hands back a
+ * hero who is flagged as chartering with nothing that can ever advance or
+ * complete it -- unselectable (turnController.selectHero bails on
+ * isChartering), forever unpaid, and starving.
+ *
+ * A chartering hero with no matching charter record is therefore treated as
+ * NOT chartering: that is the only reading under which the state is
+ * recoverable, and the flag is bookkeeping, not a rule in its own right
+ * (startCharter sets it; completeCharter clears it). Mutates the passed record
+ * and never invents a charter -- a hero with a real charter row is untouched,
+ * byte-for-byte.
+ */
+export function unlockOrphanedCharteringHeroes(
+  heroes: Record<HeroId, HeroState>,
+  charters: readonly GameState["activeCharters"][number][],
+): void {
+  const ids = new Set(charters.map((c) => c.id));
+  for (const [id, hero] of Object.entries(heroes)) {
+    if (!hero.isChartering) continue;
+    if (hero.charterId !== null && ids.has(hero.charterId)) continue;
+    console.warn(
+      `[hydrateGameState] heroes.${id} isChartering with no ${hero.charterId === null ? "charterId" : `charter ${hero.charterId}`}; unlocking the hero`,
+    );
+    heroes[id] = { ...hero, isChartering: false, charterId: null };
+  }
 }

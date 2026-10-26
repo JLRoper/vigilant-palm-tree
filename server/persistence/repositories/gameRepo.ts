@@ -108,6 +108,21 @@ export interface SaveHeroesAndSettlementsExtra {
   // that touches routes must pass the full array here or the next writer
   // clobbers it with the previous value.
   trade_routes?: TradeRouteState[];
+  /**
+   * Leave the `settlements` JSONB column exactly as it is (M-MAJOR-2).
+   *
+   * A command that did not touch a single settlement -- a hero-vs-hero combat
+   * resolution is the case that reported this -- must not rewrite the column:
+   * the settlements handed in come from the GRANULAR read path
+   * (server/persistence/repositories/settlementRepo.ts), whose shape is
+   * normalized on the way in (platoon arrays pad to ARMY_STACK_SLOTS, absent
+   * optionals stay absent), so re-writing the column from them rewrites a
+   * settlement that never changed into a slightly different document -- the
+   * "games.settlements JSONB differs across a combat save + reload" finding.
+   * Callers signal it with reference equality (`settlements === state.settlements`),
+   * the same test dualWriteEntities already uses to skip its per-entity writes.
+   */
+  skipSettlements?: boolean;
 }
 
 // One row per settlement snapshot, matching the columns the now-dead
@@ -176,9 +191,16 @@ export function createGameRepo(db: Queryable): GameRepo {
     },
 
     async saveHeroesAndSettlements(name, heroes, settlements, extra) {
-      const sets = ["heroes = $1::jsonb", "settlements = $2::jsonb"];
-      const vals: unknown[] = [JSON.stringify(heroes), JSON.stringify(settlements)];
-      let i = 3;
+      const sets = ["heroes = $1::jsonb"];
+      const vals: unknown[] = [JSON.stringify(heroes)];
+      let i = 2;
+      // skipSettlements leaves the column untouched (M-MAJOR-2): a command that
+      // changed no settlement must not rewrite it from the normalized granular
+      // shape. See SaveHeroesAndSettlementsExtra's own note.
+      if (!extra?.skipSettlements) {
+        sets.push(`settlements = $${i++}::jsonb`);
+        vals.push(JSON.stringify(settlements));
+      }
       if (extra?.players !== undefined) {
         sets.push(`players = $${i++}::jsonb`);
         vals.push(JSON.stringify(extra.players));

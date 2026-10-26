@@ -84,7 +84,11 @@ export function advanceRound(
     selectedHeroId: null,
     selectedSettlementId: null,
   };
-  withDay = advanceCharters(withDay);
+  // The map rides into the charter pass: a `traveling` charter takes one
+  // hex-step per day toward its target server-side, so a charter whose client
+  // never sent its AdvanceCharterTravel steps still arrives and founds
+  // (C-BLOCKER-1). Null on map-less callers, where the pass stays a no-op.
+  withDay = advanceCharters(withDay, map);
   withDay = advanceSettlementUpgrades(withDay, { accel: upgradeAccelEffort });
   withDay = advanceBuildingConstructions(withDay);
   const rechargedSettlements = applyDraftRecharge(withDay.settlements, unitTypes);

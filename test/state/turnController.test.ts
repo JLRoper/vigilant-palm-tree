@@ -284,7 +284,7 @@ test("drainPendingCommands still releases onHumanTurnEnd when the in-flight comm
   }
 });
 
-test("advanceAutoTravel fires onAdvanceCharterTravel once per hex-step, and endCurrentTurn blocks on them (issue #152 -- closing the #114 race on the charter-travel path)", async () => {
+test("advanceAutoTravel POSTs its hex-steps ONE AT A TIME in route order, and endCurrentTurn blocks on them (issue #152 + C-MAJOR-1)", async () => {
   const initial = makeState({
     heroes: [makeHero("h0", 0, 0, 0, { isChartering: true, charterId: "c0", movementRemaining: 2 })],
     activeCharters: [makeCharter({ id: "c0", heroId: "h0", ownerId: 0, targetQ: 5, targetR: 0 })],
@@ -300,10 +300,23 @@ test("advanceAutoTravel fires onAdvanceCharterTravel once per hex-step, and endC
     cost: () => 1,
   })) as unknown as TurnControllerHooks["getMap"];
 
+  // A fake server enforcing exactly the rule C-MAJOR-1 recorded: every step is
+  // accepted only when its fromTile is the hero's PERSISTED hex
+  // (server/app/commandHandler.ts's AdvanceCharterTravel staleness guard), and
+  // each accepted step moves that hex. A burst of fire-and-forget POSTs fails
+  // this (all but one step 409s); one-at-a-time in route order passes it.
+  let serverHex = { q: 0, r: 0 };
+  const rejections: unknown[][] = [];
   const steps: unknown[][] = [];
   const commands: Deferred<void>[] = [];
   hooks.onAdvanceCharterTravel = ((...args: unknown[]) => {
+    const [, , fromTile, toTile] = args as [number, string, { q: number; r: number }, { q: number; r: number }];
     steps.push(args);
+    if (fromTile.q !== serverHex.q || fromTile.r !== serverHex.r) {
+      rejections.push(args);
+      throw new Error("hero_not_at_fromTile");
+    }
+    serverHex = { q: toTile.q, r: toTile.r };
     const d = deferred<void>();
     commands.push(d);
     return d.promise;
@@ -312,9 +325,16 @@ test("advanceAutoTravel fires onAdvanceCharterTravel once per hex-step, and endC
   const controller = new TurnController(initial, hooks);
   controller.advanceAutoTravel();
 
-  assert.equal(steps.length, 2, "movementRemaining=2 at cost 1/hex should take exactly two steps in one call");
+  // The optimistic walk is still one synchronous pass (the map, the toolbars
+  // and the trail all move together) ...
+  assert.equal(controller.getState().heroes.h0.q, 2, "movementRemaining=2 at cost 1/hex walks two hexes in one call");
+  // ... and the POSTs go out one at a time. The first step is dispatched on the
+  // next microtask (it is chained onto an already-resolved head), so let that
+  // land before counting: only the FIRST step is in flight, the second queued.
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(steps.length, 1, "exactly one AdvanceCharterTravel POST is in flight at a time");
   assert.deepEqual(steps[0], [0, "h0", { q: 0, r: 0 }, { q: 1, r: 0 }, 1]);
-  assert.deepEqual(steps[1], [0, "h0", { q: 1, r: 0 }, { q: 2, r: 0 }, 1]);
+  assert.deepEqual(rejections, [], "the first step matches the server's position");
 
   // Same #114 shape as the MoveHero/SetAutoTrade regression pins above:
   // ending the turn immediately after these steps must not race past the
@@ -325,12 +345,64 @@ test("advanceAutoTravel fires onAdvanceCharterTravel once per hex-step, and endC
   assert.equal(
     endTurnSpy.mock.callCount(),
     0,
-    "End Turn must not race ahead of the two still-in-flight charter-travel steps",
+    "End Turn must not race ahead of the charter-travel steps still in flight",
   );
 
-  for (const d of commands) d.resolve();
+  // Releasing step 1 releases step 2 -- which carries step 1's toTile as its
+  // fromTile, i.e. the route's own order, matching the server's moved position.
+  commands[0].resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(steps.length, 2, "the queued second step POSTs once the first has landed");
+  assert.deepEqual(steps[1], [0, "h0", { q: 1, r: 0 }, { q: 2, r: 0 }, 1]);
+  assert.deepEqual(rejections, [], "the whole route was accepted -- no 409 hero_not_at_fromTile");
+
+  commands[1].resolve();
   await endTurnPromise;
   assert.equal(endTurnSpy.mock.callCount(), 1);
+  assert.deepEqual(serverHex, { q: 2, r: 0 }, "the server ends where the client's charter ended");
+});
+
+test("a rejected charter-travel step halts the rest of that burst instead of POSTing steps the server never held (C-MAJOR-1)", async () => {
+  const initial = makeState({
+    heroes: [makeHero("h0", 0, 0, 0, { isChartering: true, charterId: "c0", movementRemaining: 3 })],
+    activeCharters: [makeCharter({ id: "c0", heroId: "h0", ownerId: 0, targetQ: 5, targetR: 0 })],
+  });
+  const hooks = buildHooks(initial);
+  hooks.getMap = (() => ({
+    isPassable: () => true,
+    cost: () => 1,
+  })) as unknown as TurnControllerHooks["getMap"];
+
+  const posted: unknown[][] = [];
+  hooks.onAdvanceCharterTravel = ((...args: unknown[]) => {
+    posted.push(args);
+    // Every step is refused (the charter was cancelled server-side, say): the
+    // three queued steps must not all reach the server.
+    return Promise.reject(new Error("hero_not_at_fromTile"));
+  }) as TurnControllerHooks["onAdvanceCharterTravel"];
+
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = ((...args: unknown[]) => {
+    warnings.push(args);
+  }) as typeof console.warn;
+  try {
+    const controller = new TurnController(initial, hooks);
+    controller.advanceAutoTravel();
+    await controller.flushPendingCommands();
+
+    assert.equal(posted.length, 1, "only the first step is POSTed; the rest of the burst is dropped");
+    assert.equal(controller.getState().heroes.h0.q, 3, "the optimistic walk itself is unchanged");
+    assert.equal(warnings.length, 1, "the rejection still surfaces once via trackCommand's own catch");
+
+    // A new burst re-derives from the state it is called on and POSTs again.
+    posted.length = 0;
+    controller.advanceAutoTravel();
+    await controller.flushPendingCommands();
+    assert.equal(posted.length, 0, "a hero with no movement left queues nothing further");
+  } finally {
+    console.warn = originalWarn;
+  }
 });
 
 test("pendingCommands empties after a tracked command settles, so the Set can't grow unbounded across a session (issue #151 §4)", async () => {

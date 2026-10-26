@@ -2,6 +2,7 @@ import type { Terrain } from "../map/terrain";
 import type { ResourceType } from "../map/resourceTiles";
 import type { MapSize, MapGenVersion } from "../map/gameMap";
 import type {
+  CharterState,
   ClientTelemetryReport,
   FactionId,
   GameMode,
@@ -84,6 +85,12 @@ export type Game = {
   // Only GET /games/:name returns it (same as last_event_id): the lobby
   // column carries seat claims, startedAt, and drop-policy presence.
   lobby?: GameLobbyState;
+  // In-flight charters (games' `charters` table), returned by GET /games/:name
+  // only. hydrateClientGame maps them onto GameState.activeCharters -- without
+  // that mapping a reload lost every charter while heroes.<id>.isChartering
+  // survived, which is C-BLOCKER-1's permanently locked hero. Absent on the
+  // list route and on POST /games' create response (both read as none).
+  charters?: CharterState[];
 };
 
 // One row of GET /games/:name/events. Raw DB shape (snake_case, id and

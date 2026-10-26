@@ -19,10 +19,21 @@ import type { Game } from "./api";
 // accepted the command. Read through the engine's own `readGameMode` (the
 // `readPendingBattle` shape) so absent/junk stays absent rather than
 // fabricating a mode.
+//
+// `charters` gets the same treatment (C-BLOCKER-1): the API returns the game's
+// in-flight charters as `game.charters` (games' own `charters` table, joined in
+// server/routes.ts's GET /games/:name), while the engine's rules and the
+// client's travel loop both read `state.activeCharters`. Without this mapping
+// every load hydrated `activeCharters: []` -- advanceAutoTravel() had nothing to
+// walk, no settlement was ever founded, and the chartering hero stayed locked
+// (and unpaid) for good, even though `heroes.<id>.isChartering` had persisted.
+// Absent (a create response, the list route) stays `[]` via hydrateGameState's
+// own default, which also unlocks a hero left flagged with no charter behind it.
 export function hydrateClientGame(game: Game): GameState {
   return hydrateGameState({
     ...game,
     pendingBattle: readPendingBattle(game.lobby),
     gameMode: readGameMode(game.lobby),
+    activeCharters: game.charters,
   });
 }

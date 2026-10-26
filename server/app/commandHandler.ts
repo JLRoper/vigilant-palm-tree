@@ -135,6 +135,10 @@ export interface GameRepo {
         next_charter_id?: number;
         next_settlement_id?: number;
         trade_routes?: TradeRouteState[];
+        // Leave the settlements JSONB column untouched (M-MAJOR-2): the battle
+        // cases set it when no capture changed a settlement, so the column the
+        // fight wrote is the one the reload reads.
+        skipSettlements?: boolean;
       },
     ): Promise<void>;
   saveLobby(name: string, lobby: unknown): Promise<void>;
@@ -562,6 +566,12 @@ async function persistBattleOutcome(
       // capture happened. capture.players already carry it (the capture is
       // fed the pruned array); this branch covers every other outcome.
       players: finalPlayers,
+      // Only a post-battle CAPTURE changes a settlement; every other outcome
+      // (casualties, loot, verdicts) leaves the record reference-identical, so
+      // the column must not be rewritten from the normalized granular shape --
+      // rewriting it is what made `games.settlements` differ across a combat
+      // save + reload (M-MAJOR-2).
+      skipSettlements: !capture,
     },
   );
   // settlements is state.settlements unless a post-battle capture flipped

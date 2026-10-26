@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { hydrateClientGame } from "../../src/io/hydrateClientGame";
 import type { Game } from "../../src/io/api";
-import { makeHero, makePlayer, makeSettlement } from "../charter/_helpers";
+import type { CharterState } from "@heroes/contracts";
+import { makeCharter, makeHero, makePlayer, makeSettlement } from "../charter/_helpers";
 
 // An API-shaped game row: the raw GET /games/:name response, whose
 // pending-battle marker is nested under the untyped `lobby` jsonb bag.
@@ -27,7 +28,9 @@ function apiGame(lobby: unknown, activeFaction: "player" | "ai" = "player"): Gam
     day: 9,
     active_player_id: activeFaction === "ai" ? 1 : 0,
     players: [makePlayer(0, "player", ["h0"], ["s0"]), makePlayer(1, "ai", ["h1"], [])],
-    heroes: { h0: makeHero("h0", 0, 2, 2), h1: makeHero("h1", 1, 18, 4) },
+    // h1 adjacent to h0 (3,2 is a neighbour of 2,2): the shape a real marker
+    // always has, since EnterBattle re-derives adjacency before persisting it.
+    heroes: { h0: makeHero("h0", 0, 2, 2), h1: makeHero("h1", 1, 3, 2) },
     settlements: { s0: makeSettlement("s0", 0, 2, 2) },
     lobby: lobby as Game["lobby"],
   };
@@ -81,4 +84,83 @@ test("a malformed lobby.pendingBattle is ignored, falling back to the faction-de
       `lobby: ${JSON.stringify(lobby)}`,
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// C-BLOCKER-1: the API's `charters` array is the client's only source for
+// GameState.activeCharters (a charter lives in its own table, with no JSONB
+// column behind it). Before this mapping a reload hydrated activeCharters: []
+// while heroes.<id>.isChartering survived -- advanceAutoTravel() had nothing to
+// walk, no settlement was ever founded, and the hero stayed locked for good.
+// ---------------------------------------------------------------------------
+
+function apiGameWithCharters(
+  charters: CharterState[] | undefined,
+  heroOverrides: Partial<ReturnType<typeof makeHero>> = {},
+): Game {
+  return {
+    ...apiGame({}),
+    heroes: { h0: makeHero("h0", 0, 2, 2, heroOverrides), h1: makeHero("h1", 1, 18, 4) },
+    ...(charters === undefined ? {} : { charters }),
+  } as Game;
+}
+
+test("the API's charters array hydrates into activeCharters, so a reload keeps an in-flight charter", () => {
+  const charter = makeCharter({
+    id: "ch0",
+    heroId: "h0",
+    ownerId: 0,
+    phase: "traveling",
+    daysRemaining: 10,
+    targetQ: 12,
+    targetR: 4,
+    settlementName: "Ember pass",
+    settlementId: "s7",
+  });
+
+  const state = hydrateClientGame(apiGameWithCharters([charter], { isChartering: true, charterId: "ch0" }));
+
+  assert.deepEqual(state.activeCharters, [charter], "the in-flight charter survives the reload byte-for-byte");
+  assert.equal(state.activeCharters.length, 1);
+  assert.equal(state.heroes.h0.isChartering, true, "a hero with a real charter row stays chartering");
+  assert.equal(state.heroes.h0.charterId, "ch0");
+});
+
+test("an absent charters field hydrates as [] and unlocks the hero it left flagged (the pre-fix reload state)", (t) => {
+  // The exact shape C-BLOCKER-1 recorded: the hero carries isChartering: true,
+  // the payload carries no charters at all. Left alone, that hero can never be
+  // selected again (turnController.selectHero bails on isChartering) and
+  // nothing can finish the charter -- so hydration unlocks it instead.
+  t.mock.method(console, "warn", () => {});
+  const state = hydrateClientGame(apiGameWithCharters(undefined, { isChartering: true, charterId: "ch0" }));
+
+  assert.deepEqual(state.activeCharters, []);
+  assert.equal(state.heroes.h0.isChartering, false, "the orphaned charter flag is cleared, not honoured");
+  assert.equal(state.heroes.h0.charterId, null);
+});
+
+// ---------------------------------------------------------------------------
+// M-BLOCKER-1 / M-BLOCKER-2 on the CLIENT path: the payload's lobby marker must
+// not park the browser in BATTLE once the battle is over. Acceptance: after F5
+// + Load Game on a game whose last battle resolved, the hydrated phase is
+// PLAYER_TURN with activePlayerId 0 -- not BATTLE.
+// ---------------------------------------------------------------------------
+
+test("a lobby marker whose pair is no longer adjacent does not re-open the battle after F5 (M-BLOCKER-1/M-BLOCKER-2)", (t) => {
+  t.mock.method(console, "warn", () => {});
+  const game = apiGame({ pendingBattle: validMarker });
+  // The battle resolved: the AI attacker was bounced off the collision hex, so
+  // the persisted pair is no longer adjacent.
+  game.heroes.h1 = makeHero("h1", 1, 9, 9);
+
+  const state = hydrateClientGame(game);
+
+  assert.equal(state.phase.kind, "PLAYER_TURN");
+  assert.equal(state.activePlayerId, 0);
+  assert.deepEqual(state.phase, { kind: "PLAYER_TURN", playerId: 0 });
+});
+
+test("a live offered battle still re-opens the modal after F5 (the case the marker exists for)", () => {
+  const state = hydrateClientGame(apiGame({ pendingBattle: validMarker }));
+  assert.deepEqual(state.phase, { kind: "BATTLE", attackerId: "h1", defenderId: "h0" });
 });

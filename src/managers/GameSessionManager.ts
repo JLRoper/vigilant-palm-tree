@@ -97,6 +97,16 @@ export class GameSessionManager {
     const seededCursor = loaded.last_event_id === undefined ? undefined : Number(loaded.last_event_id);
     getMultiplayerSync().start(loaded.name, { cursor: seededCursor, state: hydrated });
     getEntityMirror().syncWith(this.state.getHeroesMap(), this.state.getSettlementsMap());
+    // Resume a charter already mid-route (C-BLOCKER-1). advanceAutoTravel() is
+    // otherwise only ever fired by startCharter() and by the end-of-turn
+    // hand-back, so a game reloaded with a `traveling` charter left the hero
+    // standing still while the toolbar advertised a countdown nothing advanced --
+    // the state was hydrated but inert, and End Turn alone could not recover it.
+    // The long route's remaining steps are walked from the hydrated positions;
+    // the server's own day-tick travel pass moves the same charter one hex per
+    // day, so the two agree rather than fight. A game with no charters (every
+    // classic game) is a no-op.
+    this.state.getTurnController().advanceAutoTravel();
   }
 
   async handleManualSave(): Promise<void> {
