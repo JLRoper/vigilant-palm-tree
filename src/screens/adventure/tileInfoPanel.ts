@@ -1,11 +1,18 @@
 import { FloatingPanel, createPanel } from "@screens/shared/panel";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import type { TileInfo } from "./tileInfo";
-import { foundSettlementRefusalToast } from "./clickIntent";
+import { foundSettlementRefusalToast, pickupRefusalToast } from "./clickIntent";
 
 export interface TileInfoPanelOptions {
   parent: HTMLElement;
   onClose?: () => void;
+  /**
+   * Fired by the pickup button. Wired by the UI manager to GameActions (which
+   * runs the same engine reducer the server will, then POSTs); absent means the
+   * panel renders the button's refusal text but offers no action, so a
+   * read-only embed cannot mutate the game.
+   */
+  onPickup?: (heroId: string, q: number, r: number) => void;
 }
 
 const PANEL_WIDTH = 230;
@@ -17,9 +24,16 @@ function panelY(): number {
   return toolbarHeight() + PANEL_GAP;
 }
 
-function makeLine(text: string, opts: { dim?: boolean; bold?: boolean } = {}): HTMLDivElement {
+function makeLine(
+  text: string,
+  opts: { dim?: boolean; bold?: boolean; key?: string } = {},
+): HTMLDivElement {
   const line = document.createElement("div");
   line.textContent = text;
+  // Optional addressable hook for the browser suites (the data-trade-* /
+  // data-hero-trade-open convention): a keyed line can be read without
+  // matching the panel's prose.
+  if (opts.key) line.dataset.tileLine = opts.key;
   Object.assign(line.style, {
     opacity: opts.dim ? "0.6" : "0.92",
     fontWeight: opts.bold ? "600" : "400",
@@ -38,12 +52,24 @@ function riverLine(river: NonNullable<TileInfo["river"]>): string {
   return "Wide river — impassable without a bridge";
 }
 
+/**
+ * The deposit line, plus how much is still on the floor. The city-view half is
+ * untouched by a pickup (the type and the per-turn yield the settlement works
+ * are the same before and after), so only the trailing quantity changes --
+ * which is exactly what the reader asked for: picking up must not remove what
+ * the tile contributes.
+ */
 function depositLine(deposit: NonNullable<TileInfo["deposit"]>): string {
   const label = deposit.resource.charAt(0).toUpperCase() + deposit.resource.slice(1);
-  if (deposit.workedBy) {
-    return `${label} deposit — worked by ${deposit.workedBy.name} (+${deposit.yield} ${deposit.resource}/turn)`;
-  }
-  return `${label} deposit — unclaimed`;
+  const heads = deposit.workedBy
+    ? `${label} deposit — worked by ${deposit.workedBy.name} (+${deposit.yield} ${deposit.resource}/turn)`
+    : `${label} deposit — unclaimed`;
+  return `${heads} · ${remainingPhrase(deposit.remaining)}`;
+}
+
+function remainingPhrase(remaining: number): string {
+  if (remaining <= 0) return "worked out";
+  return `${remaining} left`;
 }
 
 function settlementLine(settlement: NonNullable<TileInfo["settlement"]>): string {
@@ -80,6 +106,38 @@ function foundingLine(founding: NonNullable<TileInfo["founding"]>): { text: stri
   };
 }
 
+/**
+ * The panel's one action, as data (the tilePanelLines rule: the player-visible
+ * surface is readable without a document). Null when the hex offers no pickup
+ * -- no hero of the viewer's standing here, or nothing left on the tile.
+ *
+ * A hero with no room still gets a button, DISABLED and labelled with the
+ * engine's own refusal: a dead control that says why beats a live one that
+ * silently does nothing.
+ */
+export function tilePanelAction(
+  info: TileInfo,
+): { label: string; disabled: boolean; title: string; heroId: string } | null {
+  const pickup = info.pickup;
+  if (!pickup) return null;
+  const label = pickup.resource.charAt(0).toUpperCase() + pickup.resource.slice(1);
+  if (!pickup.ok) {
+    const refusal = pickupRefusalToast(pickup.reason);
+    return {
+      label: `${label} pickup — ${pickup.remaining} left`,
+      disabled: true,
+      title: refusal.message,
+      heroId: pickup.heroId,
+    };
+  }
+  return {
+    label: `Pick up ${pickup.amount} ${pickup.resource} (${pickup.remaining} left)`,
+    disabled: false,
+    title: `${pickup.heroName} takes ${pickup.amount}; ${pickup.remaining - pickup.amount} stays on the ground. Cargo room: ${pickup.room}.`,
+    heroId: pickup.heroId,
+  };
+}
+
 function signatureFor(info: TileInfo): string {
   return JSON.stringify(info);
 }
@@ -94,6 +152,8 @@ export interface TilePanelLine {
   text: string;
   dim?: boolean;
   bold?: boolean;
+  /** Optional DOM hook: the rendered line carries `data-tile-line="<key>"`. */
+  key?: string;
 }
 
 /**
@@ -107,7 +167,9 @@ export function tilePanelLines(info: TileInfo): TilePanelLine[] {
   const lines: TilePanelLine[] = [{ text: terrainLine(info.terrain) }];
   if (info.river) lines.push({ text: riverLine(info.river) });
   if (info.fogged) lines.push({ text: "Unexplored", dim: true });
-  if (info.deposit) lines.push({ text: depositLine(info.deposit) });
+  // keyed: the browser suites read the deposit line's remaining amount off
+  // `[data-tile-line="deposit"]` rather than matching the sentence.
+  if (info.deposit) lines.push({ text: depositLine(info.deposit), key: "deposit" });
   if (info.settlement) lines.push({ text: settlementLine(info.settlement), bold: info.settlement.owned });
   if (info.district) lines.push({ text: districtLine(info.district) });
   for (const hero of info.heroes) lines.push({ text: heroLine(hero), bold: hero.owned });
@@ -121,7 +183,43 @@ export function tilePanelLines(info: TileInfo): TilePanelLine[] {
 }
 
 function renderLines(info: TileInfo): HTMLElement[] {
-  return tilePanelLines(info).map((line) => makeLine(line.text, { dim: line.dim, bold: line.bold }));
+  return tilePanelLines(info).map((line) =>
+    makeLine(line.text, { dim: line.dim, bold: line.bold, key: line.key }),
+  );
+}
+
+function makePickupButton(
+  info: TileInfo,
+  action: NonNullable<ReturnType<typeof tilePanelAction>>,
+  onPickup: ((heroId: string, q: number, r: number) => void) | undefined,
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = action.label;
+  button.title = action.title;
+  button.disabled = action.disabled;
+  button.dataset.pickup = "1";
+  button.dataset.pickupHero = action.heroId;
+  button.dataset.pickupTile = `${info.q},${info.r}`;
+  Object.assign(button.style, {
+    marginTop: "2px",
+    padding: "4px 6px",
+    fontSize: "11px",
+    fontWeight: "600",
+    borderRadius: "4px",
+    border: "1px solid rgba(255,255,255,0.25)",
+    background: action.disabled ? "rgba(255,255,255,0.06)" : "rgba(120,200,120,0.22)",
+    color: "inherit",
+    cursor: action.disabled ? "default" : "pointer",
+    opacity: action.disabled ? "0.7" : "1",
+  });
+  if (!action.disabled && onPickup) {
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onPickup(action.heroId, info.q, info.r);
+    });
+  }
+  return button;
 }
 
 export class TileInfoPanel {
@@ -130,9 +228,11 @@ export class TileInfoPanel {
   private visible = false;
   private lastSignature: string | null = null;
   private onCloseCallback?: () => void;
+  private onPickupCallback?: (heroId: string, q: number, r: number) => void;
 
   constructor(opts: TileInfoPanelOptions) {
     this.onCloseCallback = opts.onClose;
+    this.onPickupCallback = opts.onPickup;
     this.menu = createPanel({
       parent: opts.parent,
       title: "Tile",
@@ -153,6 +253,7 @@ export class TileInfoPanel {
       },
     });
     this.bodyEl = document.createElement("div");
+    this.bodyEl.dataset.tileBody = "true";
     Object.assign(this.bodyEl.style, {
       display: "flex",
       flexDirection: "column",
@@ -188,6 +289,14 @@ export class TileInfoPanel {
     if (signature === this.lastSignature) return;
     this.lastSignature = signature;
     this.menu.setTitle(tilePanelTitle(info));
-    this.bodyEl.replaceChildren(...renderLines(info));
+    const children = renderLines(info);
+    const action = tilePanelAction(info);
+    if (action) children.push(makePickupButton(info, action, this.onPickupCallback));
+    this.bodyEl.replaceChildren(...children);
+  }
+
+  /** Wired by the UI manager once the game actions exist (the panel is built first). */
+  setPickupHandler(handler: ((heroId: string, q: number, r: number) => void) | undefined): void {
+    this.onPickupCallback = handler;
   }
 }

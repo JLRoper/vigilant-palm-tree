@@ -1,5 +1,5 @@
 import { Terrain, TERRAIN_COST } from "./terrain";
-import { placeResourceTiles, ResourceTile } from "./resourceTiles";
+import { placeResourceTiles, resourceAmountFor, ResourceTile } from "./resourceTiles";
 import { placeRivers, RIVER_BRIDGE_CROSS_COST, RIVER_SMALL_CROSS_COST, type RiverKind, type RiverTile } from "./rivers";
 import type { Axial } from "@heroes/contracts";
 import { mulberry32 } from "../rng";
@@ -128,7 +128,11 @@ export class GameMap {
       }
     }
     const resourceRng = mulberry32((seed ^ 0x72657375) >>> 0);
-    const placed = placeResourceTiles(this, resourceRng).filter((t) => !this.riverAt(t.q, t.r));
+    // The seed only feeds each tile's amount (a hash of seed+q+r+resource);
+    // which tile holds which resource is still the resourceRng stream's call,
+    // so the placements are byte-identical to what this seed produced before
+    // amounts existed.
+    const placed = placeResourceTiles(this, resourceRng, seed).filter((t) => !this.riverAt(t.q, t.r));
     this.placedResourceTiles = placed;
     this.resourceTiles = new Array<ResourceTile | undefined>(this.width * this.height);
     for (const t of placed) {
@@ -174,7 +178,16 @@ export class GameMap {
     return RIVER_SMALL_CROSS_COST;
   }
 
-  static fromTiles(rows: ReadonlyArray<TileRow>): GameMap {
+  /**
+   * Rebuilds a map from serialized rows (the `tiles` table / the client's own
+   * tile payload). The row shape carries only the resource TYPE, so each
+   * present tile's pristine amount is re-derived from `seed` with the same
+   * hash the generator uses -- the two sides of the wire agree on the number
+   * without either sending it. No production caller exists today (the client
+   * builds the map from the seed through getOrCreateGameMap); tests are the
+   * callers, hence the defaulted seed.
+   */
+  static fromTiles(rows: ReadonlyArray<TileRow>, seed = 1): GameMap {
     let maxQ = 0;
     let maxR = 0;
     for (const row of rows) {
@@ -195,7 +208,12 @@ export class GameMap {
           const idx = map.index(row.q, row.r);
           map.tiles[idx] = row.terrain;
           if (row.resource) {
-            const rt: ResourceTile = { q: row.q, r: row.r, resource: row.resource as any };
+            const rt: ResourceTile = {
+              q: row.q,
+              r: row.r,
+              resource: row.resource as any,
+              amount: resourceAmountFor(seed, row.q, row.r, row.resource as any),
+            };
             map.resourceTiles[idx] = rt;
             placed.push(rt);
           }

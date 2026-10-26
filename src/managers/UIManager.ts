@@ -243,13 +243,14 @@ export class UIManager {
     });
   }
 
-  initTileInfo(): void {
+  initTileInfo(onPickupResource?: (heroId: string, q: number, r: number) => void): void {
     this.tileInfoPanel = new TileInfoPanel({
       parent: document.body,
       onClose: () => {
         this.inspectedTile = null;
         this.viewManager?.clearInspectedTile();
       },
+      onPickup: onPickupResource,
     });
   }
 

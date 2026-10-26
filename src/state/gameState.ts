@@ -18,6 +18,7 @@ export {
   buyWagons,
   createTradeRoute,
   updateTradeRoute,
+  pickupResource,
 } from "@heroes/engine";
 
 export {

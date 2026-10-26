@@ -876,6 +876,32 @@ export function parseCommand(body: unknown, gameName: string): Command | null {
     };
   }
 
+  if (b.kind === "PickupResource") {
+    // Which hero and which tile. The tile must be a pair of integers (it names
+    // a hex) and the ENGINE's rulings -- not this validator -- decide whether a
+    // pickup is legal there (not_on_resource_tile / deposit_depleted /
+    // not_enough_cargo_space), surfaced by the handler as a 409 rather than a
+    // 400. How much moves is never sent: the engine takes
+    // min(remaining, the hero's room) and leaves the rest.
+    if (typeof b.heroId !== "string" || b.heroId.length === 0) {
+      return null;
+    }
+    if (
+      typeof b.q !== "number" || !Number.isInteger(b.q) ||
+      typeof b.r !== "number" || !Number.isInteger(b.r)
+    ) {
+      return null;
+    }
+    return {
+      kind: "PickupResource",
+      gameName,
+      actor: b.actor,
+      heroId: b.heroId,
+      q: b.q,
+      r: b.r,
+    };
+  }
+
   if (b.kind === "TradeHeroes") {
     // Field trade between two adjacent heroes of the acting seat. Both offers
     // must be well-formed: non-negative integer gold, non-negative integer
@@ -1072,6 +1098,7 @@ commandsRouter.post("/", async (req: Request<{ name: string }>, res) => {
       activePlayerId: result.activePlayerId,
       players: result.players,
       tradeRoutes: result.tradeRoutes,
+      resourceDeposits: result.resourceDeposits,
       attackerHero: result.attackerHero,
       defenderHero: result.defenderHero,
       attackerVerdict: result.attackerVerdict,

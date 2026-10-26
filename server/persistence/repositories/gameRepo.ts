@@ -68,6 +68,10 @@ export interface GameRow {
   next_charter_id: number;
   next_settlement_id: number;
   trade_routes: TradeRouteState[] | null;
+  // What is still on the floor of each harvested resource tile, keyed
+  // "<q>,<r>" (server/migrations/034_resource_deposits.sql). Read through
+  // @heroes/engine's readResourceDeposits, which drops junk.
+  resource_deposits: Record<string, number> | null;
   // TIMESTAMPTZ columns - node-postgres returns these as Date, not string.
   created_at: Date;
   updated_at: Date;
@@ -86,7 +90,7 @@ export class GameNotFoundError extends Error {
 // omitted trade_routes/next_charter_id/next_settlement_id, so every GET
 // returned games without them and the client hydrated tradeRoutes: [].
 export const GAME_COLUMNS =
-  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, lobby, next_charter_id, next_settlement_id, trade_routes, created_at, updated_at";
+  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, lobby, next_charter_id, next_settlement_id, trade_routes, resource_deposits, created_at, updated_at";
 
 export interface SaveHeroesAndSettlementsExtra {
   players?: Player[];
@@ -108,6 +112,12 @@ export interface SaveHeroesAndSettlementsExtra {
   // that touches routes must pass the full array here or the next writer
   // clobbers it with the previous value.
   trade_routes?: TradeRouteState[];
+  // Resource-tile pickups: the full remaining-amount map, same
+  // read/written-whole rule as trade_routes above. Only PickupResource passes
+  // it, so a command that never picks cannot rewrite a column it did not read
+  // (a granular-sourced state's resourceDeposits is the row's own value, so
+  // omitting it is the safe default).
+  resource_deposits?: Record<string, number>;
   /**
    * Leave the `settlements` JSONB column exactly as it is (M-MAJOR-2).
    *
@@ -237,6 +247,10 @@ export function createGameRepo(db: Queryable): GameRepo {
       if (extra?.trade_routes !== undefined) {
         sets.push(`trade_routes = $${i++}::jsonb`);
         vals.push(JSON.stringify(extra.trade_routes));
+      }
+      if (extra?.resource_deposits !== undefined) {
+        sets.push(`resource_deposits = $${i++}::jsonb`);
+        vals.push(JSON.stringify(extra.resource_deposits));
       }
       sets.push("updated_at = now()");
       vals.push(name);

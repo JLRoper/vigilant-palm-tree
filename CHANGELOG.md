@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.37.0] - 2026-10-26
+
+Heroes pick up the resources on the adventure map: every resource tile carries a deterministic 5-500 amount derived from the seed and the tile (a hash, no map-RNG draw, no MapGenVersion bump), a hero standing on a tile picks up min(remaining, cargo room) and leaves the rest on the floor, and the tile keeps its resource type and city-view yield
+
 ## [0.36.4] - 2026-10-26
 
 Five playthrough findings, all in the charter/persistence lane. Acceptance first:

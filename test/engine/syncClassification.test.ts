@@ -15,13 +15,46 @@ test("every declared EngineEvent variant is classified exactly once", () => {
   // 28 -> 29 (2026-10-24): SettlementFounded added -- a settlers-mode covered
   // wagon plants a settlement and is consumed by it (resync class: the town's
   // rates, spots and stock are the engine's map-derived draws).
-  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 29);
+  // 29 -> 30 (2026-10-26): ResourcePickedUp added -- a hero picks the resources
+  // off the tile it stands on (apply class: the amount taken AND what is left
+  // on the tile ride the payload, so no map is needed to replay it).
+  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 30);
 });
 
-test("classification counts: 14 apply, 8 resync, 7 ignore", () => {
+test("classification counts: 15 apply, 8 resync, 7 ignore", () => {
   const counts = { apply: 0, resync: 0, ignore: 0 };
   for (const cls of Object.values(ENGINE_EVENT_SYNC_CLASS)) counts[cls] += 1;
-  assert.deepEqual(counts, { apply: 14, resync: 8, ignore: 7 });
+  assert.deepEqual(counts, { apply: 15, resync: 8, ignore: 7 });
+});
+
+test("class agrees with the reducer: ResourcePickedUp credits the cargo and reduces the tile", () => {
+  assert.equal(ENGINE_EVENT_SYNC_CLASS.ResourcePickedUp, "apply");
+  const state = makeState({ heroes: [makeHero("h0", 0, 2, 2)] });
+  const applied = applyEngineEvent(state, {
+    type: "ResourcePickedUp",
+    actor: 0,
+    heroId: "h0",
+    q: 2,
+    r: 2,
+    resource: "wood",
+    amount: 120,
+    remaining: 30,
+  });
+  assert.equal(applied.outcome, "applied");
+  assert.equal(applied.state.heroes.h0.resources?.wood ?? 0, 120);
+  assert.deepEqual(applied.state.resourceDeposits, { "2,2": 30 });
+  // A dead hero is real drift -> refetch, never a silent credit.
+  const drifted = applyEngineEvent(state, {
+    type: "ResourcePickedUp",
+    actor: 0,
+    heroId: "nope",
+    q: 2,
+    r: 2,
+    resource: "wood",
+    amount: 120,
+    remaining: 30,
+  });
+  assert.equal(drifted.outcome, "resync");
 });
 
 test("class agrees with the reducer: GarrisonReordered swaps two garrison slots", () => {

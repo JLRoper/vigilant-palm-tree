@@ -112,6 +112,10 @@ function buildHeroPanelDom(
   goldWrap.appendChild(goldIcon);
   const goldEl = document.createElement("span");
   goldEl.textContent = "0g";
+  // Addressable readout (the data-hero-trade-open convention): the browser
+  // suites assert the purse's gain after a pickup off a gold tile without
+  // re-parsing this panel's prose.
+  goldEl.dataset.heroGold = "true";
   goldWrap.appendChild(goldEl);
   resourcesRow.appendChild(goldWrap);
 
@@ -288,6 +292,10 @@ function buildHeroPanelDom(
 
     const value = document.createElement("span");
     value.textContent = "0";
+    // Addressable per-resource readout: the cargo cell a pickup fills is read
+    // by value here (see renderCargo), which is what the browser suites assert
+    // the gain from.
+    value.dataset.heroCargo = r;
     Object.assign(value.style, {
       fontSize: "11px",
       fontVariantNumeric: "tabular-nums",

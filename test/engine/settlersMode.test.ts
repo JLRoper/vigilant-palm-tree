@@ -85,6 +85,19 @@ const GRID_PINS: readonly { seed: number; size: MapSize; digest: string }[] = [
   { seed: 7, size: "medium", digest: "1b7c4f65ec4ccf40" },
 ];
 
+// The pick-up amounts a resource tile carries, pinned separately from the
+// terrain pin above and deliberately NOT folded into it: the two pins mean
+// different things. The grid pin asks "did a generation pass move the world
+// for a seed that already exists" (only a redesign may change it); this one
+// asks "did the seed+tile hash change" (only a new hash version may change it),
+// and its digests were taken WITHOUT including the amount in the grid shape --
+// which is why the grid digests above are the same values they were before
+// pickups existed.
+const AMOUNT_PINS: readonly { seed: number; size: MapSize; digest: string }[] = [
+  { seed: 42, size: "small", digest: "42db022df1dd2858" },
+  { seed: 7, size: "medium", digest: "a236b61cb4ae6f22" },
+];
+
 test("the generated grid of an existing seed is byte-identical", () => {
   for (const pin of GRID_PINS) {
     const map = getOrCreateGameMap(pin.seed, pin.size, CURRENT_MAP_GEN_VERSION);
@@ -92,7 +105,11 @@ test("the generated grid of an existing seed is byte-identical", () => {
       width: map.width,
       height: map.height,
       tiles: map.tiles,
-      resourceTiles: map.placedResourceTiles,
+      // Deposit PLACEMENT (position + type) only. The pristine `amount` is a
+      // field added after this pin existed and is derived from the seed rather
+      // than drawn, so including it would change what the pin is measuring
+      // without changing the world -- the amounts have their own pin below.
+      resourceTiles: map.placedResourceTiles.map((t) => ({ q: t.q, r: t.r, resource: t.resource })),
       rivers: map.placedRivers,
     };
     const actual = digest(shape);
@@ -102,6 +119,24 @@ test("the generated grid of an existing seed is byte-identical", () => {
       pin.digest,
       `the grid for seed ${pin.seed} (${pin.size}) moved -- a generation pass or a MapGenVersion changed`,
     );
+  }
+});
+
+test("the pick-up amount of a resource tile is stable for a seed, inside 5-500", () => {
+  for (const pin of AMOUNT_PINS) {
+    const map = getOrCreateGameMap(pin.seed, pin.size, CURRENT_MAP_GEN_VERSION);
+    const amounts = map.placedResourceTiles.map((t) => ({
+      q: t.q,
+      r: t.r,
+      resource: t.resource,
+      amount: t.amount,
+    }));
+    const actual = digest(amounts);
+    console.log(`[pin] amounts ${pin.seed}/${pin.size} = ${actual} (${amounts.length} tiles)`);
+    assert.equal(actual, pin.digest, `the seed+tile amount hash changed for seed ${pin.seed}`);
+    for (const a of amounts) {
+      assert.ok(a.amount >= 5 && a.amount <= 500, `${a.q},${a.r} amount ${a.amount} is inside 5-500`);
+    }
   }
 });
 

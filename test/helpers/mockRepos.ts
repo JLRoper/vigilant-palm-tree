@@ -60,6 +60,7 @@ export function createMockGameRepo(
         next_charter_id?: number;
         next_settlement_id?: number;
         trade_routes?: TradeRouteState[];
+        resource_deposits?: Record<string, number>;
         skipSettlements?: boolean;
       },
     ): Promise<void> {
@@ -77,6 +78,7 @@ export function createMockGameRepo(
         ...(extra?.next_charter_id !== undefined ? { next_charter_id: extra.next_charter_id } : {}),
         ...(extra?.next_settlement_id !== undefined ? { next_settlement_id: extra.next_settlement_id } : {}),
         ...(extra?.trade_routes !== undefined ? { trade_routes: extra.trade_routes } : {}),
+        ...(extra?.resource_deposits !== undefined ? { resource_deposits: extra.resource_deposits } : {}),
       };
     },
     async saveLobby(name: string, lobby: unknown): Promise<void> {

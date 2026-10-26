@@ -3,11 +3,15 @@ import type {
   GameState,
   HeroState,
   PlayerSeat,
+  ResourceType,
   TradeRouteEndpoint,
   TradeRouteId,
   TradeRoutePayload,
   TradeRouteState,
+  WarehouseResource,
 } from "@heroes/contracts";
+import { heroCargo } from "../settlement/capacity";
+import { resourceDepositKey } from "../hero/pickupResource";
 import { transferGold } from "../economy/transfer";
 import { depositIntoBank, requestBankWithdrawal } from "../economy/bank";
 import { setAutoTrade } from "../settlement/autoTrade";
@@ -92,6 +96,11 @@ export const ENGINE_EVENT_SYNC_CLASS: Record<EngineEvent["type"], EngineEventSyn
   // (its rule needs the map to make them), so the client refetches rather than
   // guessing -- the CharterStarted rule.
   SettlementFounded: "resync",
+  // A hero picking resources off a tile it stands on. "apply", not "resync":
+  // the payload carries the amount taken AND what is left on the tile, so the
+  // replay is targeted construction with no map, no RNG and no server read --
+  // the applyUnitsRecruited/applyTradeRouteCreated pattern.
+  ResourcePickedUp: "apply",
 };
 
 function resync(state: GameState): ApplyEngineEventResult {
@@ -353,6 +362,53 @@ function applyBattleOffered(
   };
 }
 
+// ResourcePickedUp is fully payload-derivable, so the replay is targeted
+// construction: credit the hero the event's own `amount` and stamp the tile's
+// new `remaining` into resourceDeposits. Neither step needs the map (the
+// pristine amount is only what a MISSING entry means), which is the whole
+// reason this variant can be "apply" while the tile's amount stays a hash of
+// the seed rather than a wire field.
+//
+// The payload is not re-validated against the hero's remaining room: an
+// already-applied event re-credits its amount if it is ever re-delivered,
+// which is the same documented bounded drift the partial-amount kinds carry
+// (applyBankGoldMoved, applyUnitsTransferred). The client advances its cursor
+// past its own command's events, so its own row is never re-delivered, and
+// TurnEnded's resync re-derives authoritative state at every turn boundary.
+function applyResourcePickedUp(
+  state: GameState,
+  heroId: string,
+  q: number,
+  r: number,
+  resource: ResourceType,
+  amount: number,
+  remaining: number,
+): ApplyEngineEventResult {
+  const hero = state.heroes[heroId];
+  if (!hero) return resync(state);
+  if (!Number.isInteger(amount) || amount <= 0) return resync(state);
+  if (!Number.isInteger(remaining) || remaining < 0) return resync(state);
+  const credited =
+    resource === "gold"
+      ? { ...hero, gold: (hero.gold ?? 0) + amount }
+      : {
+          ...hero,
+          resources: {
+            ...heroCargo(hero),
+            [resource as WarehouseResource]: (heroCargo(hero)[resource as WarehouseResource] ?? 0) + amount,
+          },
+        };
+  return {
+    state: {
+      ...state,
+      heroes: { ...state.heroes, [heroId]: credited },
+      resourceDeposits: { ...(state.resourceDeposits ?? {}), [resourceDepositKey(q, r)]: remaining },
+      dirty: true,
+    },
+    outcome: "applied",
+  };
+}
+
 export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEngineEventResult {
   switch (event.type) {
     case "HeroMoved":
@@ -473,6 +529,17 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
 
     case "BattleOffered":
       return applyBattleOffered(state, event.attackerId, event.defenderId);
+
+    case "ResourcePickedUp":
+      return applyResourcePickedUp(
+        state,
+        event.heroId,
+        event.q,
+        event.r,
+        event.resource,
+        event.amount,
+        event.remaining,
+      );
 
     // Listed per variant rather than swept into `default:` so a new
     // EngineEvent variant trips the exhaustiveness check below.

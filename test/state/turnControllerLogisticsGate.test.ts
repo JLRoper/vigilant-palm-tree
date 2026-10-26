@@ -29,6 +29,7 @@ function buildHooks(): TurnControllerHooks {
     onAdvanceCharterTravel: noop,
     onPlaceBuildings: noop,
     onTransferResources: noop,
+    onPickupResource: noop,
     onAssignWagons: noop,
     onBuyWagons: noop,
     onCreateTradeRoute: noop,

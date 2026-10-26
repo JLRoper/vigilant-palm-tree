@@ -89,6 +89,7 @@ type FullGameRow = {
   next_charter_id: number;
   next_settlement_id: number;
   trade_routes: TradeRouteState[] | null;
+  resource_deposits: Record<string, number> | null;
   created_at: string;
   updated_at: string;
 };

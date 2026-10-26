@@ -50,7 +50,7 @@ test("new GameMap(seed, mapSize) deterministically reproduces the same map GameM
   // Simulates the client's own reconstruction path
   // (GameSessionManager.ts's loadGame(): GameMap.fromTiles(tiles fetched
   // from GET .../tiles)).
-  const clientReconstructed = GameMap.fromTiles(persistedTiles);
+  const clientReconstructed = GameMap.fromTiles(persistedTiles, seed);
 
   // Simulates server/app/commandHandler.ts's StartCharter case.
   const serverReconstructed = new GameMap(seed, mapSize);
@@ -59,6 +59,27 @@ test("new GameMap(seed, mapSize) deterministically reproduces the same map GameM
   assert.equal(serverReconstructed.height, clientReconstructed.height);
   assert.deepEqual(serverReconstructed.tiles, clientReconstructed.tiles);
   assert.deepEqual(serverReconstructed.resourceTiles, clientReconstructed.resourceTiles);
+
+  // The persisted TILE ROW carries the resource TYPE and nothing else -- which
+  // is what "no new wire field" means here: the row shape is unchanged, and a
+  // reconstruction that knows the seed re-derives each deposit's pristine
+  // amount with the same hash the generator used. The seed is therefore a
+  // REQUIRED argument for an exact reconstruction; the defaulted-seed form is
+  // pinned below so the difference is a decision rather than a surprise.
+  assert.deepEqual(Object.keys(persistedTiles[1]).sort(), ["q", "r", "resource", "terrain"]);
+  const seededRow = persistedTiles.find((row) => row.resource !== null)!;
+  const withoutSeed = GameMap.fromTiles(persistedTiles);
+  assert.notDeepEqual(
+    withoutSeed.resourceTileAt(seededRow.q, seededRow.r),
+    serverReconstructed.resourceTileAt(seededRow.q, seededRow.r),
+    "a reconstruction that is not given the seed cannot reproduce the amounts",
+  );
+  assert.deepEqual(
+    clientReconstructed.resourceTileAt(seededRow.q, seededRow.r),
+    serverReconstructed.resourceTileAt(seededRow.q, seededRow.r),
+    "...and one that is given it reproduces them exactly, like every other field",
+  );
+  assert.equal(serverReconstructed.resourceTileAt(seededRow.q, seededRow.r)!.resource, seededRow.resource);
 });
 
 test("GameMap reconstruction from seed+mapSize is deterministic across every mapSize, not just small", () => {

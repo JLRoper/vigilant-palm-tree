@@ -1,6 +1,7 @@
 import { GameStateManager } from "./GameStateManager";
 import { SessionManager } from "./SessionManager";
 import { showToast } from "@screens/shared/toast";
+import { pickupRefusalToast } from "@screens/adventure/clickIntent";
 import type { ManualBattleOutcome } from "@screens/combat/arena/openManualBattleArena";
 import type { BattleActionPhase } from "@screens/combat/arena/state";
 import { canEndTurn, cleanupDefeatedHeroCharters, endBattlePhase, platoonsHaveTroops, settlementStacks, spellLoadoutForHero, SETTLEMENT_BATTLE_MIN_RETREAT_ROUND, type BattleResult } from "@heroes/engine";
@@ -687,6 +688,39 @@ export class GameActions {
     if (after !== before) {
       this.state.replaceState(after);
     }
+  }
+
+  /**
+   * A hero picks the resources off the tile it is standing on (the tile
+   * panel's pickup button). The controller runs the engine's own rule -- ON the
+   * tile, min(remaining, cargo room), the rest left on the floor -- and its
+   * hook POSTs the command, so this method's job is the REPORTING half: a
+   * refusal is a toast in the engine's own vocabulary rather than a silent
+   * no-op, and a success says how much moved and how much stayed behind.
+   *
+   * A partial pickup lands here as a SUCCESS with remaining > 0: the hero took
+   * what fits and the tile still holds the difference, which the toast says
+   * out loud.
+   */
+  pickupResource(heroId: string, q: number, r: number): void {
+    const tc = this.state.getTurnController();
+    const result = tc.pickupResource(heroId, q, r);
+    if (!result.ok) {
+      const refusal = pickupRefusalToast(result.reason);
+      console.warn(`[pickup] refused on tile ${q},${r}: ${result.reason}`);
+      showToast(refusal.message, refusal.kind);
+      return;
+    }
+    this.state.replaceState(tc.getState());
+    const left = result.remaining;
+    const message =
+      left > 0
+        ? `Picked up ${result.taken} ${result.resource} — ${left} left on the ground`
+        : `Picked up ${result.taken} ${result.resource} — the deposit is worked out`;
+    console.info(
+      `[pickup] ${heroId} took ${result.taken} ${result.resource} at ${q},${r}; ${left} left behind`,
+    );
+    showToast(message, "info");
   }
 
   async handleEndTurn(): Promise<void> {

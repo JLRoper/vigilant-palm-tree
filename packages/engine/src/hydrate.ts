@@ -148,6 +148,17 @@ export interface HydratableGameRow {
    * and every caller that predates the mode keeps working unchanged.
    */
   gameMode?: GameMode;
+  /**
+   * games.resource_deposits JSONB: what is still on the floor of each resource
+   * tile a hero has picked from, keyed `"<q>,<r>"`. The trade_routes pattern --
+   * always read/written whole per game, untyped here and normalized by
+   * readResourceDeposits below. Optional and empty by default, so every
+   * pre-pickup row (and every client payload that predates the field) hydrates
+   * with no `resourceDeposits` key at all: absent means "nothing has been
+   * picked anywhere", and every tile's remaining amount is its seed-derived
+   * pristine one.
+   */
+  resource_deposits?: Record<string, unknown> | null;
 }
 
 // A pending-battle marker as persisted in games.lobby.pendingBattle.
@@ -194,6 +205,25 @@ export function readGameMode(lobby: unknown): GameMode | undefined {
   if (!lobby || typeof lobby !== "object") return undefined;
   const raw = (lobby as { gameMode?: unknown }).gameMode;
   return isGameMode(raw) ? raw : undefined;
+}
+
+/**
+ * Structural read of the games.resource_deposits jsonb bag: keeps only
+ * `"<q>,<r>"` keys holding a non-negative finite number, drops everything else
+ * (a hand-edited row, a key from an older shape). A dropped entry is not a
+ * loss of authority: the tile simply reads its pristine amount again, which is
+ * what an absent key means anyway. Returns undefined when nothing survives, so
+ * hydrateGameState can leave the key off the state entirely.
+ */
+export function readResourceDeposits(raw: unknown): Record<string, number> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^-?\d+,-?\d+$/.test(key)) continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) continue;
+    out[key] = Math.floor(value);
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function warnMissing(path: string, field: string): void {
@@ -524,6 +554,10 @@ export function hydrateGameState(
   // only when both ends are dead heroes -- the updateTradeRoute gate falls
   // back to the same chain, so null keeps the route removable by nobody
   // until a resync, never misattributed.
+  // What is still on the floor of each harvested resource tile. Undefined --
+  // not {} -- when the row carries none, so the returned state omits the key
+  // exactly as a pre-pickup state did.
+  const resourceDeposits = readResourceDeposits(row.resource_deposits);
   const records = { settlements: settlementsRecord, heroes: heroesRecord };
   const tradeRoutes = (row.trade_routes ?? []).flatMap((raw) => {
     const normalized = normalizeTradeRoute(raw);
@@ -567,6 +601,10 @@ export function hydrateGameState(
     // this never diverges from a plain read in the steady state.
     nextSettlementId: Math.max(row.next_settlement_id ?? 0, settlementCount),
     ...(gameMode !== DEFAULT_GAME_MODE ? { gameMode } : {}),
+    // Resource-tile pickups ride the row as JSONB (the trade_routes pattern).
+    // Spread only when non-empty: a game nobody has picked in keeps a state
+    // key-for-key identical to what it was before pickups existed.
+    ...(resourceDeposits ? { resourceDeposits } : {}),
   };
 }
 
