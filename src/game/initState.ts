@@ -1,5 +1,6 @@
 export {
   buildInitialGameState,
+  emptyGameState,
   CASTLE_COUNT_DEFAULT,
   CASTLE_COUNT_MAX,
   CASTLE_COUNT_MIN,

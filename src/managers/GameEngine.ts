@@ -4,10 +4,9 @@ import { HERO_PROCEDURAL_DRAWERS } from "../render/sprites";
 import { rng } from "../core/rng";
 import { MAP_SEED } from "@screens/adventure/adventureView";
 import { colorForOwner } from "../state/playerColors";
-import { buildInitialGameState } from "../game/initState";
+import { emptyGameState } from "../game/initState";
 import { buildTurnHooks } from "../game/turnHooks";
 import { cityViewSizeFor, districtConnectionReason, districtKey, generateDistrictSpots, isForbiddenDistrictTerrain, resolveControllingSettlement, sampleCityBackdrop, touchesTerrain, validCharterHexes } from "@heroes/engine";
-import { cachedUnitTypes } from "../data/unitCatalog";
 
 import { SessionManager } from "./SessionManager";
 import { GameStateManager, type PathPreviewLock } from "./GameStateManager";
@@ -145,11 +144,16 @@ export class GameEngine {
       },
     });
     this.state.setHooks(attached.wrapHooks(hooks));
-    // The catalog prices the starting heroes' weekly food bill against the starter
-// farmland (engine init.ts's seedStarterBuildings). Empty when the catalog has
-// not loaded, which falls back to the flat 1g/1f per-unit default -- never
-// worse than today's population-only sizing.
-const initialState = buildInitialGameState(this.gameMap, rng, { unitTypes: cachedUnitTypes() });
+    // The boot state is EMPTY (C-POLISH-2): no game is open yet, so there are no
+    // players, heroes or settlements to show. It used to be
+    // buildInitialGameState(...), which fabricated a complete local world at
+    // every page load -- day 1, three seats, five named settlements -- matching
+    // no database row, while activeGameName was still null and /api/games had
+    // never been asked. A reload showed a world the player was not playing, and
+    // any gesture against it described a game that does not exist. The map
+    // remains as the backdrop; every load path (GameSessionManager.loadGame,
+    // handleNewGame) replaces this state wholesale.
+    const initialState = emptyGameState();
     this.state.setState(initialState);
     this.state.rebuildHeroesFromState();
     this.state.rebuildSettlementsFromState();

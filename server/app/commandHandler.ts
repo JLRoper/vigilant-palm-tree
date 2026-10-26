@@ -135,6 +135,10 @@ export interface GameRepo {
         next_charter_id?: number;
         next_settlement_id?: number;
         trade_routes?: TradeRouteState[];
+        // Leave the settlements JSONB column untouched (M-MAJOR-2): the battle
+        // cases set it when no capture changed a settlement, so the column the
+        // fight wrote is the one the reload reads.
+        skipSettlements?: boolean;
       },
     ): Promise<void>;
   saveLobby(name: string, lobby: unknown): Promise<void>;

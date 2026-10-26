@@ -201,6 +201,27 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
   };
 }
 
+/**
+ * The state of a client that has no game open yet (C-POLISH-2).
+ *
+ * Before this, the client booted onto a LOCALLY GENERATED world: day 1, three
+ * seats, five named settlements and three heroes that match no database row --
+ * while `__gameDebug.activeGameName` was null and no `/api/games` request had
+ * been issued (the client had never loaded anything). Reloading the browser then
+ * showed a world the player was not playing, and any command issued against it
+ * described a game that did not exist.
+ *
+ * An empty state is the honest boot state: no players, no heroes, no
+ * settlements, day 1 -- the map stays as the backdrop until a game is created or
+ * loaded, and every load path replaces this wholesale (GameSessionManager's
+ * loadGame/handleNewGame). Nothing in the client derives a rule from an empty
+ * state: the calendar snapshot returns null, the entity mirror syncs nothing and
+ * the adventure view has no clicks to resolve.
+ */
+export function emptyGameState(): GameState {
+  return createInitialState({ seedPlayers: [], seedHeroes: [], seedSettlements: [] });
+}
+
 export function createInitialState(opts?: InitialStateOptions): GameState {
   const players = opts?.seedPlayers ?? defaultPlayers();
   const heroesRecord: Record<HeroId, HeroState> = {};
