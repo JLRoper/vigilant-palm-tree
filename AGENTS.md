@@ -37,6 +37,46 @@ Incident-driven rules. Full detail lives in the `multi-agent-workspace` skill's 
 - A user "stop" is a hard brake: execute only the literal instruction, keep every other action read-only, and announce any still-running background task so the user can cancel it. An active goal's "proceed autonomously" never overrides it.
 - Session renames are done by the human in the client. Never have an agent run `alock session-name` to fix a title — that is the mechanism that crossed them.
 
+## Per-run docker pods (an isolated db + api + web per run, on its own ports)
+
+A **pod** is one docker compose project (`heroes-pod-<name>`) created from this repo's own
+`docker-compose.yml` plus a pod-only label overlay, `docker/docker-compose.pod.yml`. It gives a run its
+own postgres, api and web on its own host ports so it can be tested without touching the shared stack
+or `game_poc` — and it stays up until it is removed.
+
+- `npm run pod:up [-- <name>]` — create a pod (name defaults to the branch slug plus a short random tag)
+  and print its name, its URL, its ports and how to remove it. A pod builds its OWN images
+  (`heroes-pod-<name>-api` / `-web`), so it never retags the shared stack's `heroes-js-api`/`heroes-js-web`.
+- `npm run pod:list` — every pod: name, URL, db/api/web ports, created time, age, and whether its
+  containers are actually running. It reads `docker ps -a --filter label=heroes.pod` and docker's own
+  port mapping; there is no registry file that could drift from docker.
+- `npm run pod:down -- <name>` — remove that pod completely: containers, network, volume.
+- `npm run pod:prune [-- --older-than <hours>]` — remove pods older than `<hours>` (default 12), naming
+  what it removed and what it kept.
+
+Identity is the labels `heroes.pod`, `heroes.pod.created`, `heroes.pod.workspace` on every container,
+the volume and the network. `scripts/pods.ts` refuses to `down`/`prune` any object that is not labelled
+with its own pod, so it can never take the shared stack or a neighbour pod with it. **A pod is not torn
+down when a run ends** — removal is explicit (`pod:down`) or by age (`pod:prune`).
+
+Everything a pod varies is a `${POD_*}` variable in `docker-compose.yml` whose default is exactly the
+shared stack's current value (game_db/game_api/game_web, 5432/3001/5173, database `game_poc`), so
+`npm run db:up` / `npm run docker:deploy` behave as before. Pod ports come from
+`scripts/allocate-ports.ts` (`pickFreePorts`), so a pod can never land on 5432/3001/5173.
+
+To point an existing run at a pod instead of the shared stack (the values `pod:up` prints):
+
+```
+API_HOST=127.0.0.1 API_PORT=<pod api port> CLIENT_PORT=<pod web port>
+PGHOST=127.0.0.1 PGPORT=<pod db port> PGUSER=gameuser PGPASSWORD=gamepass PGDATABASE=heroes_pod_<name>
+```
+
+`vite.config.ts` reads `API_HOST`/`API_PORT` (proxy target) and `CLIENT_PORT` (its own port), so
+`npm run dev` with those vars serves the client against the pod's API. Pointing a DB-backed suite at
+`PGDATABASE=heroes_pod_<name>` is how you run a database-wiping suite (`npm test`, `test:all`) safely
+while other worktrees are live: the wipe then covers the pod's throwaway games, not the shared
+`game_poc`.
+
 ## Pre-commit / pre-PR gate (automatic)
 Before ANY `git commit`, `git switch -c`, `gh pr create`, or `gh repo create`:
 1. Invoke the `precommit-checker` subagent (it runs `npm run build` + `npm run lint:deps` + the `docs:check` documentation gate scoped to changed modules + `npm run test:all`). Tests run only when the changeset touches game code: `npm run test:scope -- --changed-from origin/main` (`tools/test-scope.mjs`) reports `TESTS SKIPPED` when every changed file is documentation or agent tooling (`*.md`, `docs/`, `.kilo/`, `.claude/`, `.github/agents|hooks|prompts|skills/`, etc.), and the PR workflow `validate-game.yml` applies the same rule to its boot check and smoke test. Unknown paths fail safe to running tests.
