@@ -106,6 +106,12 @@ export class BuildingPlacer {
 
   setAffordability(aff: Affordability | null): void {
     this.affordability = aff;
+    // The palette's rows are rendered FROM this snapshot, so a palette that is
+    // already open has to be re-rendered for a new one to reach it -- otherwise
+    // a treasury that refilled while the city view was open leaves every row a
+    // dimmed "have 0" no-op until the city is left and re-entered. The re-render
+    // keeps the viewer's scroll offset (rememberListScroll/restoreListScroll).
+    if (this.palette) this.renderPaletteBody();
   }
 
   isActive(): boolean {
