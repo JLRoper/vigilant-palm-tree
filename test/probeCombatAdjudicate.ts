@@ -6,9 +6,10 @@ import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import "../server/persistence/pgTypes";
 import {
-  getApiPort, getClientPort, spawnLogged, waitForApiHealth, waitForUrl,
+  spawnLogged, waitForApiHealth, waitForUrl,
   waitForPortReleased, treeKill, reapPreviousRunPids, clearRegisteredPids,
 } from "./_request";
+import { requireRunTargets } from "./_envGuard";
 import type { GameDebugApi } from "../src/io/debugCommands";
 
 // FOCUSED PROBE (not a suite): is a BATTLE phase after a resolved combat a
@@ -20,16 +21,30 @@ import type { GameDebugApi } from "../src/io/debugCommands";
 //   cd <worktree> && PLAYTHROUGH=1 PGDATABASE=game_play_<hex> \
 //     API_PORT=57601 CLIENT_PORT=57602 npx tsx test/probeCombatAdjudicate.ts
 //
-// Pass the ports (or --env-file=.env): without them they fall back to
-// 3001/5173, which on a shared box is the Docker stack -- the probe would
-// drive the DEPLOYED api against game_poc while reading the worktree DB.
+// Pass the ports explicitly (or --env-file=.env): the guard below refuses to
+// guess them. Unset, it exits 2 before the first HTTP request -- 3001/5173 on
+// a shared box is the Docker stack, so a guess would drive the DEPLOYED api
+// against whatever database this worktree happens to read.
 
-const API_PORT = Number(process.env.API_PORT) || getApiPort(3001);
-const WEB_PORT = Number(process.env.CLIENT_PORT) || getClientPort(5173);
+const ENTRY = "probeCombatAdjudicate";
+
+// Opt-in first (a probe that is not asked for must never fail anything), then
+// fail closed: PLAYTHROUGH=1 arms the run, and the guard accepts the target
+// only if it was given explicitly. Both gates sit above the first side effect.
+if (process.env.PLAYTHROUGH !== "1") {
+  console.log(
+    `${ENTRY}: skipped (opt-in probe) — set PLAYTHROUGH=1 to run it. It then requires ` +
+    "API_PORT, CLIENT_PORT and PGDATABASE explicitly; unset values are refused, not guessed.",
+  );
+  process.exit(0);
+}
+const TARGETS = requireRunTargets(ENTRY);
+const API_PORT = TARGETS.apiPort;
+const WEB_PORT = TARGETS.clientPort;
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
 const GAME_SEED = 424242;
-const DB_NAME = process.env.PGDATABASE ?? "game_play_bf69b3";
+const DB_NAME = TARGETS.database;
 const NAME = "probe-combat-adjudicate";
 
 // Screenshots land beside the report, under the CALLER's checkout (a worktree
@@ -159,10 +174,6 @@ async function seedHeroPos(heroId: string, q: number, r: number): Promise<void> 
 }
 
 async function main(): Promise<void> {
-  if (process.env.PLAYTHROUGH !== "1") {
-    console.log("probeCombatAdjudicate: skipped (opt-in probe) — set PLAYTHROUGH=1 to run it.");
-    return;
-  }
   reapPreviousRunPids();
   await waitForPortReleased(API_PORT).catch(() => {});
   await waitForPortReleased(WEB_PORT).catch(() => {});
