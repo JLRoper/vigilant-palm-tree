@@ -334,10 +334,19 @@ async function negativeBackwardCompat(browser: Browser): Promise<void> {
   const tiles: Tile[] = tilesRes.json;
   const runs = straightPassableRuns(tiles, origin).filter((x) => x.run >= 2);
   assert(runs.length > 0, `no straight passable run of >=2 hexes from ${origin.q},${origin.r}`);
-  const dest = { q: origin.q + runs[0].dir.q * 2, r: origin.r + runs[0].dir.r * 2 };
 
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await openGame(page, name, game.id);
+  const clientClear = await page.evaluate(
+    (steps: Axial[]) => {
+      const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
+      return steps.map((s) => dbg.isPassable(s.q, s.r));
+    },
+    runs.flatMap((x) => [1, 2].map((n) => ({ q: origin.q + x.dir.q * n, r: origin.r + x.dir.r * n }))),
+  );
+  const pick = runs.findIndex((_, i) => clientClear[i * 2] && clientClear[i * 2 + 1]);
+  assert(pick >= 0, `no straight run of >=2 client-passable hexes from ${origin.q},${origin.r} (wide rivers block what tile terrain allows)`);
+  const dest = { q: origin.q + runs[pick].dir.q * 2, r: origin.r + runs[pick].dir.r * 2 };
   await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.setSelectedHero("p0-hero"));
   const moved = await page.evaluate(
     (t: Axial) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.requestMove("p0-hero", t.q, t.r),

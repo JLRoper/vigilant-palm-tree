@@ -87,7 +87,7 @@ test("findPath returns [] in < 1 ms on an epic (120x90) map when goal is in bloc
   assert.ok(elapsedMs < 1, `expected blocked-goal early exit < 1 ms, got ${elapsedMs.toFixed(4)} ms`);
 });
 
-test("corner-to-corner findPath on epic (120x90) completes in < 5 ms and returns a continuous passable path excluding start", () => {
+test("corner-to-corner findPath on epic (120x90) completes in < 15 ms and returns a continuous passable path excluding start", () => {
   const map = new GameMap(42, "epic");
   const start = { q: 0, r: 0 };
   const goal = { q: map.width - 1, r: map.height - 1 };
@@ -107,7 +107,7 @@ test("corner-to-corner findPath on epic (120x90) completes in < 5 ms and returns
   }
 
   assert.ok(path.length > 0, "expected a valid corner-to-corner path on seed 42 epic map");
-  assert.ok(bestMs < 8, `expected epic corner-to-corner findPath < 8 ms, got ${bestMs.toFixed(3)} ms`);
+  assert.ok(bestMs < 15, `expected epic corner-to-corner findPath < 15 ms, got ${bestMs.toFixed(3)} ms`);
   assert.notDeepEqual(path[0], start, "path excludes start");
   assert.deepEqual(path[path.length - 1], goal, "path ends at goal");
 

@@ -521,11 +521,10 @@ const ARTIFACT_DIR = resolve("local", "test-artifacts", "worker-drag");
 mkdirSync(ARTIFACT_DIR, { recursive: true });
 
 // Defaults pin the LOCAL docker db -- never .env's possible gameserver host;
-// PGDATABASE comes in pinned to the worktree DB from the runner env.
 const db = new Pool({
   host: process.env.PGHOST ?? "127.0.0.1", port: Number(process.env.PGPORT ?? 5432),
   user: process.env.PGUSER ?? "gameuser", password: process.env.PGPASSWORD ?? "gamepass",
-  database: process.env.PGDATABASE ?? "game_poc_feat_population_workforce",
+  database: process.env.PGDATABASE ?? "game_poc",
 });
 
 let currentGameName: string | null = null;
@@ -582,9 +581,7 @@ async function reloadToGame(page: Page, name: string): Promise<void> {
   await wait(300);
 }
 
-// SQL-side fixture seed on the worktree's own DB (PGDATABASE is pinned to
-// game_poc_feat_population_workforce by the runner; shared game_poc is never
-// touched). Mutates ONLY this run's game row, then the caller reloads so the
+// SQL-side fixture seed on the local test DB. Mutates ONLY this run's game row, then the caller reloads so the
 // client hydrates the same truth. A previous test's server-side command
 // persist can still be in flight when the UPDATE runs and clobber the seed
 // with its pre-seed snapshot (observed: district test failed no_building
