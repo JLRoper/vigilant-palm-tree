@@ -2,7 +2,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { ChildProcess, execFileSync } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
@@ -873,7 +873,15 @@ function gitBranchLine(): string {
   }
 }
 
+// A report is APPENDED now, so a second call within one process would append a
+// duplicate block rather than harmlessly overwrite: main()'s finally and the
+// rejection handler below both reach writeReport when a run fails before the
+// phases (a failed api boot), so the first write wins and the second is a no-op.
+let reportWritten = false;
+
 function writeReport(ok: boolean): void {
+  if (reportWritten) return;
+  reportWritten = true;
   mkdirSync(REPORT_DIR, { recursive: true });
   const lines: string[] = [];
   lines.push("# Playthrough — movement, combat, AI, persistence");
@@ -882,7 +890,7 @@ function writeReport(ok: boolean): void {
   lines.push(`- Worktree: ${CHECKOUT_ROOT}`);
   lines.push(`- Branch: ${gitBranchLine()}`);
   lines.push(`- Database: ${DB_NAME} (isolated)`);
-  lines.push(`- Server: this worktree's own dev stack on API ${API_PORT} / web ${WEB_PORT} (from .env via scripts/allocate-ports.ts)`);
+  lines.push(`- Server: this worktree's own dev stack on API ${API_PORT} / web ${WEB_PORT} (${TARGETS.portsFrom === "request" ? "from the run-test wrapper's request file" : "from API_PORT/CLIENT_PORT in the environment"})`);
   lines.push(`- Seed: ${GAME_SEED}`);
   lines.push(`- Result: ${ok ? "run completed" : "run FAILED"} — ${findings.length} finding(s)`);
   lines.push("");
@@ -915,9 +923,30 @@ function writeReport(ok: boolean): void {
   lines.push("- Inventory only: no code was changed.");
   lines.push("- Screenshots live beside this file under `" + SLUG + "-shots/`.");
   lines.push("");
-  writeFileSync(`${REPORT_DIR}/${SLUG}.md`, lines.join("\n"), "utf8");
-  // Second copy keyed to this checkout's directory name, for the panel's lookup.
-  writeFileSync(`${REPORT_DIR}/${basename(CHECKOUT_ROOT)}.md`, lines.join("\n"), "utf8");
+  const block = lines.join("\n");
+  const targets = [
+    `${REPORT_DIR}/${SLUG}.md`,
+    // Second copy keyed to this checkout's directory name, for the panel's lookup.
+    `${REPORT_DIR}/${basename(CHECKOUT_ROOT)}.md`,
+  ];
+  for (const target of targets) console.log(`>> report ${appendReport(target, block)}: ${target}`);
+}
+
+/**
+ * APPENDS to a report that is already there. With PLAYTHROUGH_REPORT_DIR unset
+ * every run in every worktree derives the same `<slug>.md` under the shared
+ * <repo>/.agentboard/playthrough-reports, so a plain writeFileSync replaced the
+ * previous run's report -- and the panel's checkout-keyed copy -- every single
+ * time. Each block carries its own Date / Worktree / Branch / Database header,
+ * so appending keeps the earlier runs readable instead of losing them.
+ */
+function appendReport(target: string, block: string): "written" | "appended" {
+  if (existsSync(target)) {
+    appendFileSync(target, `\n\n---\n\n${block}`, "utf8");
+    return "appended";
+  }
+  writeFileSync(target, block, "utf8");
+  return "written";
 }
 
 async function main(): Promise<void> {
