@@ -1,4 +1,4 @@
-import type { BuildingKind, FactionId, ResourceType, WarehouseResource } from "@heroes/contracts";
+import type { BuildingKind, CastleLevel, FactionId, ResourceType, WarehouseResource } from "@heroes/contracts";
 
 export interface RecruitEntry {
   unitTypeId: string;
@@ -29,6 +29,13 @@ export interface BuildingEffect {
     foodPerTurn?: number;
     resourceYieldBonus?: Partial<Record<Exclude<ResourceType, "gold" | "food">, number>>;
     populationBonus?: number;
+    /**
+     * Explicit population grant per building level, overriding the default
+     * `populationBonus x level` scaling. `buildingSettlementEffects` prefers
+     * this table when present, so a kind can pin an exact figure for every
+     * level (the House: 300 / 1000 / 1500).
+     */
+    populationByLevel?: Partial<Record<CastleLevel, number>>;
     defenseBonus?: number;
     unitCostReductionPct?: number;
     /** Per-level storage capacity bonus (docs/wagons-stockpiles-trade-routes-plan.md §4.1). */
@@ -68,7 +75,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     upkeepPerLevel: { wood: 1, stone: 0 },
     recruits: [],
     maxWorkers: 1,
-    settlementEffects: { populationBonus: 50 },
+    settlementEffects: { populationByLevel: { 1: 300, 2: 1000, 3: 1500 } },
     playerEffects: {},
   },
   tower: {
@@ -817,7 +824,7 @@ export function buildingSettlementEffects(kind: BuildingKind, level: number) {
           Object.entries(e.settlementEffects.resourceYieldBonus).map(([r, v]) => [r, (v ?? 0) * level]),
         )
       : undefined,
-    populationBonus: (e.settlementEffects.populationBonus ?? 0) * level,
+    populationBonus: e.settlementEffects.populationByLevel?.[level as CastleLevel] ?? (e.settlementEffects.populationBonus ?? 0) * level,
     defenseBonus: (e.settlementEffects.defenseBonus ?? 0) * level,
     unitCostReductionPct: e.settlementEffects.unitCostReductionPct ?? 0,
     storageBonus: e.settlementEffects.storageBonus

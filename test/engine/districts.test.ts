@@ -1360,7 +1360,7 @@ test("applyPopulationGrowth and computePlayerBonuses: include completed district
         r: 2,
         citySpots: [],
         buildings: [
-          makeBuilding("house", 0, 0, 1), // +50
+          makeBuilding("house", 0, 0, 1), // +300
           makeBuilding("apartment", 1, 0, 1), // +100
           makeBuilding("farmhouse", 3, 0, 2), // +40 (20 * 2)
           makeBuilding("apartment", 0, 2, 3, { construction: { daysRemaining: 2 } }), // in-construction: ignored
@@ -1372,16 +1372,16 @@ test("applyPopulationGrowth and computePlayerBonuses: include completed district
   };
 
   const bonus = districtPopulationBonus(sWithHousing);
-  assert.equal(bonus, 50 + 100 + 40, "completed district housing adds 190 populationBonus");
+  assert.equal(bonus, 300 + 100 + 40, "completed district housing adds 440 populationBonus (house L1 300 + apartment 100 + farmhouse L2 40)");
 
   const grown = applyPopulationGrowth({ s0: sWithHousing }, 0.1).s0;
-  // levelMax = 500 + 190 = 690; growth = ceil((500 + 190) * 0.1) = 69 -> 569
-  assert.equal(grown.population, 569);
+  // levelMax = 500 + 440 = 940; growth = ceil((500 + 440) * 0.1) = 94 -> 594
+  assert.equal(grown.population, 594);
 
-  // Clamps to levelMax (690)
-  const nearCap: SettlementState = { ...sWithHousing, population: 680 };
+  // Clamps to levelMax (940): 900 + ceil((900 + 440) * 0.1) = 1034 -> 940
+  const nearCap: SettlementState = { ...sWithHousing, population: 900 };
   const clamped = applyPopulationGrowth({ s0: nearCap }, 0.1).s0;
-  assert.equal(clamped.population, 690);
+  assert.equal(clamped.population, 940);
 
   const playerBonuses = computePlayerBonuses([sWithHousing]);
   assert.equal(playerBonuses.visionRangeBonus, 4);
