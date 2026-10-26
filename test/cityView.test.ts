@@ -1165,11 +1165,13 @@ async function testPanelChipDrag(page: Page, settlementId: string): Promise<void
   console.log(">> panel chip drag assigns from the pool and persists ✓");
 }
 
-// First assignment in a legacy city must EMPLOY the rest of the pool, not pin
-// everything to 0: jobs first (balanced across kinds), houses only after all
-// job slots are full.
+// First assignment in a legacy city writes ONLY the building it addresses
+// (C-MAJOR-2): every untouched building keeps its legacy auto-staffing at full
+// effort and no pool is spent on it, so the settlement converts to explicit
+// crews one building at a time. The old settlement-wide auto-crew is gone --
+// with a level-1 pool of 5 across 13 buildings it zeroed most producers.
 async function testFirstTouchAutoCrew(page: Page, settlementId: string): Promise<void> {
-  console.log(">> Test: first assignment auto-crews the remaining pool");
+  console.log(">> Test: first assignment writes only the building it addresses");
   await seedWorkforceFixture(page, [
     { kind: "townHall", level: 1, style: "classic", gx: 0, gy: 0 },
     { kind: "farmField", level: 1, style: "classic", gx: 1, gy: 0 },
@@ -1202,19 +1204,19 @@ async function testFirstTouchAutoCrew(page: Page, settlementId: string): Promise
   }, settlementId);
   assert.deepEqual(
     counts,
-    [1, 1, 1, 2, 0],
-    "pool 5: touched town hall 1, each farm 1, the hut fills to 2, the house stays empty while job slots remain",
+    [1, undefined, undefined, undefined, undefined],
+    "pool 5: the touched town hall goes explicit at 1; each farm, the hut and the house keep legacy auto-staffing and spend no pool",
   );
   await waitForServerStaffing(page, name, settlementId, [
     { gx: 0, workers: 1 },
-    { gx: 1, workers: 1 },
-    { gx: 2, workers: 1 },
-    { gx: 3, workers: 2 },
-    { gx: 4, workers: 0 },
+    { gx: 1, workers: undefined },
+    { gx: 2, workers: undefined },
+    { gx: 3, workers: undefined },
+    { gx: 4, workers: undefined },
   ]);
   await page.keyboard.press("w");
   await wait(200);
-  console.log(">> first touch auto-crews the pool, client and server agree ✓");
+  console.log(">> first touch writes only the addressed building, client and server agree ✓");
 }
 
 // Assignment durability + panel lifecycle: a commit made in the city view must
