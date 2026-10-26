@@ -10,6 +10,22 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.36.0] - 2026-10-26
+
+Two engine rules for buildings.
+
+- The **House** grants population by level — 300 / 1000 / 1500 at L1 / L2 / L3
+  — through a new per-level `populationByLevel` table that
+  `buildingSettlementEffects` prefers over the `populationBonus x level`
+  multiplication (`packages/engine/src/buildingRegistry.ts`). It previously
+  read 50 / 100 / 150. `POP_BY_LEVEL` (the settlement population cap,
+  500 / 1500 / 5000) is deliberately untouched.
+- **Construction speed scales with assigned workers.** A building under
+  construction now advances `1 + effortFraction(b)` days per round wrap
+  instead of a flat 1 (`packages/engine/src/settlement/advance.ts`), so a
+  fully staffed site builds at 2x and an idle one at 1x, in the main city and
+  in districts alike.
+
 ## [0.35.0] - 2026-10-25
 
 Settlers mode is fixed against its four confirmed intentions (`SETTLERS-PLAN.md`

@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { SettlementState } from "@heroes/contracts";
 import {
   advanceBuildingConstructions,
   buildingConstructionProgress,
@@ -78,9 +79,11 @@ test("buildingConstructionProgress: 0 at placement, 0.75 with one day left of fo
 });
 
 test("advanceBuildingConstructions decrements daily and removes the field on completion", () => {
+  // workers: 0 -> effortFraction 0 -> a 1x daily decrement, so this pins the
+  // idle baseline. (Staffing scaling is covered in the test below.)
   const settlement = makeSettlement("s0", 0, 2, 2, {
     buildings: [
-      { gx: 0, gy: 0, kind: "goldMine", level: 1, style: "classic", construction: { daysRemaining: 2 } },
+      { gx: 0, gy: 0, kind: "goldMine", level: 1, style: "classic", workers: 0, construction: { daysRemaining: 2 } },
       { gx: 3, gy: 3, kind: "house", level: 1, style: "classic" },
     ],
   });
@@ -100,4 +103,56 @@ test("advanceBuildingConstructions decrements daily and removes the field on com
 
   const stable = advanceBuildingConstructions(afterTwo);
   assert.equal(stable, afterTwo, "no constructions left means the same state object comes back (no-op)");
+});
+
+test("advanceBuildingConstructions scales the daily decrement with assigned workers (0 = 1x, full = 2x)", () => {
+  // goldMine maxWorkers = 3, so effortFraction = workers / 3.
+  const settlement = makeSettlement("s0", 0, 2, 2, {
+    buildings: [
+      { gx: 0, gy: 0, kind: "goldMine", level: 1, style: "classic", workers: 0, construction: { daysRemaining: 10 } },
+      { gx: 2, gy: 0, kind: "goldMine", level: 1, style: "classic", workers: 3, construction: { daysRemaining: 10 } },
+      { gx: 4, gy: 0, kind: "goldMine", level: 1, style: "classic", workers: 1, construction: { daysRemaining: 10 } },
+      { gx: 6, gy: 0, kind: "goldMine", level: 1, style: "classic", construction: { daysRemaining: 10 } },
+    ],
+  });
+  const after = advanceBuildingConstructions(makeState({ settlements: [settlement] }));
+  const days = after.settlements.s0.buildings.map((b) => b.construction?.daysRemaining);
+  assert.equal(days[0], 9, "0 workers: 1 day per turn (1x)");
+  assert.equal(days[1], 8, "fully staffed (3/3): 2 days per turn (2x)");
+  assert.equal(days[2], 10 - (1 + 1 / 3), "1 of 3 workers: 1 + 1/3 days per turn");
+  assert.equal(days[3], 8, "legacy undefined workers = auto-staffed full effort -> 2x");
+});
+
+test("advanceBuildingConstructions: a fully staffed site finishes in half the days", () => {
+  const settlement = makeSettlement("s0", 0, 2, 2, {
+    buildings: [
+      { gx: 0, gy: 0, kind: "goldMine", level: 1, style: "classic", workers: 3, construction: { daysRemaining: 2 } },
+      { gx: 2, gy: 0, kind: "goldMine", level: 1, style: "classic", workers: 0, construction: { daysRemaining: 2 } },
+    ],
+  });
+  const after = advanceBuildingConstructions(makeState({ settlements: [settlement] }));
+  assert.equal("construction" in after.settlements.s0.buildings[0], false, "2 days at 2x completes in one tick");
+  assert.equal(after.settlements.s0.buildings[1].construction?.daysRemaining, 1, "2 days at 1x leaves 1");
+});
+
+test("district buildings build on the same staffing rule", () => {
+  const settlement: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, {}),
+    buildings: [],
+    districts: {
+      "3,2": {
+        q: 3,
+        r: 2,
+        citySpots: [],
+        buildings: [
+          { gx: 0, gy: 0, kind: "goldMine", level: 1, style: "classic", workers: 0, construction: { daysRemaining: 10 } },
+          { gx: 2, gy: 0, kind: "goldMine", level: 1, style: "classic", workers: 3, construction: { daysRemaining: 10 } },
+        ],
+      },
+    },
+  };
+  const after = advanceBuildingConstructions(makeState({ settlements: [settlement] }));
+  const districtBuildings = after.settlements.s0.districts!["3,2"].buildings;
+  assert.equal(districtBuildings[0].construction?.daysRemaining, 9, "district idle site: 1x");
+  assert.equal(districtBuildings[1].construction?.daysRemaining, 8, "district fully staffed site: 2x");
 });

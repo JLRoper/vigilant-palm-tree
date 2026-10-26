@@ -1,6 +1,7 @@
 import type { BuildingDef, DistrictState, GameState, SettlementId, SettlementState } from "@heroes/contracts";
 import { districtKey } from "../control";
 import { pickStyleForBuilding } from "../styleResolver";
+import { effortFraction } from "./workforce";
 
 export interface AdvanceUpgradesOptions {
   accel?: (s: SettlementState) => number;
@@ -116,7 +117,12 @@ export function advanceBuildingConstructions(state: GameState): GameState {
   const newSettlements: Record<SettlementId, SettlementState> = { ...state.settlements };
   const stepBuilding = (b: BuildingDef): BuildingDef => {
     if (!b.construction) return b;
-    const daysRemaining = b.construction.daysRemaining - 1;
+    // Construction is staffed work: the daily decrement is 1 + effortFraction,
+    // so an idle site advances 1 day and a fully staffed one (effortFraction 1)
+    // advances 2 -- a fresh placement in a normalized settlement carries
+    // workers 0 and builds at 1x. A legacy settlement (workers undefined =
+    // auto-staffed at full effort) keeps the 2x its other effects already get.
+    const daysRemaining = b.construction.daysRemaining - (1 + effortFraction(b));
     changed = true;
     if (daysRemaining > 0) return { ...b, construction: { daysRemaining } };
     const { construction: _completed, ...finished } = b;
