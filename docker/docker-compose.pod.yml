@@ -1,0 +1,53 @@
+# docker/docker-compose.pod.yml -- the pod-only overlay. Layered over
+# docker-compose.yml by scripts/pods.ts (`npm run pod:up` / `pod:down` /
+# `pod:list`), never by the shared stack:
+#
+#   docker compose -p heroes-pod-<name> -f docker-compose.yml \
+#     -f docker/docker-compose.pod.yml up -d db api web
+#
+# Why a second file exists at all: container names, host ports, the database
+# name and the image tags ARE parameterized in docker-compose.yml (their
+# defaults are the shared stack's current values, so the shared stack is
+# untouched), but pod IDENTITY cannot live there. Compose has no conditional
+# labels, so an unset POD_NAME in docker-compose.yml would emit `heroes.pod=`
+# on game_db/game_api/game_web -- and docker's label filter matches a key that
+# is merely PRESENT, so `--filter label=heroes.pod` would list the shared stack
+# as pods and `down` could think it owned them. Labels therefore live in this
+# overlay, which only pods.ts layers on, and every label value is required
+# (`:?`) so a bare `docker compose -f docker-compose.yml -f <this file> up`
+# fails loudly instead of creating an unlabelled pod.
+services:
+  db:
+    labels:
+      heroes.pod: "${POD_NAME:?scripts/pods.ts sets POD_NAME}"
+      heroes.pod.created: "${POD_CREATED:?scripts/pods.ts sets POD_CREATED}"
+      heroes.pod.workspace: "${POD_WORKSPACE:?scripts/pods.ts sets POD_WORKSPACE}"
+  api:
+    labels:
+      heroes.pod: "${POD_NAME:?scripts/pods.ts sets POD_NAME}"
+      heroes.pod.created: "${POD_CREATED:?scripts/pods.ts sets POD_CREATED}"
+      heroes.pod.workspace: "${POD_WORKSPACE:?scripts/pods.ts sets POD_WORKSPACE}"
+  web:
+    labels:
+      heroes.pod: "${POD_NAME:?scripts/pods.ts sets POD_NAME}"
+      heroes.pod.created: "${POD_CREATED:?scripts/pods.ts sets POD_CREATED}"
+      heroes.pod.workspace: "${POD_WORKSPACE:?scripts/pods.ts sets POD_WORKSPACE}"
+  adminer:
+    labels:
+      heroes.pod: "${POD_NAME:?scripts/pods.ts sets POD_NAME}"
+      heroes.pod.created: "${POD_CREATED:?scripts/pods.ts sets POD_CREATED}"
+      heroes.pod.workspace: "${POD_WORKSPACE:?scripts/pods.ts sets POD_WORKSPACE}"
+
+volumes:
+  game_db_data:
+    labels:
+      heroes.pod: "${POD_NAME:?scripts/pods.ts sets POD_NAME}"
+      heroes.pod.created: "${POD_CREATED:?scripts/pods.ts sets POD_CREATED}"
+      heroes.pod.workspace: "${POD_WORKSPACE:?scripts/pods.ts sets POD_WORKSPACE}"
+
+networks:
+  heroes-network:
+    labels:
+      heroes.pod: "${POD_NAME:?scripts/pods.ts sets POD_NAME}"
+      heroes.pod.created: "${POD_CREATED:?scripts/pods.ts sets POD_CREATED}"
+      heroes.pod.workspace: "${POD_WORKSPACE:?scripts/pods.ts sets POD_WORKSPACE}"
