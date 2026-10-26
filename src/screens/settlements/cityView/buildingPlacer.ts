@@ -12,6 +12,7 @@ import {
   randomFarmFieldStyle,
 } from "@heroes/engine";
 import { buildListSections } from "./buildListSections";
+import { CART_TONE_COLORS, formatCartCharge, netDelta } from "./netCost";
 import { buildConfirmStatus, buildEntryStatus, districtTerrainBlock } from "./buildEntryStatus";
 import { footprintSuffix } from "./footprint";
 import type { ResourceType } from "../../../state/gameState";
@@ -209,17 +210,15 @@ export class BuildingPlacer {
     this.committedNet = { ...this.computeNetCost() };
   }
 
-  getNetCostSummary(): string {
-    const net = this.computeNetCost();
-    const parts: string[] = [];
-    for (const [r, v] of Object.entries(net)) {
-      if (v !== 0) {
-        const prefix = r === "gold" ? "g" : r[0];
-        const sign = v > 0 ? `+${v}${prefix}` : `${v}${prefix}`;
-        parts.push(sign);
-      }
-    }
-    return parts.join(" ") || "No changes";
+  /**
+   * What this cart still owes: the net cost of everything staged since the
+   * palette opened, minus what earlier incremental commits already charged.
+   * This is the figure the palette displays and the figure `persistBuildings`
+   * charges (`pendingNetDelta`), so the readout cannot drift from the payment
+   * -- and it returns to nothing as soon as a placement is committed.
+   */
+  getPendingCharge(): Partial<Record<ResourceType, number>> {
+    return netDelta(this.computeNetCost(), this.committedNet);
   }
 
   // ─── palette popup ──────────────────────────────────────────────────
@@ -285,13 +284,18 @@ export class BuildingPlacer {
       this.renderDestroyInstructions();
     }
 
-    const costSummary = this.getNetCostSummary();
-    if (costSummary !== "No changes") {
+    // The cart line is a CHARGE, not a running total: it shows what is still
+    // owed and disappears once the placement has been paid for, so a spend can
+    // never appear as a green "+" and the readout cannot keep growing against
+    // the palette-open baseline (C-MINOR-3).
+    const charge = formatCartCharge(this.getPendingCharge(), this.canAfford());
+    if (charge) {
       const summaryDiv = document.createElement("div");
-      summaryDiv.textContent = `Cart: ${costSummary}`;
+      summaryDiv.dataset.testid = "palette-cart";
+      summaryDiv.textContent = charge.text;
       Object.assign(summaryDiv.style, {
         fontSize: "10px",
-        color: this.canAfford() ? "#8f8" : "#f88",
+        color: CART_TONE_COLORS[charge.tone],
         marginTop: "6px",
         padding: "3px 6px",
         background: "rgba(0,0,0,0.3)",
@@ -579,6 +583,10 @@ export class BuildingPlacer {
     if (!this.isDistrict && this.center && b.kind === "townHall" && this.isCenterCell(b)) return null;
     this.buildings.splice(idx, 1);
     this.onPlaced?.();
+    // Same refresh the placement path does: a destroy moves the cart's
+    // outstanding charge (it refunds half the price), and a charge line that
+    // keeps the pre-destroy figure is exactly the "cart never settles" report.
+    this.renderPaletteBody();
     return b;
   }
 
