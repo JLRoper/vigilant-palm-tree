@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.37.1] - 2026-10-26
+
+The settlement-placement friction a real playthrough hit: a grid click now places the held building from the click's own coordinates (a bare click used to be a silent no-op), a refused footprint states the rule in words beside the ghost and in the palette instead of only tinting the ghost red, and a repeated cart commit (Confirm after a placement) writes nothing -- it used to send a second identical PlaceBuildings command, append a second buildings_placed event and, on the granular store, be rejected with a duplicate-key 500.
+
 ## [0.37.0] - 2026-10-26
 
 Heroes pick up the resources on the adventure map: every resource tile carries a deterministic 5-500 amount derived from the seed and the tile (a hash, no map-RNG draw, no MapGenVersion bump), a hero standing on a tile picks up min(remaining, cargo room) and leaves the rest on the floor, and the tile keeps its resource type and city-view yield

@@ -23,6 +23,7 @@ import {
 import { getUnitImageUrl } from "../../../data/unitImages";
 import { cachedUnitTypes } from "../../../data/unitCatalog";
 import { advanceChargedOnCommit, netDelta } from "./netCost";
+import { cartCommitSignature } from "./commitSignature";
 import { syncCartBuildings } from "./syncedBuildings";
 import { BuildingMenu, type BuildingMenuOptions, type BuildingMenuWorkforce } from "./buildingMenu";
 import { BuildingPlacer } from "./buildingPlacer";
@@ -124,6 +125,12 @@ export class CityView {
   private onPlaceBuildings: (settlementId: string, buildings: BuildingDef[], initialLayout?: boolean, district?: { q: number; r: number }) => boolean;
   /** Net cost already charged via incremental onPlaceBuildings commits since the view opened. */
   private chargedNet: Partial<Record<ResourceType, number>> = {};
+  /**
+   * Fingerprint of the cart as the server last accepted it (null before the
+   * first write of this view). `✓ Confirm` after a placement recomputes the same
+   * fingerprint and writes nothing -- see commitSignature.ts.
+   */
+  private lastCommitSignature: string | null = null;
   private getSettlement: () => SettlementState | undefined;
   private onUpgradeBuildings: (settlementId: string, requests: BuildingUpgradeRequest[], district?: { q: number; r: number }) => { ok: boolean; reason: string };
   private getSelection?: () => CitySelectionSnapshot;
@@ -315,6 +322,7 @@ export class CityView {
     this.placer.setOnPaletteStateChange(() => this.updateBuildButton());
     this.placer.setOnPlaced(() => this.persistBuildings());
     this.chargedNet = {};
+    this.lastCommitSignature = null;
 
     // Commit the starter layout immediately and FREE. Doing it at open —
     // rather than lazily on the first placement — means user buildings are
@@ -325,6 +333,9 @@ export class CityView {
       if (ok) {
         this.committedInitialLayout = true;
         this.placer.markSynced();
+        // Recorded like any other write, so a later Confirm of the very same
+        // starter cart does not re-send it.
+        this.lastCommitSignature = this.commitSignature();
         this.refreshAffordability();
       }
     }
@@ -485,6 +496,14 @@ export class CityView {
     const cell = screenToGridCell(layout, this.size, viewportW, canvasX, canvasY);
 
     if (!cell) {
+      // While a building is held, an off-grid click is a placement attempt that
+      // cannot land: the placer says so in words instead of the click clearing
+      // the selection and leaving the player to guess (playthrough finding 1).
+      if (this.placer.isActive()) {
+        this.placer.placeAt(canvasX, canvasY, viewportW, viewportH);
+        this.updateBuildButton();
+        return;
+      }
       this.buildingMenu.hide();
       if (!modifier?.ctrlKey && !modifier?.metaKey) this.clearSelection();
       return;
@@ -502,7 +521,10 @@ export class CityView {
 
     // placement mode: place building
     if (this.placer.isActive()) {
-      this.placer.place();
+      // The snap comes from the CLICK's own coordinates, not from whatever a
+      // previous mousemove left behind: a click on the grid must place, and a
+      // click that cannot must say why (playthrough findings 1 and 2).
+      this.placer.placeAt(canvasX, canvasY, viewportW, viewportH);
       this.updateBuildButton();
       return;
     }
@@ -1076,16 +1098,42 @@ export class CityView {
     const delta = this.pendingNetDelta();
     const synced = this.syncedBuildings();
     const dist = this.openDistrict ?? undefined;
-    const accepted = this.onClose(this.openSettlementId, synced, delta, false, null, dist);
     const initialLayout = this.freeInitialLayout && !this.committedInitialLayout;
+    // Idempotence: a commit that would send exactly what the last accepted
+    // commit sent is not sent at all. Every placement/destroy already commits,
+    // so `✓ Confirm` used to re-send the same cart -- two identical POSTs, a
+    // second `buildings_placed` event for every other client to replay, and (on
+    // the granular store) a duplicate-key rejection of the second one
+    // (playthrough finding 3).
+    const signature = this.commitSignature();
+    if (signature === this.lastCommitSignature) {
+      this.refreshAffordability();
+      this.updateBuildButton();
+      return;
+    }
+    const accepted = this.onClose(this.openSettlementId, synced, delta, false, null, dist);
     const result = accepted ? this.onPlaceBuildings(this.openSettlementId, synced, initialLayout, dist) : false;
     this.chargedNet = advanceChargedOnCommit(result, this.placer.getNetCost(), this.chargedNet);
     if (result) {
       this.placer.markSynced();
       if (initialLayout) this.committedInitialLayout = true;
+      // Recorded AFTER the charge and the synced-baseline advance, so it is the
+      // fingerprint of the cart as the server now holds it -- which is exactly
+      // what the next call computes at the top of this method.
+      this.lastCommitSignature = this.commitSignature();
     }
     this.refreshAffordability();
     this.updateBuildButton();
+  }
+
+  /** The fingerprint of the cart as it stands now, for the idempotence check in persistBuildings(). */
+  private commitSignature(): string {
+    return cartCommitSignature(
+      this.syncedBuildings(),
+      this.freeInitialLayout && !this.committedInitialLayout,
+      this.openDistrict ?? undefined,
+      this.pendingNetDelta(),
+    );
   }
 
   /** Cart buildings with construction/level/style/bank re-synced from live state -- EndTurn's round wrap replaces state objects, so the cart snapshot goes stale otherwise. */
