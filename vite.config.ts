@@ -1,7 +1,7 @@
 import { defineConfig, loadEnv } from "vite";
 import path from "node:path";
 import fs from "node:fs";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 
 function getAppVersion(): string {
   try {
@@ -15,7 +15,13 @@ function getAppVersion(): string {
 function getCommitHash(): string {
   if (process.env.VITE_COMMIT_HASH) return process.env.VITE_COMMIT_HASH;
   try {
-    return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+    // execFileSync, not execSync: vite.config.ts is loaded by every dev run
+    // and every test's web server, and `exec` would route it through cmd.exe,
+    // which allocates a console window when it does not inherit one.
+    return execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+      encoding: "utf8",
+      windowsHide: true,
+    }).trim();
   } catch {
     return "dev";
   }

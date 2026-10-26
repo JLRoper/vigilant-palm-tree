@@ -407,7 +407,10 @@ function ensureBuilt(): void {
 
 function runOnce(cmd: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const p = spawn(cmd, args, { stdio: "inherit", shell: true });
+    // windowsHide: no console window for a helper command that does not need
+    // one (this is the same rule every other spawn site in the test path
+    // follows -- see test/_request.ts).
+    const p = spawn(cmd, args, { stdio: "inherit", shell: true, windowsHide: true });
     p.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} exited ${code}`))));
   });
 }

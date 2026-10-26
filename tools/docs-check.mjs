@@ -199,6 +199,7 @@ function verifyGitSpec(spec) {
       execFileSync("git", ["rev-parse", "--verify", "--quiet", `${part}^{commit}`], {
         cwd: ROOT,
         stdio: ["ignore", "ignore", "ignore"],
+        windowsHide: true,
       });
     } catch {
       return `revision not found: ${part}`;
@@ -209,7 +210,7 @@ function verifyGitSpec(spec) {
 
 function gitLinesOrExit(gitArgs) {
   try {
-    const out = execFileSync("git", gitArgs, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const out = execFileSync("git", gitArgs, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
     return out.split(/\r?\n/).map((line) => line.trim().replaceAll("\\", "/")).filter(Boolean);
   } catch (error) {
     console.error(`docs:check: git ${gitArgs.join(" ")} failed${Number.isFinite(error.status) ? ` (exit ${error.status})` : ""}`);
@@ -225,6 +226,7 @@ function gitIgnoredPaths(paths) {
       encoding: "utf8",
       input: paths.join("\0") + "\0",
       stdio: ["pipe", "pipe", "ignore"],
+      windowsHide: true,
     });
     return new Set(out.split("\0").filter(Boolean));
   } catch {

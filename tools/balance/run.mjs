@@ -9,7 +9,7 @@ const fair = {};
 let meta = {};
 for (const [b, s] of SCALES) {
   const out = `scale-${b}.json`;
-  execFileSync("npx", ["tsx", JSON.stringify(resolve(HERE, "sim.ts")), ...(override ? [JSON.stringify(override)] : [])], { cwd: HERE, env: { ...process.env, FIELD: "all", BUDGET: String(b), STACKS: String(s), OUT: out }, stdio: ["ignore", "ignore", "inherit"], shell: true });
+  execFileSync("npx", ["tsx", JSON.stringify(resolve(HERE, "sim.ts")), ...(override ? [JSON.stringify(override)] : [])], { cwd: HERE, env: { ...process.env, FIELD: "all", BUDGET: String(b), STACKS: String(s), OUT: out }, stdio: ["ignore", "ignore", "inherit"], shell: true, windowsHide: true });
   for (const r of JSON.parse(readFileSync(resolve(HERE, "out", out), "utf8"))) {
     (fair[r.id] ??= []).push(Math.log(r.fair));
     meta[r.id] = r;

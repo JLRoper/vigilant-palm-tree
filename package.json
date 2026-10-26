@@ -9,7 +9,7 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "postinstall": "node -e \"require.resolve('playwright')\" && playwright install chromium || true",
-    "cleanup": "pwsh scripts/cleanup.ps1",
+    "cleanup": "pwsh -NoProfile -NonInteractive -File scripts/cleanup.ps1",
     "predev": "tsx scripts/allocate-ports.ts",
     "dev": "concurrently -n web,api -c green,cyan \"vite\" \"tsx watch --env-file=.env server/index.ts\"",
     "dev:web": "vite",
@@ -18,7 +18,7 @@
     "preview": "vite preview",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
-    "dev:status": "pwsh scripts/dev-status.ps1",
+    "dev:status": "pwsh -NoProfile -NonInteractive -File scripts/dev-status.ps1",
     "pretest": "tsx scripts/allocate-ports.ts",
     "test": "tsx --env-file=.env --env-file=.env.test test/smoke.ts",
     "test:cityview": "tsx scripts/allocate-ports.ts && tsx --env-file=.env --env-file=.env.test test/cityView.test.ts",

@@ -2,12 +2,16 @@ import { spawn, spawnSync } from "node:child_process";
 import { connect, createServer } from "node:net";
 import { mkdirSync, writeFileSync, existsSync, readFileSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
+import { nodeToolCommand, toolEntry } from "./resolve-tool-entry.mjs";
 
 const ROOT = process.cwd();
 const LOCAL_DIR = resolve(ROOT, "local");
 const REQUEST_PATH = resolve(LOCAL_DIR, ".test-request.json");
-const IS_WINDOWS = process.platform === "win32";
-const NPX = IS_WINDOWS ? "npx.cmd" : "npx";
+// Children are started shell-free (see tools/resolve-tool-entry.mjs): a
+// `shell: true` child on Windows runs through cmd.exe, which allocates a
+// visible console window when it does not inherit one, and that window takes
+// the foreground with it.
+const TSX = nodeToolCommand("tsx");
 
 const ENTRIES = {
   smoke: "test/smoke.ts",
@@ -153,7 +157,7 @@ async function runOne(entry, opts) {
     // environment (loadEnv gives process.env precedence over .env), so the
     // dev-server proxy must target THIS entry's ephemeral API port, not the
     // .env value some other environment may hold.
-    const child = spawn(NPX, ["tsx", tsFile], {
+    const child = spawn(TSX.cmd, [...TSX.args, tsFile], {
       cwd: ROOT,
       stdio: "inherit",
       env: {
@@ -163,7 +167,7 @@ async function runOne(entry, opts) {
         CLIENT_PORT: String(req.clientPort),
         NODE_NO_WARNINGS: "1",
       },
-      shell: true,
+      windowsHide: true,
     });
 
     const killTimer = req.shutdownAfterMs
@@ -203,7 +207,11 @@ async function main() {
 
   // Best-effort: allocate ports via the existing script so .env is fresh.
   try {
-    spawnSync(NPX, ["tsx", "scripts/allocate-ports.ts"], { cwd: ROOT, stdio: "inherit", shell: true });
+    spawnSync(process.execPath, [toolEntry("tsx"), "scripts/allocate-ports.ts"], {
+      cwd: ROOT,
+      stdio: "inherit",
+      windowsHide: true,
+    });
   } catch {}
 
   try {

@@ -1,8 +1,9 @@
-import { spawn, execSync } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { connect } from "node:net";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
+import { resolveNpxInvocation } from "../tools/resolve-tool-entry.mjs";
 
 const ROOT = process.cwd();
 const REQUEST_PATH = resolve(ROOT, "local", ".test-request.json");
@@ -96,7 +97,13 @@ function writeRegistry(reg: PidRegistry): void {
 
 function treeKill(pid: number): void {
   if (IS_WINDOWS) {
-    try { execSync(`taskkill /F /T /PID ${pid}`, { stdio: "ignore" }); return; } catch {}
+    // execFileSync, not execSync: `exec` runs the command through cmd.exe,
+    // and a cmd.exe that does not inherit a console allocates one (a visible
+    // window). taskkill takes its arguments directly, so no shell is needed.
+    try {
+      execFileSync("taskkill", ["/F", "/T", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
+      return;
+    } catch {}
   }
   try { process.kill(pid, "SIGKILL"); } catch {}
 }
@@ -142,13 +149,41 @@ export function spawnLogged(
   args: string[],
   extraEnv: Record<string, string> = {}
 ) {
+  // Three rules, all about Windows console windows:
+  //
+  // 1. No shell. A `shell: true` child is run by cmd.exe, and a cmd.exe
+  //    started detached ALLOCATES a console of its own -- a visible window
+  //    that also takes the foreground. `npx tsx ...` / `npx vite ...` are
+  //    rewritten to `node <tool entry> ...` (tools/resolve-tool-entry.mjs) so
+  //    no shell and no `npx.cmd` shim is involved at all. The shell path is
+  //    kept only as a fallback for a command this helper cannot resolve.
+  // 2. No `detached`. This is the option that was opening the windows:
+  //    `detached` maps to DETACHED_PROCESS, which leaves the child with NO
+  //    console, and Windows then ignores `windowsHide` (CREATE_NO_WINDOW is
+  //    documented as ignored together with DETACHED_PROCESS). Measured on
+  //    Windows 11 + node 24: `detached: true, windowsHide: true` still opened
+  //    one console window per server, because the servers' own children (tsx's
+  //    node child, esbuild's service process) were spawned with default
+  //    options by a console-less parent and so each got a brand new console.
+  //    Without `detached` the whole tree inherits the console the run started
+  //    from (or gets none, when the run itself has none) and nothing appears.
+  // 3. `windowsHide: true` everywhere anyway, for the shell fallback above.
+  //
+  // Clean shutdown does not need `detached`: teardown is by pid tree, not by
+  // process group. Every pid is recorded with registerPid() and killed with
+  // `taskkill /F /T /PID <pid>` (treeKill), which walks the parent/child chain
+  // Windows recorded at creation and therefore reaches the grandchildren (tsx,
+  // esbuild, vite) regardless of the process group they were started in.
+  // Suites keep their own `finally` cleanup, so api and web still stop and
+  // release their ports when a run finishes or fails.
+  const shellFree = resolveNpxInvocation(cmd, args);
   const resolved = IS_WINDOWS && cmd === "npx" ? "npx.cmd" : cmd;
-  const child = spawn(resolved, args, {
+  const child = spawn(shellFree ? shellFree.cmd : resolved, shellFree ? shellFree.args : args, {
     cwd: ROOT,
     env: { ...process.env, ...extraEnv },
     stdio: ["ignore", "pipe", "pipe"],
-    detached: true,
-    shell: true,
+    windowsHide: true,
+    shell: !shellFree && (cmd === "npx" || cmd === "npx.cmd"),
   });
   child.stdout?.on("data", (d) => process.stdout.write(`[${label}] ${d.toString()}`));
   child.stderr?.on("data", (d) => process.stderr.write(`[${label}-err] ${d.toString()}`));

@@ -6,7 +6,12 @@ $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName = "npx"
 $psi.ArgumentList.Add("tsx")
 $psi.ArgumentList.Add("test/smoke.ts")
-$psi.UseShellExecute = $true
+# UseShellExecute = $true launches through the shell (ShellExecuteEx), which
+# gives a console child its OWN console window -- the launcher popped one every
+# time it ran. $false + CreateNoWindow keeps the child on this process's
+# console (and hidden when there is none).
+$psi.UseShellExecute = $false
+$psi.CreateNoWindow = $true
 
 $proc = [System.Diagnostics.Process]::Start($psi)
 $timeout = (Get-Date).AddSeconds($TimeoutSec)
