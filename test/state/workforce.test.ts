@@ -8,12 +8,14 @@ import {
   effortFraction,
   hasExplicitStaffing,
   hasLegacyStaffing,
+  producerTurnOutput,
   staffingBase,
   upgradeAccelEffort,
   workforcePool,
 } from "@heroes/engine";
 import type { BuildingDef, GameState, SettlementState } from "@heroes/contracts";
-import { makeSettlement, makeState } from "../charter/_helpers";
+import { settlementDailyRates } from "../../src/screens/settlements/panelRates";
+import { emptyWarehouse, makeSettlement, makeState } from "../charter/_helpers";
 
 function building(kind: BuildingDef["kind"], gx: number, gy: number, overrides: Partial<BuildingDef> = {}): BuildingDef {
   return { gx, gy, kind, level: 1, style: "classic", ...overrides };
@@ -181,7 +183,7 @@ test("assignWorkers: pool_exhausted only when incrementing past the pool", () =>
   assert.equal(assignedWorkersExplicit(b1.state.settlements.s0), 2);
 });
 
-test("assignWorkers: first assign normalizes every legacy building and auto-crews the remainder", () => {
+test("assignWorkers: the first assign writes the addressed building and leaves every other building legacy", () => {
   const state = stateWithSettlement({
     ...makeSettlement("s0", 0, 2, 2, { population: 200 }),
     buildings: [building("farmField", 0, 0), building("farmField", 1, 0), building("house", 2, 0)],
@@ -190,9 +192,11 @@ test("assignWorkers: first assign normalizes every legacy building and auto-crew
   assert.equal(r.ok, true);
   assert.deepEqual(
     r.state.settlements.s0.buildings.map((b) => b.workers),
-    [2, 0, 0],
-    "the target spends the whole pool, so the auto-crew has nothing left to place",
+    [2, undefined, undefined],
+    "the addressed building takes the count; nothing else is converted to an explicit crew",
   );
+  assert.equal(hasLegacyStaffing(r.state.settlements.s0), true, "the settlement is STILL legacy after the first assignment");
+  assert.equal(effortFraction(r.state.settlements.s0.buildings[1]), 1, "the untouched farm keeps legacy full effort");
   assert.equal(assignedWorkersExplicit(r.state.settlements.s0), 2);
   assert.deepEqual(
     state.settlements.s0.buildings.map((b) => b.workers),
@@ -268,7 +272,7 @@ test("assignWorkers: decrements stay allowed while explicit staffing oversubscri
   assert.equal(upAgain.state, down.state, "a refused increment returns the state untouched");
 });
 
-test("assignWorkers: a district first assign normalizes and auto-crews main and every district", () => {
+test("assignWorkers: a district first assign writes the district target and leaves main and the other districts alone", () => {
   const settlement: SettlementState = {
     ...makeSettlement("s0", 0, 2, 2, { population: 300 }),
     buildings: [building("farmField", 0, 0)],
@@ -286,54 +290,15 @@ test("assignWorkers: a district first assign normalizes and auto-crews main and 
   });
   assert.equal(r.ok, true);
   const after = r.state.settlements.s0;
-  assert.equal(after.buildings[0].workers, 1, "main job buildings take the remaining pool");
+  assert.equal(after.buildings[0].workers, undefined, "the main city keeps its legacy auto-staffing");
   assert.equal(after.districts?.["3,2"].buildings[0].workers, 1, "the district target gets the assignment");
-  assert.equal(after.districts?.["3,2"].buildings[1].workers, 0, "housing stays empty while job slots remain");
-  assert.equal(after.districts?.["4,2"].buildings[0].workers, 1, "other districts auto-crew too");
-  assert.equal(assignedWorkersExplicit(after), 3);
+  assert.equal(after.districts?.["3,2"].buildings[1].workers, undefined, "the district's other building is untouched");
+  assert.equal(after.districts?.["4,2"].buildings[0].workers, undefined, "other districts are not auto-crewed");
+  assert.equal(assignedWorkersExplicit(after), 1, "exactly one worker is explicit");
+  assert.equal(hasLegacyStaffing(after), true);
 });
 
-test("assignWorkers: first touch fills every other job slot before housing", () => {
-  const state = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 500 }),
-    buildings: [
-      building("farmField", 0, 0),
-      building("farmField", 1, 0),
-      building("house", 2, 0),
-      building("apartment", 3, 0),
-    ],
-  });
-  const r = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 1 });
-  assert.equal(r.ok, true);
-  assert.deepEqual(
-    r.state.settlements.s0.buildings.map((b) => b.workers),
-    [1, 2, 1, 1],
-    "pool 5: the touched farm keeps exactly 1, the other farm fills to its max of 2, then housing takes the surplus",
-  );
-  assert.equal(assignedWorkersExplicit(r.state.settlements.s0), 5);
-});
-
-test("assignWorkers: surplus workers sit in houses/apartments once every job slot is full", () => {
-  const state = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 400 }),
-    buildings: [
-      building("farmField", 0, 0),
-      building("farmField", 1, 0),
-      building("house", 2, 0),
-      building("apartment", 3, 0),
-    ],
-  });
-  const r = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 1 });
-  assert.equal(r.ok, true);
-  assert.deepEqual(
-    r.state.settlements.s0.buildings.map((b) => b.workers),
-    [1, 2, 1, 0],
-    "4 workers: the touched farm keeps 1, the other fills to 2, then the house takes the last slot",
-  );
-  assert.equal(assignedWorkersExplicit(r.state.settlements.s0), 4);
-});
-
-test("assignWorkers: auto-crew skips construction sites and leaves true surplus idle", () => {
+test("assignWorkers: untouched buildings keep full legacy effort, construction sites included", () => {
   const state = stateWithSettlement({
     ...makeSettlement("s0", 0, 2, 2, { population: 400 }),
     buildings: [
@@ -344,15 +309,12 @@ test("assignWorkers: auto-crew skips construction sites and leaves true surplus 
   });
   const r = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 1 });
   assert.equal(r.ok, true);
-  assert.deepEqual(
-    r.state.settlements.s0.buildings.map((b) => b.workers),
-    [1, 0, 1],
-    "the unfinished farm takes none; the house takes one; two workers stay idle (pool 4, assigned 2)",
-  );
-  assert.equal(assignedWorkersExplicit(r.state.settlements.s0), 2);
+  assert.deepEqual(r.state.settlements.s0.buildings.map((b) => b.workers), [1, undefined, undefined]);
+  assert.equal(effortFraction(r.state.settlements.s0.buildings[2]), 1, "the house still works at full legacy effort");
+  assert.equal(assignedWorkersExplicit(r.state.settlements.s0), 1, "no surplus is auto-employed anywhere");
 });
 
-test("assignWorkers: auto-crew never overwrites explicit counts in a mixed settlement", () => {
+test("assignWorkers: an explicit count elsewhere in a legacy settlement is preserved, not overwritten", () => {
   const state = stateWithSettlement({
     ...makeSettlement("s0", 0, 2, 2, { population: 400 }),
     buildings: [
@@ -363,11 +325,7 @@ test("assignWorkers: auto-crew never overwrites explicit counts in a mixed settl
   });
   const r = assignWorkers(state, { settlementId: "s0", gx: 1, gy: 0, workers: 1 });
   assert.equal(r.ok, true);
-  assert.deepEqual(
-    r.state.settlements.s0.buildings.map((b) => b.workers),
-    [1, 1, 1],
-    "the pre-existing explicit count is preserved; the remaining auto buildings take the pool",
-  );
+  assert.deepEqual(r.state.settlements.s0.buildings.map((b) => b.workers), [1, 1, undefined]);
 });
 
 test("assignWorkers: an explicit 0 is kept and shuts output down", () => {
@@ -475,7 +433,7 @@ test("assignWorkers source transfer: refusals are atomic and named", () => {
   assert.equal(sameBuilding.reason, "invalid_source", "source == destination is refused");
 });
 
-test("assignWorkers source transfer: legacy source normalizes and honors approved first-touch targets", () => {
+test("assignWorkers source transfer: a legacy source gives one from its own cap and the destination lands at 1", () => {
   const state = stateWithSettlement({
     ...makeSettlement("s0", 0, 2, 2, { population: 300 }),
     buildings: [
@@ -496,7 +454,7 @@ test("assignWorkers source transfer: legacy source normalizes and honors approve
   assert.equal(assignedWorkersExplicit(after), 3);
 });
 
-test("assignWorkers source transfer: first-touch auto-crews the untouched remainder", () => {
+test("assignWorkers source transfer: the untouched remainder is NOT auto-crewed by the transfer", () => {
   const state = stateWithSettlement({
     ...makeSettlement("s0", 0, 2, 2, { population: 500 }),
     buildings: [
@@ -515,10 +473,12 @@ test("assignWorkers source transfer: first-touch auto-crews the untouched remain
   assert.equal(r.ok, true);
   assert.deepEqual(
     r.state.settlements.s0.buildings.map((b) => b.workers),
-    [2, 1, 2],
-    "source keeps max-1 (2), dest 1, and the untouched farm is auto-crewed with the remaining 2 (pool 5)",
+    [2, 1, undefined],
+    "source keeps max-1 (2), dest 1, and the untouched farm stays legacy (full effort) -- no pool is spent on it",
   );
-  assert.equal(assignedWorkersExplicit(r.state.settlements.s0), 5);
+  assert.equal(assignedWorkersExplicit(r.state.settlements.s0), 3);
+  assert.equal(hasLegacyStaffing(r.state.settlements.s0), true);
+  assert.equal(effortFraction(r.state.settlements.s0.buildings[2]), 1, "the untouched farm still works at full effort");
 });
 
 test("assignWorkers source transfer: full destination is refused", () => {
@@ -555,6 +515,111 @@ test("canAssignWorkers: undefined current behaves as max; pool cost is the whole
   assert.equal(canAssignWorkers(0, 3, 2, 1, 0), false, "a +2 delta costs 2, not 1");
   assert.equal(canAssignWorkers(0, 3, 2, 2, 0), true, "a +2 delta fits a pool of 2");
   assert.equal(canAssignWorkers(1, 4, 2, 3, 2), false, "assigned 2 + delta 2 exceeds pool 3");
+});
+
+// --- C-MAJOR-2: the first assignment must not collapse the settlement's output -
+
+/**
+ * The playthrough's Silver crest: a level-1 city of 13 buildings -- town hall,
+ * 3 woodcutter huts, 3 stone mines, 3 farm fields, 2 houses and a farmhouse --
+ * at population 500, i.e. a worker pool of 5. It starts legacy (every building
+ * auto-staffed at full effort), which is how every game begins.
+ */
+const C_MAJOR_2_SEED = 515690;
+const C_MAJOR_2_HUT_INDEX = 6;
+
+function cMajor2City(): SettlementState {
+  return makeSettlement("s0", 0, 10, 10, {
+    level: 1,
+    population: 500,
+    resourceRates: { wood: 10, stone: 2, food: 1 },
+    warehouse: emptyWarehouse({ wood: 40, stone: 40, food: 400 }),
+    buildings: [
+      building("townHall", 2, 2),
+      building("farmField", 0, 0),
+      building("farmField", 0, 3),
+      building("farmField", 3, 0),
+      building("house", 0, 2),
+      building("house", 1, 2),
+      building("woodcutterHut", 4, 2),
+      building("stoneMine", 4, 3),
+      building("woodcutterHut", 4, 1),
+      building("farmhouse", 1, 0),
+      building("woodcutterHut", 4, 0),
+      building("stoneMine", 4, 4),
+      building("stoneMine", 3, 4),
+    ],
+  });
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/** The settlement panel's own per-day numbers for the three resources the
+ * finding names, read through `panelRates.settlementDailyRates` -- the same
+ * arithmetic the panel renders. */
+function dailyNets(s: SettlementState): { wood: number; stone: number; food: number } {
+  const rows = settlementDailyRates(s, C_MAJOR_2_SEED).rows;
+  const net = (r: string): number => rows.find((row) => row.resource === r)?.net ?? 0;
+  return { wood: net("wood"), stone: net("stone"), food: net("food") };
+}
+
+test("C-MAJOR-2: the first assignment leaves the settlement legacy and does not drive wood/stone/food negative", () => {
+  const state = stateWithSettlement(cMajor2City());
+  const before = state.settlements.s0;
+  assert.equal(workforcePool(before), 5);
+  assert.equal(hasLegacyStaffing(before), true, "the city starts legacy");
+
+  // Before: a legacy city running at full effort.
+  assert.deepEqual(
+    dailyNets(before),
+    { wood: 4.3, stone: 9.36, food: 13.03 },
+    "pinned before-rates: tile rates + 3 huts / 3 mines / 3 fields at full effort, minus upkeep and food",
+  );
+
+  // The report's exact click: +1 on the first woodcutter's hut.
+  const r = assignWorkers(state, { settlementId: "s0", gx: 4, gy: 2, workers: 1 });
+  assert.equal(r.ok, true);
+  const after = r.state.settlements.s0;
+
+  // 1. It must not flip the settlement to explicit crews.
+  assert.equal(hasLegacyStaffing(after), true, "the settlement did NOT convert to explicit crews");
+  assert.equal(
+    after.buildings.filter((b) => b.workers !== undefined).length,
+    1,
+    "exactly one building was written; 12 keep their legacy auto-staffing",
+  );
+  assert.equal(after.buildings[C_MAJOR_2_HUT_INDEX].workers, 1, "the addressed hut took the count");
+  for (const [i, b] of after.buildings.entries()) {
+    if (i === C_MAJOR_2_HUT_INDEX) continue;
+    assert.equal(b.workers, undefined, `${b.kind} at (${b.gx},${b.gy}) is untouched`);
+    assert.equal(effortFraction(b), 1, `${b.kind} at (${b.gx},${b.gy}) keeps full effort`);
+  }
+
+  // 2. It must not drive any of the three rates negative. Pre-fix, on this
+  // identical fixture, the same click left wood -3.05 / stone 1.3 / food -0.94
+  // and eight buildings (five of them producers) at 0 workers.
+  const afterNets = dailyNets(after);
+  assert.deepEqual(afterNets, { wood: 2.7, stone: 9.36, food: 13.03 }, "pinned after-rates");
+  assert.ok(afterNets.wood > 0, "wood stays positive");
+  assert.ok(afterNets.stone > 0, "stone stays positive");
+  assert.ok(afterNets.food > 0, "food stays positive");
+
+  // 3. And the whole cost of the click is the clicked building's own effort
+  // step: 8 producers are no longer zeroed behind the player's back.
+  const hutBefore = producerTurnOutput(before.buildings[C_MAJOR_2_HUT_INDEX], before, C_MAJOR_2_SEED);
+  const hutAfter = producerTurnOutput(after.buildings[C_MAJOR_2_HUT_INDEX], after, C_MAJOR_2_SEED);
+  assert.ok(hutBefore && hutAfter);
+  assert.equal(hutBefore.effort, 1, "legacy effort is 1");
+  assert.equal(hutAfter.effort, 1 / 3, "1 of its 3 worker slots");
+  assert.equal(
+    round2(4.3 - afterNets.wood),
+    round2(hutBefore.amount - hutAfter.amount),
+    "wood loses exactly the clicked hut's own step and nothing else",
+  );
+  assert.equal(afterNets.stone, 9.36, "the stone mines were never touched");
+  assert.equal(afterNets.food, 13.03, "the farm fields were never touched");
 });
 
 test("advanceSettlementUpgrades: 1/day by default, accel adds more, staffed townHall doubles", () => {

@@ -97,6 +97,31 @@ export function formatDailyRate(net: number): string {
   return `${sign}${formatRate(Math.abs(net))}/day`;
 }
 
+/**
+ * Hover text for the Population row: the number, the ceiling it is filling, and
+ * what the ceiling is made of. The row this belongs to used to print the bare
+ * population, so "why is my town not growing?" had no answer on screen
+ * (C-MINOR-2). `cap` is the engine's own `settlementPopulationCap`, `districtBonus`
+ * the part of it that comes from housing in the settlement's districts, and
+ * `levelBase` the level's own cap.
+ */
+export function populationCapTitle(
+  population: number,
+  cap: number,
+  levelBase: number,
+  districtBonus: number,
+): string {
+  const made =
+    districtBonus > 0
+      ? `${levelBase.toLocaleString()} from the settlement's level cap plus ${districtBonus.toLocaleString()} from housing in its districts`
+      : `${levelBase.toLocaleString()} from the settlement's level cap (housing inside the main city adds nothing)`;
+  const verdict =
+    population >= cap
+      ? " At the cap: population grows no further until the settlement's level rises or more housing is built in a district."
+      : " Grows weekly while the warehouse can feed it, and stops at the cap.";
+  return `Population ${population.toLocaleString()} of ${cap.toLocaleString()} — ${made}.${verdict}`;
+}
+
 export function resourceLabel(resource: WarehouseResource): string {
   return resource.charAt(0).toUpperCase() + resource.slice(1);
 }
