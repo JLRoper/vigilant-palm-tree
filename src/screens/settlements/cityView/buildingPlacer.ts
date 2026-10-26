@@ -86,6 +86,8 @@ export class BuildingPlacer {
   private listScrollTop = 0;
   /** Why the last click could not place anything, shown in the palette; null once a placement lands. */
   private notice: string | null = null;
+  /** The notice the CART produced (the affordability shortfall), kept so a snapshot that now covers the placement can retire it -- see setAffordability. */
+  private cartNotice: string | null = null;
 
   init(size: CityViewSize, center: { gx: number; gy: number } | null, initialBuildings: BuildingDef[], isDistrict = false, districtTerrain: string | null = null, factionId?: FactionId): void {
     this.size = size;
@@ -106,6 +108,18 @@ export class BuildingPlacer {
 
   setAffordability(aff: Affordability | null): void {
     this.affordability = aff;
+    // A cart refusal is about a SNAPSHOT ("have 0" is a fact about one reading
+    // of the treasury), so the reading that covers the placement retires it --
+    // a "have 0" line beside a refilled treasury is the same class of lie as
+    // the dimmed rows below. A GEOMETRY refusal is a rule, and no treasury
+    // reading can make it stop being true, so it is left alone: only the line
+    // this cart itself wrote is tracked here.
+    if (this.notice !== this.cartNotice) {
+      this.cartNotice = null;
+    } else if (this.affordabilityRefusal() === null) {
+      this.notice = null;
+      this.cartNotice = null;
+    }
     // The palette's rows are rendered FROM this snapshot, so a palette that is
     // already open has to be re-rendered for a new one to reach it -- otherwise
     // a treasury that refilled while the city view was open leaves every row a
@@ -155,7 +169,8 @@ export class BuildingPlacer {
       // click vanished without a word anywhere (playthrough finding 4); the
       // sentence joins the geometry ones on the palette notice, the surface
       // this gate already shares with them.
-      this.notice = this.affordabilityRefusal() ?? "The settlement cannot cover this placement.";
+      this.cartNotice = this.affordabilityRefusal() ?? "The settlement cannot cover this placement.";
+      this.notice = this.cartNotice;
       this.renderPaletteBody();
       return false;
     }

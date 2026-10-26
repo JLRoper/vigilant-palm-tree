@@ -15,7 +15,7 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import type { BuildingDef } from "@heroes/contracts";
-import { openPlacer, paletteNotice, pointFor, restoreDom, RICH, VIEWPORT } from "./_cityPlacerHarness";
+import { BROKE, openPlacer, paletteNotice, pointFor, restoreDom, RICH, VIEWPORT } from "./_cityPlacerHarness";
 
 afterEach(() => {
   restoreDom();
@@ -133,4 +133,41 @@ test("refusal: the shortfall line clears once the treasury can cover it again", 
   const placed = placer.placeAt(p.x, p.y, VIEWPORT.w, VIEWPORT.h);
   assert.ok(placed, "the same cell places once the cart can pay");
   assert.equal(paletteNotice(body), null, "a landed placement leaves no refusal line behind");
+});
+
+test("refusal: the cart's line retires with the snapshot, a geometry line does not", () => {
+  // A cart refusal is about a SNAPSHOT ("have 50" is a fact about one reading of
+  // the treasury), so the reading that covers the placement retires it -- a
+  // "have 0" line beside a full treasury is the same class of lie as the dimmed
+  // rows this card also fixes. A GEOMETRY refusal is a rule, and no treasury
+  // reading can make it stop being true.
+  const { placer, body } = openPlacer([], 50);
+  placer.selectBuilding("house");
+  const p = pointFor(3, 3);
+  assert.equal(placer.placeAt(p.x, p.y, VIEWPORT.w, VIEWPORT.h), null);
+  assert.equal(paletteNotice(body), "Not enough gold (need 100, have 50)");
+
+  // A snapshot that still cannot cover the placement leaves a refusal line
+  // standing: the retirement is owed to a covering reading, not to any reading
+  // at all. (The line may keep quoting the snapshot that refused it; the row
+  // tooltips are what re-read the cart on every change.)
+  placer.setAffordability({ gold: 60, warehouse: { ...RICH.warehouse } });
+  assert.ok(paletteNotice(body), "a repeated shortfall does not retire the line");
+
+  placer.setAffordability({ gold: RICH.gold, warehouse: { ...RICH.warehouse } });
+  assert.equal(paletteNotice(body), null, "the retired line does not outlive its snapshot");
+
+  const occupied: BuildingDef[] = [{ gx: 1, gy: 1, kind: "farmhouse", level: 1, w: 1, h: 1 }];
+  const second = openPlacer(occupied);
+  second.placer.selectBuilding("house");
+  const q = pointFor(1, 1);
+  assert.equal(second.placer.placeAt(q.x, q.y, VIEWPORT.w, VIEWPORT.h), null);
+  assert.equal(paletteNotice(second.body), "A building already stands there.");
+
+  second.placer.setAffordability(BROKE);
+  assert.equal(
+    paletteNotice(second.body),
+    "A building already stands there.",
+    "a treasury reading cannot retract a geometry rule",
+  );
 });
