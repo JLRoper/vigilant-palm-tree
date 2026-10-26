@@ -9,9 +9,79 @@ import type {
   StartUpgradeResult,
   UpgradeState,
 } from "@heroes/contracts";
-import { buildingUpgradeCost } from "../buildingRegistry";
+import { buildingFootprintFromRegistry, buildingUpgradeCost } from "../buildingRegistry";
 import { districtKey } from "../control";
 import { pickStyleForBuilding } from "../styleResolver";
+
+/** Every grid cell a building occupies at a given level, as `"gx,gy"` keys.
+ * The `ceil()` is the placement path's own rounding, so a building whose
+ * registry footprint is fractional (1.5x1.5 at L2/L3) claims the same 2x2 block
+ * `coversCell` blocks -- the client's click resolver and this check agree on
+ * which cells are taken. */
+function coveredCells(b: BuildingDef, level: number): string[] {
+  const fp = buildingFootprintFromRegistry(b.kind, level);
+  const w = Math.max(1, Math.ceil(b.w ?? fp.w));
+  const h = Math.max(1, Math.ceil(b.h ?? fp.h));
+  const cells: string[] = [];
+  for (let dy = 0; dy < h; dy++) {
+    for (let dx = 0; dx < w; dx++) cells.push(`${b.gx + dx},${b.gy + dy}`);
+  }
+  return cells;
+}
+
+/**
+ * C-MAJOR-3. `buildingFootprintFromRegistry` grows several 1x1 producers
+ * (`woodcutterHut`, `granary`, `bank`, `goldMine`) to 1.5x1.5 -- i.e. a 2x2
+ * block of cells -- at L2/L3. Nothing validated the cells that growth NEWLY
+ * claims, so an upgrade next to a neighbour was accepted and the bigger
+ * building swallowed the neighbour's cell: clicking the neighbour then opened
+ * the upgrader's menu and the neighbour's own controls were unreachable.
+ *
+ * Returns the refusal reason for the first conflict, or null when every request
+ * fits. Cells the building already occupies are its own, and a pre-existing
+ * overlap elsewhere in the grid must not block an unrelated upgrade, so only
+ * the newly claimed cells are tested -- against every other building's cells
+ * and against the other requests' new cells in the same command.
+ */
+function upgradeFootprintConflict(
+  s: SettlementState,
+  requests: BuildingUpgradeRequest[],
+  district?: { q: number; r: number },
+): string | null {
+  const listFor = (dCoord?: { q: number; r: number }): BuildingDef[] =>
+    dCoord ? (s.districts?.[districtKey(dCoord.q, dCoord.r)]?.buildings ?? []) : s.buildings;
+
+  const byContainer = new Map<string, { list: BuildingDef[]; requested: BuildingDef[] }>();
+  for (const req of requests) {
+    const dCoord = req.district ?? district;
+    const key = dCoord ? districtKey(dCoord.q, dCoord.r) : "main";
+    let entry = byContainer.get(key);
+    if (!entry) {
+      entry = { list: listFor(dCoord), requested: [] };
+      byContainer.set(key, entry);
+    }
+    const b = entry.list.find((x) => x.gx === req.gx && x.gy === req.gy && x.kind === req.kind);
+    if (b) entry.requested.push(b);
+  }
+
+  for (const { list, requested } of byContainer.values()) {
+    const upgrading = new Set(requested);
+    const occupied = new Map<string, BuildingDef>();
+    for (const b of list) {
+      if (upgrading.has(b)) continue;
+      for (const cell of coveredCells(b, b.level)) occupied.set(cell, b);
+    }
+    for (const b of requested) {
+      const current = new Set(coveredCells(b, b.level));
+      for (const cell of coveredCells(b, b.level + 1)) {
+        if (current.has(cell)) continue;
+        if (occupied.has(cell)) return "footprint_blocked";
+        occupied.set(cell, b);
+      }
+    }
+  }
+  return null;
+}
 
 export function startBuildingUpgrade(
   state: GameState,
@@ -50,6 +120,10 @@ export function startBuildingUpgrade(
     totalStone += cost.stone;
     maxDays = Math.max(maxDays, cost.days);
   }
+
+  // Refuse BEFORE any cost is charged: the whole command is atomic.
+  const conflict = upgradeFootprintConflict(s, requests, district);
+  if (conflict) return { state, ok: false, reason: conflict };
 
   if (s.gold < totalGold) return { state, ok: false, reason: "insufficient_gold" };
   if ((s.warehouse.wood ?? 0) < totalWood) return { state, ok: false, reason: "insufficient_wood" };

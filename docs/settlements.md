@@ -119,6 +119,23 @@ Settlements can be upgraded to the next tier through an active construction proc
    - Population and buildings preserved as-is
 5. **Town Hall completion:** The Town Hall building level increments in the `buildings` array.
 
+### Building upgrade footprints (C-MAJOR-3)
+
+An individual building upgrade is a level bump, and some level bumps grow the
+building's footprint: `woodcutterHut`, `granary`, `bank` and `goldMine` are 1×1
+at L1 and 1.5×1.5 from L2 (`buildingFootprintFromRegistry`,
+`packages/engine/src/buildingRegistry.ts`), and the placement path rounds that
+up to a 2×2 block of cells. `startBuildingUpgrade`
+(`packages/engine/src/settlement/upgradeBuilding.ts`) now validates the cells the
+upgrade **newly** claims against every other building in the same container and
+refuses the whole request with `footprint_blocked` before any cost is charged.
+Before that check an L3 hut could swallow a neighbour's cell, after which
+clicking the neighbour opened the hut's menu and the neighbour's own controls
+were unreachable. Cells the building already occupies are its own, and a
+pre-existing overlap elsewhere in the grid does not block an unrelated upgrade.
+The check is start-time only: a neighbour placed *during* the construction
+window is still not validated against the pending footprint (queued).
+
 ### Constraints
 
 - **No concurrent upgrades:** Only one upgrade (town hall or settlement) at a time per settlement.
