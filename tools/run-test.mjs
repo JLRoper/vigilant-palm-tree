@@ -29,12 +29,13 @@ const ENTRIES = {
   heroVariants: "test/heroVariants.e2e.ts",
   heroTrade: "test/heroTrade.e2e.ts",
   settlers: "test/settlers.e2e.ts",
+  towncenter: "test/townCenterSprite.e2e.ts",
   visual: "test/visualRegression.test.ts",
 };
 
 // "visual" runs last -- it's the slowest suite (several game setups, each
 // spinning up its own scene) and gains nothing from running earlier.
-const ALL_ORDER = ["smoke", "multiplayer", "cityview", "cityGridTurnover", "newGameForm", "settlements", "districts", "aiDefender", "aiCharter", "logisticsCaravan", "logpanel", "uncharted", "heroVariants", "heroTrade", "settlers", "visual"];
+const ALL_ORDER = ["smoke", "multiplayer", "cityview", "cityGridTurnover", "newGameForm", "settlements", "districts", "aiDefender", "aiCharter", "logisticsCaravan", "logpanel", "uncharted", "heroVariants", "heroTrade", "settlers", "towncenter", "visual"];
 
 function readEnvPort(name, fallback) {
   try {
@@ -191,7 +192,7 @@ async function runOne(entry, opts) {
 async function main() {
   const args = process.argv.slice(2);
   if (args.length === 0) {
-    console.error("usage: node tools/run-test.mjs <smoke|multiplayer|cityview|settlements|districts|logpanel|logisticsCaravan|uncharted|heroVariants|heroTrade|settlers|visual|aiCharter|all> [--auto-close] [--shutdown-after-ms=N] [--update-baselines]");
+    console.error("usage: node tools/run-test.mjs <smoke|multiplayer|cityview|settlements|districts|logpanel|logisticsCaravan|uncharted|heroVariants|heroTrade|settlers|towncenter|visual|aiCharter|all> [--auto-close] [--shutdown-after-ms=N] [--update-baselines]");
     process.exit(2);
   }
 
