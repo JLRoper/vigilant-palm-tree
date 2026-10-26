@@ -10,6 +10,14 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.36.2] - 2026-10-26
+
+Three settlement-economy fixes from the classic playthrough findings.
+
+- **Workforce (C-MAJOR-2):** an `AssignWorkers` assignment now writes only the building it addresses. The first assignment used to convert the whole settlement to explicit crews and auto-employ the remaining pool, which on a level-1 city (pool 5, 13 buildings) took the advertised daily rates from −3.84 to −12.8 wood, +6.64 to −1.11 stone and +14.33 to −0.53 food from a single click. Untouched settlements keep their legacy full-effort auto-staffing, so a city converts to explicit crews one building at a time.
+- **Building upgrades (C-MAJOR-3):** `startBuildingUpgrade` refuses (`footprint_blocked`) an upgrade whose bigger L2/L3 footprint would claim a cell another building occupies, so a growing hut can no longer swallow a neighbour's cell and hide that neighbour's controls.
+- **Population cap (C-MINOR-2):** `settlementPopulationCap` (level base + district housing) is the one reader of the cap; the settlement panel prints `Population <now> / <cap>` with a tooltip naming the level base and the district-housing part, and `docs/settlements.md` states that same rule instead of a flat 500 / 1,500 / 5,000.
+
 ## [0.36.1] - 2026-10-26
 
 The adventure map's tile info panel now follows the pointer: pointing at a hex inspects it exactly as clicking one does (the same onTileInspect channel), so an unrevealed hex reads "Unexplored" and the hex a hero has landed on shows its terrain without a click that would also select, move or attack. Fixes the two map display findings of the movement playthrough (M-MINOR-1, M-MINOR-2) — both were one defect: the panel was click-driven, so hovering produced no panel at all.
