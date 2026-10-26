@@ -53,11 +53,18 @@ const ROOT = process.cwd();
 const ART_DIR = resolve(ROOT, "src/resources/buildings");
 
 const KIND = "townHall";
+/** The level a town center is rendered at in the game under test (a level-1 town). */
 const LEVEL = 1;
 const PREFERRED_STYLE = "pixel";
-const SPRITE_KEY = `${PREFERRED_STYLE}.${KIND}.${LEVEL}`;
-const ART_FILE = BUILDING_SPRITE_FILES[SPRITE_KEY];
-const ART_PATH = ART_FILE ? resolve(ART_DIR, ART_FILE) : "";
+/**
+ * The town-center FAMILY: every level of art the town hall can render. Level 1
+ * is the town center of any level-1 settlement (every settlers town at
+ * founding, and the asset in the audit's source screenshot); levels 2-3 are
+ * what the same building renders once its settlement upgrades, so the art
+ * checks run over all three -- a re-art that ships one level leaves the others
+ * carrying the defect.
+ */
+const TOWN_CENTER_LEVELS = [1, 2, 3] as const;
 /** The grid-exact calibration sprite (2x2 ground plot, the farm family's shape). */
 const REFERENCE_PATH = resolve(ART_DIR, "building-pixel-farmWheat-1.png");
 
@@ -74,7 +81,13 @@ const MAX_BELOW_GROUND_PX = 16; // ref 11 (of a 1024 canvas)
 // Rendered tolerances (city view, tileScale 1).
 const MAX_BASE_OFFSET_PX = 2; // "floating"/"cut off" is measured against this
 const MAX_RENDERED_SLOPE_DEV = 0.08;
-const MIN_RENDERED_FOOTPRINT_COVERAGE = 0.95;
+// Every building sprite is drawn at fitWidth hexSizeMul 0.9 (the universal
+// building inset, assetDescriptors.ts), so grid-exact lot art lands on 90% of
+// its 2x2 footprint; the farm plots reach 100% only because they are the one
+// family that overrides the inset (GRID_EXACT_FARM_STYLES -> hexSizeMul 1). The
+// floor is set just under the inset so "art whose lot fills its canvas" passes
+// and "art with a 15% transparent margin and a thick lip" (76% drawn) fails.
+const MIN_RENDERED_FOOTPRINT_COVERAGE = 0.85;
 
 const ARTIFACT_DIR = resolve(ROOT, "local/audit-town-center");
 
@@ -474,76 +487,84 @@ function townHallState(page: Page, settlementId: string): Promise<{ kind: string
 }
 
 // ── Part 1: the asset the town center resolves to ─────────────────────────
-async function auditResolvedArt(): Promise<{ art: Silhouette; committedOffsetY: number }> {
+async function auditResolvedArt(): Promise<{ art: Silhouette }> {
   console.log("\n== Part 1: the resolved town-center asset (offline) ==");
-
-  // The resolver returns GenerationStyle, a union that predates the pixel
-  // family ("classic" | "blocky" | ...); "pixel" rides it as a cast on the
-  // engine side, so compare it as the plain string carrier it is.
-  const style = pickStyleForBuilding(KIND, LEVEL, PREFERRED_STYLE) as string;
-  check(
-    "A0",
-    "the town center resolves through styleResolver to a real file",
-    style === PREFERRED_STYLE && Boolean(ART_FILE) && existsSync(ART_PATH),
-    `pickStyleForBuilding("${KIND}", ${LEVEL}, "${PREFERRED_STYLE}") -> "${style}"; key "${SPRITE_KEY}" -> ${ART_FILE ?? "(none)"}; exists=${ART_FILE ? existsSync(ART_PATH) : false}`,
-  );
-  assert(ART_FILE && existsSync(ART_PATH), `resolved art missing: ${ART_PATH}`);
-  // The fall-through (no preferred style) must reach the same art: it is the
-  // only style the family ships for this kind.
-  const fallthrough = pickStyleForBuilding(KIND, LEVEL, undefined) as string;
-  check(
-    "A0b",
-    "the fall-through style agrees (no preferred style -> same art)",
-    fallthrough === PREFERRED_STYLE,
-    `pickStyleForBuilding("${KIND}", ${LEVEL}, undefined) -> "${fallthrough}"`,
-  );
-
-  const art = silhouetteOf(await decodePng(ART_PATH));
   const reference = silhouetteOf(await decodePng(REFERENCE_PATH));
+  const referenceName = REFERENCE_PATH.split(/[\\/]/).pop();
+  let level1: Silhouette | null = null;
 
-  check(
-    "A1",
-    "the ground diamond is projected 2:1, like the iso grid",
-    Math.abs(art.edgeSlope - ISO_SLOPE) <= MAX_SLOPE_DEV,
-    `edge slope ${art.edgeSlope.toFixed(3)} (grid ${ISO_SLOPE.toFixed(3)}, tolerance ±${MAX_SLOPE_DEV}); grid-exact reference ${REFERENCE_PATH.split(/[\\/]/).pop()} measures ${reference.edgeSlope.toFixed(3)}`,
-  );
-  check(
-    "A2",
-    "the art is authored flush to its own base (no transparent pad under the ground)",
-    art.bottomPadRows <= MAX_BOTTOM_PAD_ROWS,
-    `${art.bottomPadRows} transparent rows below the lowest opaque pixel of ${art.height} (max ${MAX_BOTTOM_PAD_ROWS}); reference ${reference.bottomPadRows}`,
-  );
-  check(
-    "A3",
-    "the ground diamond fills the sprite canvas (the family's grid-exact convention)",
-    art.widthRatio >= MIN_GROUND_WIDTH_RATIO,
-    `ground diamond ${(art.widthRatio * 100).toFixed(1)}% of the ${art.width}px canvas (min ${(MIN_GROUND_WIDTH_RATIO * 100).toFixed(0)}%); reference ${(reference.widthRatio * 100).toFixed(1)}%`,
-  );
-  check(
-    "A4",
-    "nothing hangs below the ground plane (no soil plinth)",
-    art.belowGroundPx <= MAX_BELOW_GROUND_PX,
-    `${art.belowGroundPx.toFixed(1)}px of silhouette below a 2:1 diamond of its own ${art.widest.w}px width (max ${MAX_BELOW_GROUND_PX}); reference ${reference.belowGroundPx.toFixed(1)}px`,
-  );
+  for (const level of TOWN_CENTER_LEVELS) {
+    const key = `${PREFERRED_STYLE}.${KIND}.${level}`;
+    const file = BUILDING_SPRITE_FILES[key];
+    const path = file ? resolve(ART_DIR, file) : "";
+    const id = (base: string): string => `${base}@L${level}`;
 
-  // The anchor table is what places that base on the cell. Its documented
-  // convention (src/render/assetDescriptors.ts, "Other 2x2 buildings (e.g.
-  // townHall) deliberately keep 86.4") sizes the compensation with the 1x1
-  // draw height even for a 2x2 building, so a padded 2x2 sprite is only
-  // half-corrected and its visible base floats above the footprint vertex.
-  const committedOffsetY = BUILDING_ANCHOR_OVERRIDES[SPRITE_KEY];
-  const drawnHeight1x1 = TILE_W * 0.9; // the divisor the table used for this key
-  const drawnHeight2x2 = 2 * TILE_W * 0.9; // fitWidth hexSizeMul 0.9 over a 2x2 footprint
-  const requiredOffsetY = (art.bottomPadRows * drawnHeight2x2) / art.height;
-  const offsetFrom1x1Divisor = (art.bottomPadRows * drawnHeight1x1) / art.height;
-  check(
-    "A5",
-    "the anchor offset cancels the art's own bottom pad at its real draw height",
-    Math.abs(committedOffsetY - requiredOffsetY) <= 1,
-    `committed anchorOffsetY ${committedOffsetY} (generated from the 86.4 1x1 divisor: ${offsetFrom1x1Divisor.toFixed(2)}), required ${requiredOffsetY.toFixed(2)} for the 2x2 draw height ${drawnHeight2x2}`,
-  );
+    // The resolver returns GenerationStyle, a union that predates the pixel
+    // family ("classic" | "blocky" | ...); "pixel" rides it as a cast on the
+    // engine side, so compare it as the plain string carrier it is.
+    const style = pickStyleForBuilding(KIND, level, PREFERRED_STYLE) as string;
+    // The fall-through (no preferred style) must reach the same art: it is the
+    // only style the family ships for this kind.
+    const fallthrough = pickStyleForBuilding(KIND, level, undefined) as string;
+    check(
+      id("A0"),
+      "the town center resolves through styleResolver to a real file",
+      style === PREFERRED_STYLE && fallthrough === PREFERRED_STYLE && Boolean(file) && existsSync(path),
+      `pickStyleForBuilding("${KIND}", ${level}, "${PREFERRED_STYLE}") -> "${style}" (fall-through -> "${fallthrough}"); key "${key}" -> ${file ?? "(none)"}; exists=${file ? existsSync(path) : false}`,
+    );
+    assert(file && existsSync(path), `resolved art missing: ${path}`);
 
-  return { art, committedOffsetY };
+    const art = silhouetteOf(await decodePng(path));
+    if (level === 1) level1 = art;
+    console.log(
+      `>> L${level} ${file}: ${art.width}x${art.height}, alpha bbox y[${art.minY}..${art.maxY}], widest row y=${art.widest.y} width=${art.widest.w}, bottomPad=${art.bottomPadRows}`,
+    );
+
+    check(
+      id("A1"),
+      "the ground diamond is projected 2:1, like the iso grid",
+      Math.abs(art.edgeSlope - ISO_SLOPE) <= MAX_SLOPE_DEV,
+      `edge slope ${art.edgeSlope.toFixed(3)} (grid ${ISO_SLOPE.toFixed(3)}, tolerance ±${MAX_SLOPE_DEV}); grid-exact reference ${referenceName} measures ${reference.edgeSlope.toFixed(3)}`,
+    );
+    check(
+      id("A2"),
+      "the art is authored flush to its own base (no transparent pad under the ground)",
+      art.bottomPadRows <= MAX_BOTTOM_PAD_ROWS,
+      `${art.bottomPadRows} transparent rows below the lowest opaque pixel of ${art.height} (max ${MAX_BOTTOM_PAD_ROWS}); reference ${reference.bottomPadRows}`,
+    );
+    check(
+      id("A3"),
+      "the ground diamond fills the sprite canvas (the family's grid-exact convention)",
+      art.widthRatio >= MIN_GROUND_WIDTH_RATIO,
+      `ground diamond ${(art.widthRatio * 100).toFixed(1)}% of the ${art.width}px canvas (min ${(MIN_GROUND_WIDTH_RATIO * 100).toFixed(0)}%); reference ${(reference.widthRatio * 100).toFixed(1)}%`,
+    );
+    check(
+      id("A4"),
+      "nothing hangs below the ground plane (no soil plinth)",
+      art.belowGroundPx <= MAX_BELOW_GROUND_PX,
+      `${art.belowGroundPx.toFixed(1)}px of silhouette below a 2:1 diamond of its own ${art.widest.w}px width (max ${MAX_BELOW_GROUND_PX}); reference ${reference.belowGroundPx.toFixed(1)}px`,
+    );
+
+    // The anchor table is what places that base on the cell. Its documented
+    // convention (src/render/assetDescriptors.ts, "Other 2x2 buildings (e.g.
+    // townHall) deliberately keep 86.4") sizes the compensation with the 1x1
+    // draw height even for a 2x2 building, so a padded 2x2 sprite is only
+    // half-corrected and its visible base floats above the footprint vertex.
+    const committedOffsetY = BUILDING_ANCHOR_OVERRIDES[key];
+    const drawnHeight1x1 = TILE_W * 0.9; // the divisor the table used for this key
+    const drawnHeight2x2 = 2 * TILE_W * 0.9; // fitWidth hexSizeMul 0.9 over a 2x2 footprint
+    const requiredOffsetY = (art.bottomPadRows * drawnHeight2x2) / art.height;
+    const offsetFrom1x1Divisor = (art.bottomPadRows * drawnHeight1x1) / art.height;
+    check(
+      id("A5"),
+      "the anchor offset cancels the art's own bottom pad at its real draw height",
+      Math.abs(committedOffsetY - requiredOffsetY) <= 1,
+      `committed anchorOffsetY ${committedOffsetY} (generated from the 86.4 1x1 divisor: ${offsetFrom1x1Divisor.toFixed(2)}), required ${requiredOffsetY.toFixed(2)} for the 2x2 draw height ${drawnHeight2x2}`,
+    );
+  }
+
+  assert(level1, "level 1 must be measured (it is the town center a level-1 town renders)");
+  return { art: level1 };
 }
 
 // ── Part 2: the rendered town center on the iso grid ──────────────────────
@@ -601,7 +622,7 @@ async function auditRendered(page: Page, viewport: { width: number; height: numb
   check(
     "B1",
     "the town center is placed and committed in the settlers town",
-    hall?.gx === cell.gx && hall?.gy === cell.gy && hall?.level === 1,
+    hall?.gx === cell.gx && hall?.gy === cell.gy && hall?.level === LEVEL,
     `townHall in state: ${hall ? `(${hall.gx},${hall.gy}) level ${hall.level}` : "absent"}; clicked the cell centre at (${Math.round(clickPt.x)},${Math.round(clickPt.y)})`,
   );
   assert(hall, "the town center must be in the settlement's buildings before the sprite can be measured");
@@ -685,10 +706,7 @@ async function auditRendered(page: Page, viewport: { width: number; height: numb
 }
 
 async function main(): Promise<void> {
-  const { art } = await auditResolvedArt();
-  console.log(
-    `>> resolved asset: ${ART_FILE} (${art.width}x${art.height}); alpha bbox y[${art.minY}..${art.maxY}]; widest row y=${art.widest.y} width=${art.widest.w}`,
-  );
+  await auditResolvedArt();
 
   children.push(spawnLogged("api", "npx", ["tsx", "server/index.ts"], { API_PORT: String(API_PORT) }));
   children.push(spawnLogged("web", "npx", ["vite", "--port", String(WEB_PORT), "--strictPort"], {}));
