@@ -13,13 +13,23 @@ import type { CharterPhase } from "@heroes/contracts";
 import { isCoveredWagonId, resolveGameMode } from "@heroes/contracts";
 import { canFoundSettlement, districtKey, isDistrictBlockedByHero, resolveControllingSettlement, settlementRateRadius, platoonTroopTotal, type FoundSettlementRefusal } from "@heroes/engine";
 import { colorForOwner } from "../../state/playerColors";
-import { isTileVisibleTo } from "../../render/fog";
+import { computeVisionFromState, isTileVisibleTo } from "../../render/fog";
 import { districtVariantForBuildings } from "../../render/scene/sceneBuilder/adventureScene";
 
 export interface TileInfo {
   q: number;
   r: number;
   fogged: boolean;
+  /**
+   * True when the map's own revealed state has this hex (uncharted mode's
+   * persisted `revealedTiles`, seeded + merged server-side), even if the hex is
+   * not in live vision right now. The canvas paints such a hex as explored
+   * ground under the fog veil, so the panel reads its terrain instead of
+   * "Unexplored" — "Unexplored" is for hexes the player has NEVER seen.
+   * Classic games carry no reveal set, so this stays false there and the
+   * locked "Unexplored" fog decision (docs/map.md) is unchanged.
+   */
+  explored: boolean;
   terrain: { kind: Terrain; label: string; cost: number; passable: boolean } | null;
   river: {
     kind: "small" | "wide";
@@ -330,6 +340,30 @@ function describeTerritory(
   return { settlementName: winner.name, ownerName: playerName(state, winner.ownerId) };
 }
 
+/**
+ * The reveal set the tile panel reads for a seat: what the seat's units see
+ * right now, unioned with its persisted `revealedTiles`.
+ *
+ * Null when the seat carries no reveal list at all — a classic game, whose fog
+ * is two-state and whose locked rule is "Unexplored means nothing at all"
+ * (docs/map.md). Null keeps `describeTile` byte-identical to before.
+ *
+ * The union matters because a hero's vision ring and the persisted list are
+ * different facts: the ring is live (it moves with the hero every frame), the
+ * list is what the map has already been drawn as explored. The panel must
+ * answer for the ground the player is looking at, so it needs both.
+ */
+export function revealedSetForTilePanel(
+  state: GameState,
+  seat: PlayerId,
+): ReadonlySet<string> | null {
+  const seed = state.players.find((p) => p.id === seat)?.revealedTiles;
+  if (!seed) return null;
+  const revealed = new Set<string>(seed);
+  for (const key of computeVisionFromState(state, seat)) revealed.add(key);
+  return revealed;
+}
+
 export function describeTile(input: {
   map: GameMap;
   state: GameState;
@@ -337,12 +371,23 @@ export function describeTile(input: {
   castles: readonly Castle[];
   viewPlayerId: PlayerId;
   tile: Axial;
+  /**
+   * The map's own revealed state for the viewing seat (uncharted mode's
+   * persisted `revealedTiles`, unioned with what is visible right now).
+   * Omitted/null in classic games, which carry no reveal set — the locked fog
+   * decision then keeps "Unexplored" for every unseen hex, exactly as before.
+   */
+  revealed?: ReadonlySet<string> | null;
 }): TileInfo | null {
   const { map, state, heroes, castles, viewPlayerId, tile } = input;
   const kind = map.get(tile.q, tile.r);
   if (!kind) return null;
 
   const fogged = !isTileVisibleTo(heroes, castles, viewPlayerId, tile.q, tile.r);
+  // "Unexplored" means never seen. A hex the map has already painted as
+  // explored ground (revealed earlier, now outside every vision ring) reads its
+  // terrain and move cost, because that is what the player is looking at.
+  const explored = fogged && (input.revealed?.has(`${tile.q},${tile.r}`) ?? false);
   const river = map.riverAt(tile.q, tile.r);
   // Classically absent rather than present-and-undefined: a classic TileInfo
   // keeps exactly its previous keys, which is what every existing panel test
@@ -354,7 +399,8 @@ export function describeTile(input: {
     q: tile.q,
     r: tile.r,
     fogged,
-    terrain: fogged
+    explored,
+    terrain: fogged && !explored
       ? null
       : {
           kind,
@@ -365,7 +411,7 @@ export function describeTile(input: {
           passable: map.isPassable(tile.q, tile.r),
         },
     river:
-      fogged || !river
+      (fogged && !explored) || !river
         ? null
         : {
             kind: river.kind,

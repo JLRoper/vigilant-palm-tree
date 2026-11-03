@@ -9,7 +9,7 @@ import { SettlementRosterMenu } from "@screens/settlements/settlementRosterMenu"
 import { openLogisticsModal } from "@screens/logistics/logisticsModal";
 import { SettlementInfoMenu } from "@screens/settlements/settlementInfoMenu";
 import { TileInfoPanel } from "@screens/adventure/tileInfoPanel";
-import { describeTile } from "@screens/adventure/tileInfo";
+import { describeTile, revealedSetForTilePanel } from "@screens/adventure/tileInfo";
 import { setMinimapReserve } from "@screens/shared/panelRail";
 import { getMinimapReserveHeight } from "../render/minimap";
 import { RESOURCE_PILE_SMOL_SPRITES } from "../render/assetDescriptors";
@@ -877,13 +877,19 @@ export class UIManager {
       this.tileInfoPanel.hide();
       return;
     }
+    const seat = localPlayerId ?? 0;
     const info = describeTile({
       map: this.gameStateManager.getGameMap(),
       state: gameState,
       heroes: Object.values(heroes),
       castles: this.gameStateManager.getSettlements(),
-      viewPlayerId: localPlayerId ?? 0,
+      viewPlayerId: seat,
       tile: this.inspectedTile,
+      // The map's own revealed state: the seat's persisted reveal plus what its
+      // own units see right now. Classic games carry no reveal list (an empty
+      // seed), so the union collapses to the live vision set and the locked
+      // "Unexplored" fog decision stays byte-identical.
+      revealed: revealedSetForTilePanel(gameState, seat),
     });
     if (!info) {
       this.tileInfoPanel.hide();
