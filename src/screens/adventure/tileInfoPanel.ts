@@ -166,7 +166,12 @@ export function tilePanelLines(info: TileInfo): TilePanelLine[] {
   if (!info.terrain) return [{ text: "Unexplored", dim: true }];
   const lines: TilePanelLine[] = [{ text: terrainLine(info.terrain) }];
   if (info.river) lines.push({ text: riverLine(info.river) });
-  if (info.fogged) lines.push({ text: "Unexplored", dim: true });
+  // Explored-but-unwatched ground reads its terrain (the map draws it under the
+  // veil), so "Unexplored" would be a lie about ground the player can see. The
+  // note says why the hex is dimmed instead: seen before, not in sight now.
+  if (info.fogged) {
+    lines.push({ text: info.explored ? "Explored — not in sight" : "Unexplored", dim: true });
+  }
   // keyed: the browser suites read the deposit line's remaining amount off
   // `[data-tile-line="deposit"]` rather than matching the sentence.
   if (info.deposit) lines.push({ text: depositLine(info.deposit), key: "deposit" });

@@ -4,10 +4,14 @@ import { forgetGame, listUserGames, type UserGameEntry } from "../../io/userGame
 import { panelTheme, styleButton } from "./panel";
 import { openDialog } from "./dialog";
 
+// The Open button awaits this, so a load that fails must REJECT it: a handler
+// that returns void (the shape that landed in PR #289) settles the await
+// immediately, the dialog closes over the failure and the retryable row below
+// is unreachable. See src/managers/toolbarLoadCallback.ts.
 export type LoadGameHandler = (
   game: Game,
   tiles?: Awaited<ReturnType<typeof api.getTiles>>,
-) => void | Promise<void>;
+) => Promise<void>;
 
 export interface LoadGameModalOptions {
   backendOk: () => boolean;

@@ -68,7 +68,7 @@ test("a short purse reports the exact missing row and the withdraw hint", () => 
   assert.equal(reqs.canStart, false);
   assert.deepEqual(reqs.missing, ["Purse 300/2500g"]);
   assert.deepEqual(reqs.hints, [
-    "Withdraw gold from a friendly settlement's treasury — your hero must stand on it (hero panel → Withdraw all)",
+    "Withdraw gold from a friendly settlement's treasury — your hero must stand on it (hero panel → Withdraw gold)",
   ]);
   assert.equal(CHARTER_PURSE_HINT, reqs.hints[0]);
 });

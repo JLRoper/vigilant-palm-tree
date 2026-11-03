@@ -9,7 +9,7 @@ import { SettlementRosterMenu } from "@screens/settlements/settlementRosterMenu"
 import { openLogisticsModal } from "@screens/logistics/logisticsModal";
 import { SettlementInfoMenu } from "@screens/settlements/settlementInfoMenu";
 import { TileInfoPanel } from "@screens/adventure/tileInfoPanel";
-import { describeTile } from "@screens/adventure/tileInfo";
+import { describeTile, revealedSetForTilePanel } from "@screens/adventure/tileInfo";
 import { setMinimapReserve } from "@screens/shared/panelRail";
 import { getMinimapReserveHeight } from "../render/minimap";
 import { RESOURCE_PILE_SMOL_SPRITES } from "../render/assetDescriptors";
@@ -31,11 +31,11 @@ import { SessionManager } from "./SessionManager";
 import { GameStateManager } from "./GameStateManager";
 import { ViewManager } from "./ViewManager";
 import type { MapInfo } from "@screens/home/settingsMenu";
-import type { DistrictState, FactionId, BuildingKind, GameMode } from "@heroes/contracts";
+import type { DistrictState, FactionId, BuildingKind, GameMode, WarehouseResource } from "@heroes/contracts";
 
 type ToolbarCallbacks = {
   onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: MapSize; enemyCount?: number; factionId?: FactionId; uncharted?: boolean; gameMode?: GameMode }) => void;
-  onLoad: (loaded: import("../io/api").Game, tiles?: import("../io/api").TileRow[]) => void;
+  onLoad: (loaded: import("../io/api").Game, tiles?: import("../io/api").TileRow[]) => Promise<void>;
   onSave: () => void;
   onEndTurn: () => void;
   onForget: (id: number) => void;
@@ -252,6 +252,8 @@ export class UIManager {
         this.gameStateManager.replaceState(tc.getState());
         return result;
       },
+      onTransferCargo: (heroId, settlementId, direction, amounts) =>
+        this.transferCargoFor(heroId, settlementId, direction, amounts),
     });
   }
 
@@ -715,6 +717,24 @@ export class UIManager {
     );
   }
 
+  /**
+   * One hero-cargo transfer, shared by the settlement panel's Warehouse row and
+   * the Logistics modal's (the modal's declared transferResources action had no
+   * caller at all until this existed).
+   */
+  private transferCargoFor(
+    heroId: string,
+    settlementId: string,
+    direction: "load" | "unload",
+    amounts: Partial<Record<WarehouseResource, number>>,
+  ): { ok: boolean; reason: string } {
+    if (!this.gameStateManager) return { ok: false, reason: "no_settlement" };
+    const tc = this.gameStateManager.getTurnController();
+    const result = tc.transferResources(heroId, settlementId, direction, amounts);
+    if (result.ok) this.gameStateManager.replaceState(tc.getState());
+    return result;
+  }
+
   /** One garrison transfer, shared by the settlement panel and the recruitment panel. */
   private transferUnitsFor(
     heroId: string,
@@ -889,13 +909,19 @@ export class UIManager {
       this.tileInfoPanel.hide();
       return;
     }
+    const seat = localPlayerId ?? 0;
     const info = describeTile({
       map: this.gameStateManager.getGameMap(),
       state: gameState,
       heroes: Object.values(heroes),
       castles: this.gameStateManager.getSettlements(),
-      viewPlayerId: localPlayerId ?? 0,
+      viewPlayerId: seat,
       tile: this.inspectedTile,
+      // The map's own revealed state: the seat's persisted reveal plus what its
+      // own units see right now. Classic games carry no reveal list (an empty
+      // seed), so the union collapses to the live vision set and the locked
+      // "Unexplored" fog decision stays byte-identical.
+      revealed: revealedSetForTilePanel(gameState, seat),
     });
     if (!info) {
       this.tileInfoPanel.hide();
@@ -941,11 +967,8 @@ export class UIManager {
       parent: document.body,
       getState: () => stateManager.getState(),
       actions: {
-        transferResources: (heroId, settlementId, direction, amounts) => {
-          const result = tc().transferResources(heroId, settlementId, direction, amounts);
-          if (result.ok) stateManager.replaceState(tc().getState());
-          return result;
-        },
+        transferResources: (heroId, settlementId, direction, amounts) =>
+          this.transferCargoFor(heroId, settlementId, direction, amounts),
         assignWagons: (heroId, delta, slot) => {
           const result = tc().assignWagons(heroId, delta, slot);
           if (result.ok) stateManager.replaceState(tc().getState());

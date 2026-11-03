@@ -26,11 +26,13 @@ const WEB_PORT = getClientPort(5173);
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
 const GAME_SEED = 424242;
-const IMPASSABLE = new Set(["water", "mountain"]);
 const DIRS = [{ q: 1, r: 0 }, { q: 1, r: -1 }, { q: 0, r: -1 }, { q: -1, r: 0 }, { q: -1, r: 1 }, { q: 0, r: 1 }];
+// A move this long guarantees the tile at hex-distance exactly 5 from the
+// origin sits >4 hexes from BOTH endpoints, so only the walked-path trail
+// (never the endpoint vision rings) can reveal it.
+const MIN_TRAIL_DISTANCE = 10;
 
 interface Axial { q: number; r: number; }
-interface Tile extends Axial { terrain: string; }
 interface PlayerRow { id: number; revealedTiles?: string[]; [key: string]: unknown; }
 interface HeroRow { ownerId: number; q: number; r: number; movementRemaining: number; }
 interface GameRow {
@@ -116,17 +118,49 @@ function sortedByQThenR(keys: string[]): boolean {
   return true;
 }
 
-// Longest consecutive passable straight-line run from `origin` per direction.
-function straightPassableRuns(tiles: Tile[], origin: Axial): Array<{ dir: Axial; run: number }> {
-  return DIRS.map((dir) => {
-    let run = 0;
-    for (let s = 1; ; s++) {
-      const t = tiles.find((x) => x.q === origin.q + dir.q * s && x.r === origin.r + dir.r * s);
-      if (!t || IMPASSABLE.has(t.terrain)) break;
-      run = s;
+// Destination selection asks the LIVE game instead of keeping a second,
+// hand-rolled copy of the engine's terrain cost table. __gameDebug.isPassable
+// delegates straight to the engine's GameMap.isPassable (TERRAIN_COST in
+// packages/engine/src/map/terrain.ts, plus rivers), so a hex it reports
+// passable is exactly one findPath/requestMove will accept. The old fixture
+// hardcoded IMPASSABLE = {water, mountain}, which disagreed with the engine on
+// the current map generation (mapGenVersion 5 prices denseForest at Infinity
+// too); on this seed that made part [D] target a denseForest the engine
+// refuses, failing the suite before its own assertions.
+
+// The most open of the six directions: the longest straight run of hexes the
+// engine prices. Ties keep DIRS order.
+async function mostOpenDirection(page: Page, origin: Axial): Promise<Axial | null> {
+  return page.evaluate(({ o, dirs }: { o: Axial; dirs: Axial[] }) => {
+    const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
+    let best: { d: { q: number; r: number }; run: number } | null = null;
+    for (const d of dirs) {
+      let run = 0;
+      for (let s = 1; s <= 64; s++) {
+        if (!dbg.isPassable(o.q + d.q * s, o.r + d.r * s)) break;
+        run = s;
+      }
+      if (!best || run > best.run) best = { d, run };
     }
-    return { dir, run };
-  });
+    return best && best.run > 0 ? best.d : null;
+  }, { o: origin, dirs: DIRS });
+}
+
+// Endpoint of a run of `distance` hexes the engine prices all the way through
+// (a non-adjacent destination when distance >= 2), or null if no direction is
+// open that far.
+async function enginePassableDest(page: Page, origin: Axial, distance: number): Promise<Axial | null> {
+  return page.evaluate(({ o, dist, dirs }: { o: Axial; dist: number; dirs: Axial[] }) => {
+    const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
+    for (const d of dirs) {
+      let open = true;
+      for (let s = 1; s <= dist; s++) {
+        if (!dbg.isPassable(o.q + d.q * s, o.r + d.r * s)) { open = false; break; }
+      }
+      if (open) return { q: o.q + d.q * dist, r: o.r + d.r * dist };
+    }
+    return null;
+  }, { o: origin, dist: distance, dirs: DIRS });
 }
 
 async function openGame(page: Page, name: string, gameId: string): Promise<void> {
@@ -226,23 +260,20 @@ async function corridorAndPersistence(browser: Browser): Promise<void> {
   const origin = { q: hero.q, r: hero.r };
   await seedHeroMovement(name, "p0-hero", 25);
 
-  const tilesRes = await api("GET", `/api/games/${name}/tiles`);
-  assert.equal(tilesRes.status, 200, `tiles ${name} -> ${tilesRes.status}`);
-  const tiles: Tile[] = tilesRes.json;
-
-  // A trail-only corridor tile exists when some direction has a >=10 straight
-  // passable run: the tile at hex-distance exactly 5 from the origin is >4
-  // from BOTH endpoints, so only the walked-path trail can reveal it.
-  const runs = straightPassableRuns(tiles, origin)
-    .filter((x) => x.run >= 10)
-    .sort((a, b) => b.run - a.run);
-  assert(runs.length > 0, `no straight passable run of >=10 hexes from ${origin.q},${origin.r} (seed ${GAME_SEED})`);
-  const { dir, run } = runs[0];
-  const dest = { q: origin.q + dir.q * run, r: origin.r + dir.r * run };
-
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await openGame(page, name, game.id);
   await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.setSelectedHero("p0-hero"));
+
+  // A trail-only corridor tile exists when the destination is >= MIN_TRAIL_DISTANCE
+  // away: the tile at hex-distance exactly 5 from the origin is then >4 from BOTH
+  // endpoints, so only the walked-path trail can reveal it. We walk that far along
+  // the most open direction the ENGINE prices rather than scanning straight lines
+  // with a hand-rolled terrain table -- __gameDebug.isPassable is the engine's own
+  // predicate, so the direction (and the hexes along it) are ones the engine's
+  // pathfinding accepts.
+  const dir = await mostOpenDirection(page, origin);
+  assert(dir, `no engine-passable straight direction from ${origin.q},${origin.r} (seed ${GAME_SEED})`);
+  const dest = { q: origin.q + dir.q * MIN_TRAIL_DISTANCE, r: origin.r + dir.r * MIN_TRAIL_DISTANCE };
   const moved = await page.evaluate(
     (t: Axial) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.requestMove("p0-hero", t.q, t.r),
     dest,
@@ -268,6 +299,28 @@ async function corridorAndPersistence(browser: Browser): Promise<void> {
   });
   assert(corridorKey, "no corridor tile at hex-distance 5 from origin revealed (trail not wired into MoveHero)");
   console.log(`>> [B] move landed, destination + corridor ${corridorKey} revealed server-side`);
+
+  // The client's OWN copy of that projection, read BEFORE the reload that
+  // rehydrates it from the server: this is the value GameEngine.draw seeds the
+  // renderer from and what a playthrough card measures. It used to stay at its
+  // load-time value for the whole session -- measured 98 keys against the
+  // server's 134, 36 keys behind, never reconciled (playthrough round 3, F1) --
+  // masked only because the render re-unions the live vision ring every frame.
+  const inSession = await page.evaluate(() => {
+    const st = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getState();
+    const p = st.players.find((x) => x.id === 0);
+    return (p?.revealedTiles ?? []) as string[];
+  });
+  assert(
+    inSession.includes(`${dest.q},${dest.r}`),
+    `the client's own revealedTiles is behind the server (client ${inSession.length} keys, server ${reveal.length}): destination ${dest.q},${dest.r} missing in-session`,
+  );
+  assert(inSession.includes(corridorKey!), `the client's own revealedTiles is behind the server: corridor ${corridorKey} missing in-session`);
+  assert(
+    inSession.length >= reveal.length,
+    `the client's own revealedTiles (${inSession.length}) is behind the server's (${reveal.length}) after a move`,
+  );
+  console.log(`>> [B] in-session client mirror holds ${inSession.length} keys vs the server's ${reveal.length} -- destination + corridor present`);
 
   // Full reload: client hydrates players[] from the games JSONB, so the
   // persisted reveal must come back with the same keys.
@@ -329,16 +382,21 @@ async function negativeBackwardCompat(browser: Browser): Promise<void> {
   const hero = row.heroes["p0-hero"];
   assert(hero, `p0-hero missing in ${name}`);
   const origin = { q: hero.q, r: hero.r };
-  const tilesRes = await api("GET", `/api/games/${name}/tiles`);
-  assert.equal(tilesRes.status, 200, `tiles ${name} -> ${tilesRes.status}`);
-  const tiles: Tile[] = tilesRes.json;
-  const runs = straightPassableRuns(tiles, origin).filter((x) => x.run >= 2);
-  assert(runs.length > 0, `no straight passable run of >=2 hexes from ${origin.q},${origin.r}`);
-  const dest = { q: origin.q + runs[0].dir.q * 2, r: origin.r + runs[0].dir.r * 2 };
 
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await openGame(page, name, game.id);
   await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.setSelectedHero("p0-hero"));
+
+  // Destination chosen by ASKING THE GAME, not by a hand-rolled copy of the
+  // terrain cost table: the old fixture kept IMPASSABLE = {water, mountain},
+  // which disagreed with the engine on the current map generation (mapGenVersion
+  // 5 prices denseForest at Infinity too), so from hero (5,7) it picked (7,7) --
+  // a denseForest the engine refuses, making requestMove return false and the
+  // suite fail before its own assertions. isPassable() is the engine's own
+  // predicate, so the picked destination is one requestMove accepts.
+  const dest = await enginePassableDest(page, origin, 2);
+  assert(dest, `no engine-passable two-hex destination from ${origin.q},${origin.r} in ${name} (seed ${GAME_SEED})`);
+
   const moved = await page.evaluate(
     (t: Axial) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.requestMove("p0-hero", t.q, t.r),
     dest,

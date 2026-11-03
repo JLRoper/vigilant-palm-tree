@@ -14,6 +14,7 @@ import { ViewManager } from "./ViewManager";
 import { UIManager } from "./UIManager";
 import { GameActions } from "./GameActions";
 import { GameSessionManager } from "./GameSessionManager";
+import { createToolbarLoadCallback } from "./toolbarLoadCallback";
 import { attachDebugApi } from "../io/debugCommands";
 import { bus } from "../core/eventBus";
 import { attachEventLog, type EventLog } from "../debug/eventLog";
@@ -192,9 +193,12 @@ export class GameEngine {
   private initUI(): void {
     this.ui.initToolbar(this.session, this.state, () => this.getCalendar(), {
       onNew: (opts) => void this.sessions.handleNewGame(opts).then(() => this.fullFrame()),
-      onLoad: (loaded) => void this.sessions.loadGame(loaded).then(() => {
-        this.actions.maybeAutoResolveBattle();
-        this.fullFrame();
+      onLoad: createToolbarLoadCallback({
+        loadGame: (loaded) => this.sessions.loadGame(loaded),
+        afterLoad: () => {
+          this.actions.maybeAutoResolveBattle();
+          this.fullFrame();
+        },
       }),
       onSave: () => void this.sessions.handleManualSave().then(() => this.fullFrame()),
       onEndTurn: () => void this.actions.handleEndTurn().then(() => this.fullFrame()),

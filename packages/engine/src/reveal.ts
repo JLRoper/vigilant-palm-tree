@@ -68,3 +68,38 @@ export function mergePlayerReveal(
   );
   return { ...state, players };
 }
+
+/**
+ * The ONE uncharted-mode reveal rule: union a seat's current vision -- hero
+ * rings (HERO_VISION_RANGE) plus its owned settlements' controlRange -- into its
+ * persisted `players[].revealedTiles`. `extraPoints` adds its rings too, which
+ * is how a multi-hex move reveals the corridor it walked rather than only the
+ * tile it landed on.
+ *
+ * Both writers call THIS function, so the persisted reveal and the client's
+ * copy of it cannot disagree: the server applies it after every command
+ * (server/app/commandHandler.ts) and persists the result, and the client applies
+ * it to its own optimistic state on the same commands.
+ *
+ * Gated on the seat MAINTAINING a reveal -- a human (`faction === "player"`)
+ * seat of an uncharted game, which is exactly the set init.ts's
+ * `seedInitialReveal` stamps with the `revealedTiles` key. AI seats are never
+ * stamped (their reveal is never rendered or maintained), and no seat of a
+ * classic game is, so for those this is a no-op and their persisted rows stay
+ * byte-identical.
+ */
+export function revealForPlayer(
+  state: GameState,
+  playerId: number,
+  extraPoints?: readonly { q: number; r: number }[],
+): GameState {
+  const player = state.players.find((p) => p.id === playerId);
+  if (!player || player.faction !== "player" || player.revealedTiles === undefined) {
+    return state;
+  }
+  const keys = visionKeysForPlayer(state, playerId);
+  if (extraPoints) {
+    for (const key of visionKeysAroundPoints(extraPoints)) keys.add(key);
+  }
+  return mergePlayerReveal(state, playerId, keys);
+}

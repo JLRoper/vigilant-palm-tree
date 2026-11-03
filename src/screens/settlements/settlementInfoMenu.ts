@@ -8,6 +8,8 @@ import { DockedPanel } from "@screens/shared/dockedPanel";
 import { loadPanelGeometry, savePanelGeometry } from "@screens/shared/panelLayout";
 import type { PanelRect } from "@screens/shared/panelPlacement";
 import { AccordionSection, makeRow } from "@screens/shared/panelWidgets";
+import { cargoTransferRefusalMessage, cargoTransferRequest, type CargoTransferVerb } from "@screens/shared/cargoTransfer";
+import { showToast } from "@screens/shared/toast";
 import { DESERTION_AFTER_WEEKS } from "@screens/shared/upkeepWarnings";
 import { liveSettlementUpkeepUnfed } from "@screens/shared/heroUpkeepCost";
 import { RESOURCE_PILE_BUBBLY_SPRITES, settlementBannerUrl } from "../../render/assetDescriptors";
@@ -15,7 +17,7 @@ import { bankRejectionMessage, bankRowModel, treasuryRowModel, type BankGoldDire
 import { TREASURY_CAP_AMBER, treasuryCapBlockerMessage, treasuryCapBlocksGold, treasuryCapMessage, treasuryCapped } from "./treasuryCap";
 import { dailyRateTitle, foodBalanceTitle, formatDailyRate, populationCapTitle, resourceLabel, settlementDailyRates } from "./panelRates";
 import type { HorseVariant } from "../../state/settings";
-import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
+import { WAREHOUSE_RESOURCES, type WarehouseResource } from "@heroes/contracts";
 import { districtPopulationBonus, POP_BY_LEVEL, settlementPopulationCap, UPGRADE_POPULATION_GATE, effectiveSettlementIncome, settlementTreasuryCap, workforcePool, assignedWorkersExplicit, hasLegacyStaffing } from "@heroes/engine";
 import { pickHeroName } from "../../data/heroNames";
 import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
@@ -38,6 +40,17 @@ export interface SettlementInfoMenuOptions {
     amount: number,
     direction: BankGoldDirection,
     district?: { q: number; r: number },
+  ) => { ok: boolean; reason: string };
+  /**
+   * One hero-cargo transfer, in the ENGINE's direction vocabulary ("load" is
+   * hero -> settlement; shared/cargoTransfer.ts owns that mapping). The panel
+   * hands it the request the shared model built.
+   */
+  onTransferCargo?: (
+    heroId: string,
+    settlementId: string,
+    direction: "load" | "unload",
+    amounts: Partial<Record<WarehouseResource, number>>,
   ) => { ok: boolean; reason: string };
   /** Double-clicking the banner asks for the settlement's city view. */
   onEnterCityView?: (settlementId: string) => void;
@@ -71,6 +84,10 @@ export class SettlementInfoMenu {
   private bannerEl: HTMLImageElement;
   private warehouseEls: Record<string, HTMLSpanElement>;
   private warehouseRateEls: Record<string, HTMLSpanElement>;
+  private cargoTransferRow: HTMLDivElement;
+  private cargoTransferLabel: HTMLSpanElement;
+  private cargoTransferButtons: Record<CargoTransferVerb, HTMLButtonElement>;
+  private heroAtTile: HeroState | null = null;
   private onCloseCallback?: () => void;
   private onRecruitHero?: (name: string, variant: HorseVariant) => void;
   private recruitContainer: HTMLDivElement;
@@ -102,6 +119,12 @@ export class SettlementInfoMenu {
     direction: BankGoldDirection,
     district?: { q: number; r: number },
   ) => { ok: boolean; reason: string };
+  private onTransferCargo?: (
+    heroId: string,
+    settlementId: string,
+    direction: "load" | "unload",
+    amounts: Partial<Record<WarehouseResource, number>>,
+  ) => { ok: boolean; reason: string };
 
   constructor(opts: SettlementInfoMenuOptions) {
     this.onCloseCallback = opts.onClose;
@@ -112,6 +135,7 @@ export class SettlementInfoMenu {
     this.onReorderGarrison = opts.onReorderGarrison;
     this.onReorderHero = opts.onReorderHero;
     this.onBankGold = opts.onBankGold;
+    this.onTransferCargo = opts.onTransferCargo;
     this.onEnterCityView = opts.onEnterCityView;
     this.canEnterCityView = opts.canEnterCityView;
     this.menu = new FloatingPanel({
@@ -310,10 +334,53 @@ export class SettlementInfoMenu {
       });
       row.appendChild(rate);
 
+      // Addressable per-resource readout: a browser suite reads a delivery off
+      // this row, the way the hero panel's cargo cells carry data-hero-cargo.
+      value.dataset.warehouseStock = r;
       this.warehouseEls[r] = value;
       this.warehouseRateEls[r] = rate;
       list.appendChild(row);
     }
+
+    // Hero cargo in and out of THIS warehouse: the other half of the pickup
+    // verb (packages/engine/src/hero/pickupResource.ts). Shown only while a
+    // same-seat hero stands on the tile -- the one state the engine's
+    // TransferResources accepts -- and a dead button says why it is dead
+    // instead of doing nothing.
+    this.cargoTransferRow = document.createElement("div");
+    Object.assign(this.cargoTransferRow.style, {
+      display: "none",
+      flexDirection: "column",
+      gap: "4px",
+      marginBottom: "4px",
+    });
+    this.cargoTransferLabel = document.createElement("span");
+    Object.assign(this.cargoTransferLabel.style, { fontSize: "10px", opacity: "0.65" });
+    this.cargoTransferRow.appendChild(this.cargoTransferLabel);
+    const cargoTransferButtons = document.createElement("div");
+    Object.assign(cargoTransferButtons.style, { display: "flex", gap: "6px" });
+    const cargoTransferVerbs: Array<[CargoTransferVerb, string]> = [
+      ["deposit", "Deposit cargo"],
+      ["withdraw", "Take cargo"],
+    ];
+    const builtButtons = {} as Record<CargoTransferVerb, HTMLButtonElement>;
+    for (const [verb, label] of cargoTransferVerbs) {
+      const btn = document.createElement("button");
+      btn.textContent = label;
+      btn.dataset.cargoTransfer = verb;
+      Object.assign(btn.style, {
+        flex: "1",
+        padding: "4px 6px",
+        fontSize: "11px",
+        cursor: "pointer",
+      });
+      btn.addEventListener("click", () => this.requestCargoTransfer(verb));
+      cargoTransferButtons.appendChild(btn);
+      builtButtons[verb] = btn;
+    }
+    this.cargoTransferButtons = builtButtons;
+    this.cargoTransferRow.appendChild(cargoTransferButtons);
+    this.warehouseAccordion.body.appendChild(this.cargoTransferRow);
 
     this.bankAccordion = new AccordionSection({ label: "Banking", onToggle: () => this.reposition() });
     body.appendChild(this.bankAccordion.element);
@@ -503,6 +570,8 @@ export class SettlementInfoMenu {
       rateEl.title = dailyRateTitle(row);
     }
 
+    this.updateCargoTransfer(settlement);
+
     let showRecruit = false;
     if (this.onRecruitHero && settlement.ownerId !== null) {
       const player = state.players.find((p) => p.id === settlement.ownerId);
@@ -606,6 +675,59 @@ export class SettlementInfoMenu {
    * again the moment the settlement un-caps (a capture can drop the gold; a
    * bank or treasury can raise the cap).
    */
+  /**
+   * The hero cargo row: the hero standing on THIS tile, what each direction
+   * would move, and the reason either button is dead. Both requests come from
+   * the shared model, so the two surfaces that mount this verb (this panel and
+   * the Logistics modal) cannot disagree about direction or amounts.
+   */
+  private updateCargoTransfer(settlement: SettlementState): void {
+    const standing =
+      this.getHeroesAtSettlement?.(settlement.id).find((h) => h.ownerId === settlement.ownerId) ?? null;
+    this.heroAtTile = standing;
+    if (!standing) {
+      this.cargoTransferRow.style.display = "none";
+      return;
+    }
+    const deposit = cargoTransferRequest(standing, settlement, "deposit");
+    const withdraw = cargoTransferRequest(standing, settlement, "withdraw");
+    this.cargoTransferRow.style.display = "flex";
+    this.cargoTransferLabel.textContent = standing.name + " — hero cargo";
+    const depositBtn = this.cargoTransferButtons.deposit;
+    const withdrawBtn = this.cargoTransferButtons.withdraw;
+    depositBtn.disabled = deposit.total <= 0;
+    depositBtn.title =
+      deposit.total > 0
+        ? "Move " + deposit.total + " of the hero's cargo into the warehouse"
+        : deposit.source > 0
+          ? "The warehouse is full"
+          : "The hero's wagons are empty";
+    withdrawBtn.disabled = withdraw.total <= 0;
+    withdrawBtn.title =
+      withdraw.total > 0
+        ? "Take " + withdraw.total + " out of the warehouse into the hero's cargo"
+        : withdraw.source > 0
+          ? "The hero's wagons are full"
+          : "The warehouse is empty";
+    for (const btn of [depositBtn, withdrawBtn]) {
+      btn.style.opacity = btn.disabled ? "0.4" : "1";
+      btn.style.cursor = btn.disabled ? "default" : "pointer";
+    }
+  }
+
+  /** One cargo transfer for the hero standing here; a refusal reads with the engine's own reason. */
+  private requestCargoTransfer(verb: CargoTransferVerb): void {
+    const settlement = this.lastSettlement;
+    const hero = this.heroAtTile;
+    if (!settlement || !hero || !this.onTransferCargo) return;
+    const request = cargoTransferRequest(hero, settlement, verb);
+    if (request.total <= 0) return;
+    const result = this.onTransferCargo(hero.id, settlement.id, request.direction, request.amounts);
+    if (!result.ok) {
+      showToast("Cargo transfer failed: " + cargoTransferRefusalMessage(result.reason), "error");
+    }
+  }
+
   private updateTreasuryRow(settlement: SettlementState, state: GameState): void {
     const cap = settlementTreasuryCap(settlement);
     const owned = settlement.ownerId !== null && settlement.ownerId === state.activePlayerId;

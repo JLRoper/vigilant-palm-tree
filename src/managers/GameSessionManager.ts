@@ -12,7 +12,8 @@ import type { Game } from "../io/api";
 import { hydrateClientGame } from "../io/hydrateClientGame";
 import type { FactionId, GameMode } from "@heroes/contracts";
 import { notePersisted } from "../io/commands";
-import { getLocalPlayerId, resolveInitialLocalSeat, setInMemoryLocalPlayerId } from "../players/localPlayer";
+import { setInMemoryLocalPlayerId, getLocalPlayerId, getLocalClaimHandle, rememberSelfClaim } from "../players/localPlayer";
+import { resolveLocalSeat } from "../players/localSeat";
 import { getMultiplayerSync, getEntityMirror } from "../io/multiplayerSync";
 import { clearServerDriven, syncServerDrivenFromGame } from "../io/serverDrivenGames";
 import { setUncharted } from "../io/unchartedGames";
@@ -80,26 +81,25 @@ export class GameSessionManager {
     this.view.updateMap(map);
     // The seat this browser holds, resolved BEFORE the camera: the centre below
     // keys off it, and a reloaded tab has no in-memory seat for this game yet.
-    const claimed = (loaded as unknown as { lobby?: { claimed?: Record<string, { handle: string }> } }).lobby?.claimed ?? {};
-    // F2 (playthrough round 2b): the lobby holds several claims in a
-    // multi-human game, and the browser must play the one IT claimed -- not
-    // whichever happens to come first in the jsonb (that reset a browser that
-    // had claimed seat 1 back to seat 0). Stored in localStorage by the lobby
-    // flows; see resolveInitialLocalSeat for the fallback. The camera below
-    // reads the same seat, so the two cannot disagree.
-    const claimedSeats = Object.keys(claimed)
-      .filter((k) => claimed[k])
-      .map(Number)
-      .filter((n) => Number.isInteger(n));
-    const localSeat = resolveInitialLocalSeat(claimedSeats, getLocalPlayerId(loaded.name));
-    if (localSeat !== null) setInMemoryLocalPlayerId(loaded.name, localSeat);
+    // The claim map cannot say which seat is OURS by itself -- taking its first
+    // entry put a browser holding seat 1 on seat 0's wagon -- so it is matched
+    // against what this browser remembers: the seat it claimed, the handle it
+    // claimed with, or the email the server bound the claim to. No match means
+    // no seat is asserted (src/players/localSeat.ts).
+    const claimed = loaded.lobby?.claimed ?? {};
+    const localSeat = resolveLocalSeat(claimed, {
+      rememberedSeat: getLocalPlayerId(loaded.name),
+      handle: getLocalClaimHandle(loaded.name),
+      email: getCachedAuth()?.email ?? null,
+    });
+    if (localSeat.seat !== null) setInMemoryLocalPlayerId(loaded.name, localSeat.seat);
     // F6 (playthrough round 2b): centre on what THIS game actually has -- the
     // seat's own wagon / commander / settlement. The load path used to key off
     // `getHero(playerHeroId())` (literally "p0-hero", which no settlers game has
     // before founding) with the classic castle-less spawn hex {q:6,r:5} as its
     // fallback, so an unfounded settlers game opened fully fogged with the
     // player's wagon off screen. Ladder + fallback: src/game/loadCamera.ts.
-    const center = resolveLoadCameraCenter(hydrated, localSeat ?? 0, map);
+    const center = resolveLoadCameraCenter(hydrated, localSeat.seat, map);
     this.view.centerOn(center.q, center.r);
     this.ui.getToolbar()?.refresh();
     void this.session.logEvent(loaded.name, "load_game", {});
@@ -180,6 +180,7 @@ export class GameSessionManager {
     const seat = 0;
     const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? `Player ${seat + 1}`;
     await this.session.claimLobbySeat(created.name, seat, handle);
+    rememberSelfClaim(created.name, seat, handle);
     await this.loadGame(created);
     void this.session.logEvent(created.name, "new_game", {
       seed: opts.seed,
@@ -219,6 +220,7 @@ export class GameSessionManager {
       const seat = 0;
       const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? `Player ${seat + 1}`;
       await this.session.claimLobbySeat(created.name, seat, handle);
+      rememberSelfClaim(created.name, seat, handle);
       await this.loadGame(created);
       void this.session.logEvent(created.name, "session_start", {
         seed: MAP_SEED,

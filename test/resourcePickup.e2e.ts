@@ -24,7 +24,10 @@ import type { GameDebugApi } from "../src/io/debugCommands";
 //      refusal ("wagons are full") instead of silently doing nothing, and the
 //      tile's number does not move;
 //  (4) a reload shows the REDUCED amount, not a fresh tile: the remaining
-//      amount is server state (games.resource_deposits), not a client guess.
+//      amount is server state (games.resource_deposits), not a client guess;
+//  (5) the hero CARRIES the cargo home and DELIVERS it through the settlement
+//      panel's Warehouse row -- the other half of the verb (playthrough finding
+//      F-2: map-picked cargo had no UI path into a settlement).
 //
 // The game is created and deleted by exact name (never a table sweep), and the
 // suite runs on this worktree's own ports and its own PGDATABASE.
@@ -42,6 +45,13 @@ const PER_RESOURCE_CAP = CARGO_WAGONS * 50;
 
 interface Axial { q: number; r: number }
 interface Tile extends Axial { terrain: string; resource: string | null }
+interface SettlementRow {
+  q: number;
+  r: number;
+  name: string;
+  ownerId: number | null;
+  warehouse?: Record<string, number>;
+}
 interface HeroRow {
   id?: string;
   name?: string;
@@ -88,8 +98,8 @@ async function api(method: string, path: string, body?: unknown): Promise<{ stat
   return { status: res.status, json };
 }
 
-async function gameRow(name: string): Promise<{ heroes: Record<string, HeroRow>; resource_deposits: Record<string, number> | null }> {
-  const r = await db.query(`SELECT heroes, resource_deposits FROM games WHERE name = $1`, [name]);
+async function gameRow(name: string): Promise<{ heroes: Record<string, HeroRow>; settlements: Record<string, SettlementRow>; resource_deposits: Record<string, number> | null }> {
+  const r = await db.query(`SELECT heroes, settlements, resource_deposits FROM games WHERE name = $1`, [name]);
   assert(r.rows[0], `game ${name} missing from db`);
   return r.rows[0];
 }
@@ -228,6 +238,38 @@ async function remainingOnScreen(line: string): Promise<number | null> {
 async function cargoOnScreen(page: Page, resource: string): Promise<number> {
   const text = await page.locator(`[data-hero-cargo="${resource}"]`).first().innerText();
   return Number(text);
+}
+
+/** A resource's stock on the settlement panel, as the player reads it. */
+async function warehouseStock(page: Page, resource: string): Promise<number> {
+  const text = await page.locator(`[data-warehouse-stock="${resource}"]`).first().innerText();
+  return Number(text.replace(/[^0-9.-]/g, ""));
+}
+
+/**
+ * Opens the settlement panel through the door a player standing on their own
+ * settlement has: the toolbar's Settlements roster. A click on that hex is a
+ * HERO gesture while a hero stands there (clickIntent.ts resolves your own hero
+ * first), so the roster row is the way in -- and the panel is where the cargo
+ * row lives.
+ */
+async function openSettlementPanel(page: Page, settlementName: string): Promise<void> {
+  await page.locator("button").filter({ hasText: /Settlements/ }).first().click();
+  await wait(700);
+  const clicked = await page.evaluate((n) => {
+    const rows = Array.from(document.querySelectorAll("div")).filter(
+      (d) =>
+        getComputedStyle(d).cursor === "pointer" &&
+        (d.textContent ?? "").includes(n),
+    );
+    rows.sort((a, b) => (a.textContent ?? "").length - (b.textContent ?? "").length);
+    const row = rows[0];
+    if (!row) return false;
+    row.click();
+    return true;
+  }, settlementName);
+  assert(clicked, `no roster row matched ${settlementName}`);
+  await wait(800);
 }
 
 async function main(): Promise<void> {
@@ -396,6 +438,89 @@ async function main(): Promise<void> {
         await remainingOnScreen(reloadedLine),
         fixture.pristine - expectedTake,
         "a reloaded game must show the reduced amount, not a fresh tile",
+      );
+
+      // (5) THE OTHER HALF (F-2): carry the cargo home and deliver it through
+      // the settlement panel's Warehouse row. Walking home is a real move
+      // command and the delivery is the panel's own button.
+      const homeEntries = Object.entries((await gameRow(name)).settlements);
+      const homePick = homeEntries.find(([, s]) => s.ownerId === 0) ?? homeEntries[0];
+      assert(homePick, "the fixture game must own a settlement to deliver into");
+      const [homeId, home] = homePick;
+      await db.query(
+        `UPDATE games SET heroes = jsonb_set(heroes, '{${HERO_ID},movementRemaining}', '80') WHERE name = $1`,
+        [name],
+      );
+      await page.evaluate((id) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.setSelectedHero(id), HERO_ID);
+      await wait(250);
+      const homeward = await page.evaluate(
+        ({ id, q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.requestMove(id, q, r),
+        { id: HERO_ID, q: home.q, r: home.r },
+      );
+      assert.equal(homeward, true, "the walk home was refused");
+      await page.waitForFunction(
+        ({ id, q, r }) => {
+          const s = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getState() as { heroes?: Record<string, HeroRow> };
+          return s?.heroes?.[id]?.q === q && s?.heroes?.[id]?.r === r;
+        },
+        { id: HERO_ID, q: home.q, r: home.r },
+        { timeout: 20000 },
+      );
+      await wait(700);
+      const atHome = (await gameRow(name)).heroes[HERO_ID];
+      assert.equal(
+        `${atHome.q},${atHome.r}`,
+        `${home.q},${home.r}`,
+        "the hero must be standing ON its own settlement",
+      );
+      const carried = atHome.resources?.[fixture.resource] ?? 0;
+      assert.equal(carried, expectedTake, "the hero carried the whole pickup home");
+
+      await openSettlementPanel(page, home.name);
+      const deliver = page.locator('[data-cargo-transfer="deposit"]').first();
+      await deliver.waitFor({ state: "visible", timeout: 10000 });
+      const stockBefore = await warehouseStock(page, fixture.resource);
+      const deliverTitle = (await deliver.getAttribute("title")) ?? "";
+      assert.equal(
+        await deliver.isDisabled(),
+        false,
+        "a hero standing on its own settlement with cargo is offered the deposit",
+      );
+      assert.match(
+        deliverTitle,
+        new RegExp(`Move ${carried} of the hero's cargo into the warehouse`),
+        `the button names what it will move, got "${deliverTitle}"`,
+      );
+      console.log(`>> panel: "${deliverTitle}"`);
+      await deliver.click();
+      let stockAfter = stockBefore;
+      for (let i = 0; i < 20 && stockAfter !== stockBefore + carried; i++) {
+        await wait(300);
+        stockAfter = await warehouseStock(page, fixture.resource);
+      }
+      console.log(`>> delivered: warehouse ${fixture.resource} ${stockBefore} -> ${stockAfter} (carried ${carried})`);
+      assert.equal(stockAfter, stockBefore + carried, "the whole hold must ARRIVE in the warehouse");
+
+      // The panel is optimistic, so the ARRIVAL is only proven once the server
+      // row carries it: the hook's POST is fire-and-forget.
+      const expectedStock = stockBefore + carried;
+      let persisted = -1;
+      for (let i = 0; i < 25 && persisted !== expectedStock; i++) {
+        await wait(400);
+        persisted = (await gameRow(name)).settlements[homeId]?.warehouse?.[fixture.resource] ?? -1;
+      }
+      assert.equal(persisted, expectedStock, "the persisted warehouse must carry the delivery");
+      const deliveredRow = await gameRow(name);
+      assert.equal(
+        deliveredRow.heroes[HERO_ID].resources?.[fixture.resource] ?? 0,
+        0,
+        "and the wagons must be empty again",
+      );
+      const clientDelivered = await clientHero(page);
+      assert.equal(
+        clientDelivered?.resources?.[fixture.resource] ?? 0,
+        0,
+        "the client's hero agrees the hold is empty",
       );
 
       await page.close();

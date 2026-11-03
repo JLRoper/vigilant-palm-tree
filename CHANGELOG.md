@@ -10,13 +10,129 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.6] - 2026-11-03
+
+F1 (the client's `players[].revealedTiles` mirror went stale and a renderer trick hid it): after a move the server's persisted reveal grew while the client's own copy of it stayed at its load-time value for the whole session -- measured 98 keys against the server's 134, 36 of them present only on the server, never reconciled -- and nothing showed, because `GameEngine.draw` handed that copy to `src/render/reveal.ts`, which re-unioned the live vision ring every frame: the render compensated for the projection instead of the projection being right. The verdict, read off the writers and the consumers: the server's persisted projection is authoritative, the client's copy is a projection of it that only hydration ever wrote, and it now has two consumers -- the renderer's seed and, since F2 above, the tile panel's `revealedSetForTilePanel` -- so the mirror is RECONCILED rather than deleted, by applying the SAME rule instead of a second one. `revealForPlayer` (`packages/engine/src/reveal.ts`) unions a seat's vision rings -- plus the walked corridor -- into its reveal, gated on the seat maintaining one, and now lives in the engine: `server/app/commandHandler.ts` imports it (its local copy and `isHuman` helper are gone, behaviour unchanged) and the client applies it on the same four commands the server does (`TurnController.revealReconciled` -- moves, chartered travel, captures, foundings), so the copy follows the server instead of waiting for a reload or a resync a solo game never performs. `src/render/reveal.ts` then draws the persisted list **as of each frame**, unioned with the tiles this session's own vision has seen, so no load-time snapshot and no monotone accumulator is left standing between the projection and the pixels. Proof at the level the defect lives: `test/state/revealMirrorReconcile.test.ts` reads the client's own `players[].revealedTiles` after a move (RED on the previous revision -- "measured: 61 keys before, 61 after; destination 12,2 MISSING"), and `test/unchartedMode.e2e.ts` reads the same value in the browser BEFORE the reload that would rehydrate it (RED without the client half -- "the client's own revealedTiles is behind the server: destination 5,17 missing in-session"; green -- in-session client mirror holds 227 keys vs the server's 227).
+
+## [0.39.5] - 2026-11-03
+
+the load path remembers the seat it claimed, so a reload opens where you are
+
+`test:districts` was red on main. Re-measured on the real tip first: `git fetch github` → `f7e02a3` (0.39.2), where `districts.e2e.ts:372` failed verbatim — `AssertionError [ERR_ASSERTION]: district did not re-open after reload` / `false !== true` (`>> threw:` … `at run (test/districts.e2e.ts:372:12)`). Attributed by RUNNING the suite at the commit on either side of each candidate in `a895975..fd18ec0`, not by reading: green at `a895975` (0.38.12), green at `adcbc18` (0.38.13, PR #297), **red from `0bc64b7` (0.38.14, PR #296 — the load-path/seat-resolver landing) on**, red again at `fd18ec0` (0.39.0, PR #295) and at the tip. The flip is PR #296's, and it is a real product regression, not test drift.
+
+- **the mechanism, read out of the running client at the culprit commit:** after the reload `resolveLocalSeat` answered `{"seat":null,"source":"unknown"}` for a game whose claim map held `{"0":{"handle":"Player 1",…}}`, so the load camera centred `{"q":17.5,"r":13,"source":"map-centre"}` instead of the seat's own castle at `(2,9)`. Every claim check falls back to seat 0, so nothing else refused — the district hex had simply fallen off screen and the double-click never reached it.
+- **the cause:** the client's own self-claims — the New Game form and the auto-created starter, both seat 0, `src/managers/GameSessionManager.ts` — claimed a seat server-side and never recorded it locally. PR #296 removed the old fallback (the *lowest* claimed seat, which happened to be the creator's 0), so a browser that had claimed its own seat now had nothing to be identified BY on reload. Verified against the DB, not inferred: `SELECT lobby->'claimed' FROM games` on the run's own game returns exactly that single seat-0 claim.
+- **the fix is the missing memory, never a softened guess:** both self-claim sites now call the same `rememberSelfClaim()` (`src/players/localPlayer.ts`) the multiplayer lobby's Host/Join tabs already used, which writes the remembered seat, the claim handle and the in-memory seat. `resolveLocalSeat` still refuses to assert a seat the browser cannot prove it holds.
+- **surfaces:** the reload path is shared by every game a browser self-claims through `GameSessionManager.loadGame` → `resolveLocalSeat` (the load camera and the in-memory seat). Verified in a browser by `test:districts` (green on this tree) and by `test:settlements` (green, unaffected); pinned by a new unit file `test/state/selfClaimMemory.test.ts` whose last case reads `src/` and fails if ANY `.claimLobbySeat(` call site stops remembering its seat, so a new claim path cannot reintroduce this silently.
+- docs: `docs/multiplayer.md`'s Local-seat-identity row now states the rule — claiming a seat and remembering it are one act.
+
+## [0.39.4] - 2026-11-03
+
+F3 (the camera could lose the map): there was no pan clamp, so repeated drags walked it arbitrarily far off the map and the renderer -- which clamps the tiles it asks about to the map's bounds -- painted nothing. Measured on a 40x30 map at zoom 1 in a 1280x800 viewport: forty `pan(-400,-400)` drags took `mapTilesOnScreen` from 369 to 0 with the camera parked at (-16000,-16000), a black viewport whose only exit was a minimap click. `Camera.clampToMap` now keeps the map's world-pixel extent (measured from the four corner hexes) overlapping the viewport, compared against `viewport/zoom` so it holds at every zoom level, and centres a map that fits entirely. Every surface that moves the camera routes through `AdventureView.clampCamera`: the drag pan, the minimap frame drag, the wheel zoom, `centerOn` (minimap click, load centring, resize, focus-hero/settlement) and the zoom-out setting callback.
+
+F2 (the tile panel lied about what you can see): outside every vision ring the panel read "Unexplored" with no terrain and no move cost, even on hexes the map itself paints as explored ground under the fog veil -- at a dirt hex the scene builder emitted `terrainHex` + `fogHex` (veiled dirt composites to `rgb(37,31,25)`, the card's `(36,31,25)` to rounding) while `describeTile` returned `terrain: null`. "Unexplored" now means NEVER SEEN: `TileInfo.explored` is set from the seat's reveal set (`revealedSetForTilePanel` unions the persisted `revealedTiles` with live vision), and an explored hex reads its terrain label and move cost with a dim "Explored — not in sight" note. Deposits, settlements, heroes, charters and territory stay visibility-gated; classic games carry no reveal list, so there `explored` is false everywhere and the locked two-state fog rule is byte-identical.
+
+F4 (cosmetic, same family): the minimap painted every explored-but-unwatched hex as flat slate, so uncovered ground lost its biome the moment the hero walked away. `minimapCellKind` / `minimapCellFill` give the cell its tier -- visible and explored share the terrain colour (explored under a veil), uncharted stays opaque black, classic fog stays the slate.
+
+`patch`: three presentation/view-layer fixes, no schema or wire-contract change. New tests `test/render/camera.test.ts`, the F2 cases in `test/screens/adventure/tileInfoPanel.test.ts`, the F4 cases in `test/render/minimap.test.ts`; docs/map.md updated.
+
+## [0.39.3] - 2026-11-03
+
+- fix(types): the type gate checks the application and ratchets the test tree (eac6850)
+- test(uncharted): ask the game for passability instead of a hand-rolled terrain set (9fe5300)
+- chore(release): 0.39.1 with the settings-panel truthfulness fixes (da5ae39)
+- chore(release): 0.38.15 with the settings-panel truthfulness fixes (70b17fa)
+- chore(release): 0.38.14 with the settings-panel truthfulness fixes (5dfb37d)
+- chore(release): 0.38.12 with the settings-panel truthfulness fixes (26cfea1)
+- docs(player-guide): the New Game form opens on the stored preference, not the last game created (0f5ab42)
+- fix(settings): show every slider's name and value, and let a player set the default mode (2a93c68)
+- fix(sync): reconcile an unpaired resync snapshot instead of orphaning the cursor (#293) (a895975)
+- chore(release): 0.38.12, test:visual tells the truth again (8d9c69a)
+- test(visual): re-baseline the three city-view scenes (cf67390)
+- test(visual): re-baseline the three adventure/charter scenes (c242ff8)
+- chore(release): 0.38.10 with the seat-resolver and load-promise fixes (ec541c3)
+- fix(load): return the load promise through the toolbar callback (fe61e52)
+- fix(load): resolve the browser's OWN seat, not the first claimed one (6f89ece)
+- fix(ui): the hero panel's transfer buttons are gold, and now say so (821e906)
+- feat(ui): deliver hero cargo into a settlement's warehouse (547aab0)
+- chore(release): 0.38.9 with the settlement UI telling the truth (25536b3)
+- chore(release): 0.38.9 with the Load-path fixes (f97d5cb)
+- docs(settlements): record the cap-aware upgrade refusal and the panel's one rate (4a6a6bd)
+- chore(release): 0.38.8, the ledger learns to hold district buildings (f0ddd20)
+- chore(release): 0.38.8 with the Load-path fixes (fefd133)
+- chore(release): 0.38.7, the ledger learns to hold district buildings (71dbc7e)
+- fix(settlements): the panel's food rate is one entry, not two that could drift (c56671c)
+- chore(release): 0.38.7 with the Load-path fixes (3494421)
+- fix(city-view): a blocked upgrade says why, and names the cap when the cap is the blocker (a5311d3)
+- test(server): retarget the last HTTP EndTurn caller to the declared seat (2b3088b)
+- chore(release): 0.38.6, the ledger learns to hold district buildings (faf478a)
+- chore(release): 0.38.3, the ledger learns to hold district buildings (a3b8a76)
+- test(migrations): find the settlement by id, not by read order (87fc0f8)
+- chore(release): 0.38.6 with the Load-path fixes (b427bc7)
+- docs(settlements): say where a district's buildings actually persist (0d83238)
+- fix(persistence): the granular ledger holds district buildings (E8) (1efaef9)
+- chore(release): 0.38.3 with the turn-control and seat-truth fixes (deb4647)
+- fix(seats): a browser plays the seat it claimed; the hotseat decision is written down (9592c0e)
+- chore(release): 0.38.5 with the Load-path fixes (e988d3c)
+- chore(release): 0.38.3 with the district-road feedback and fidelity fixes (b541b9d)
+- docs(roads): decide the workforce reading and record the harbour rule (92aaa03)
+- fix(roads): a shipyard harbour gets its pier, and the width reading is pinned (94ab561)
+- fix(districts): speak each refused district entry on the map's toast (cca252d)
+- fix(client): reconcile the settlement mirror on the per-frame state diff (b94b862)
+- fix(logistics): Accept all is disabled when no recommendation can be accepted (45887e6)
+- fix(api): availableSeats means what it says -- the seats that are actually free (5c87f42)
+- fix(turn-control): an End Turn names the seat it acts as, and must be its own (646127a)
+- fix(load): centre the camera on what the loaded game actually has, not (6,5) (9ea9d25)
+- chore(release): 0.38.4 with the battle-persistence fixes (b9a028c)
+- fix(combat): the troops scalar tracks its stacks on BOTH sides of a battle (F3) (9b8724b)
+- fix(sync): an unseeded load never replays the event log into a settled battle (F2 client half) (73194b7)
+- fix(combat): refuse a defender-seat resolve the lobby no longer marks pending (F2) (f3023f7)
+- fix(load-modal): close the dialog the Open actually used, so no overlay is left (f16c21c)
+- chore(release): 0.38.3 with the town-hall L2/L3 re-art (5aeab4d)
+- fix(sprites): the town hall's L2 and L3 lots are 30 deg and plinth-less too (78de92f)
+- docs(design): record the town-hall L2/L3 wave - the candidates and the pick (20c548e)
+- fix(home): the landing Load list reads the round, not the frozen games.turn (9f55061)
+- chore(release): 0.38.2 with the town-centre sprite audit (5ecbfe2)
+- docs(town-center): record the audit — the asset, the defect, and the test's verdict (21d9632)
+- test(town-center): measure the whole town-hall art family, and calibrate the drawn lot (38235d3)
+- test(town-center): prove the town center's grid misalignment end to end (94058c7)
+- chore(release): 0.38.1 (4525641)
+- fix(test): route the two turnover specs through the typed GameDebugApi seam (311cf86)
+- …and 215 more commits
+
+## [0.39.2] - 2026-11-03
+
+the uncharted suite stops guessing the engine's terrain table
+
+`test:uncharted` part [D] was red on main (a895975 / 0.38.12) and inherited: it fails identically on 44e0f1d (0.38.9), f8686e1 (0.38.10) and 6a80df0 (0.38.11). The fixture picked its destination from a hand-rolled `IMPASSABLE = new Set(["water", "mountain"])` kept inside the test, while the engine's own cost table (`TERRAIN_COST` in `packages/engine/src/map/terrain.ts`) prices `denseForest` at `Infinity` as well. On seed 424242 with mapGenVersion 5 the hero starts at (5,7) and the first direction the fixture's set calls passable two hexes out resolves to (7,7) -- a `denseForest`; `/tiles` reports it as denseForest, `__gameDebug.isPassable(7,7)` is `false`, and `requestMove` correctly returns `false`, so [D] failed on its own fixture line (`requestMove to 7,7 rejected client-side`) before it ever reached the assertion it exists for.
+
+The fix removes the second copy of the terrain table outright: destination selection asks the LIVE game through `__gameDebug.isPassable` (the engine's own `GameMap.isPassable` / `TERRAIN_COST`, rivers included). Part [D] scans the six directions for a two-hex run the engine prices; part [B] walks `MIN_TRAIL_DISTANCE` (10) hexes along the most open direction the engine prices. The assertions are untouched -- [D] still proves a non-uncharted move never persists a `revealedTiles` key, and the destination stays a real, non-trivial two-hex move. No engine, terrain, persistence or wire change; `terrain.ts` is not modified.
+
+`patch`: the failure was in the test, not the game. Measured green on a895975 / 0.38.12 with a private database and kernel-assigned ports (never client port 5173): test:uncharted ([A]-[D]), test:settlements, test:districts, build, lint:deps, docs:check.
+
+## [0.39.1] - 2026-11-03
+
+settings panel: slider labels and the new-game default mode
+
+- **fix(settings): seven sliders showed a player a bare number.** Each of these rows already built its label row and its value (`Hero movement speed`, `220ms · Normal`) and then appended only the slider and its hint, so the Game, Population and Visual sections rendered anonymous sliders with no name and no value anywhere in the document (playthrough round 4, F1). The label row is now appended with its slider, the value follows the drag, and every control carries a `data-setting="<key>"` hook so the panel's contents are enumerable from a test.
+- **fix(settings): the stored new-game default mode had no writer in any UI.** `heroesJs.settings.gameMode` was persisted, migrated and read by both New Game surfaces, but only `__gameDebug.settings.update` could set it, so no player could make Settlers the default for a new game (F2). Settings has a **New game** section whose select writes that key, lists the store's own options, and says when it applies (the New Game form starts on it; it never changes an existing game's mode).
+- **fix(settings): `Reset to default` reset 16 of the 18 persisted keys**, so `gameMode` and `buildingUpgradeConfirm` stayed at the player's value while the button claimed the defaults had been restored. It now resets the whole store from the one exported `DEFAULT_SETTINGS` object.
+- **test(settings): the panel's contents are pinned.** Every persisted key must have a control in the panel that writes it, every slider row must name itself and show its current value, Reset must land every key on its default, and the store's reload round-trip covers all 18 keys.
+- docs: the player guide no longer says the New Game form opens on "the mode you last created a game with" — it opens on the stored preference, which is now settable at Settings → New game.
+
+## [0.39.0] - 2026-11-03
+
+Cargo a hero picks up on the map can now be delivered: the settlement panel's Warehouse
+section carries a hero-cargo row (**Deposit cargo** / **Take cargo**) whenever a hero of
+yours stands on the settlement's tile, wired to the engine's existing `TransferResources`
+verb -- which until now only the Logistics modal's declared action named, and no control
+ever invoked. The Logistics window's hero block offers the same two buttons, both surfaces
+read one shared direction/amount model (`src/screens/shared/cargoTransfer.ts`), and the hero
+panel's own buttons are renamed **Deposit gold** / **Withdraw gold** because they were always
+gold-only despite the generic label (playthrough finding F-2).
 ## [0.38.14] - 2026-11-03
 
-test:visual sees districts, district roads' host and the Load path
-
-- Three new scenes, shaped exactly like the ten (same runner, Chromium, 0.5% threshold, never port 5173): `district-map` settles every affordable hex of the L1 settlement's ring through the real City Design flow and captures the map at maximum camera zoom, so the district sprites and the road network that only renders once a settlement HAS districts are both on screen; `district-city-view` captures the district's own 5x5 grid with real buildings placed from the real palette; `load-path-adventure` is the suite's first scene to RELOAD the page and drive the landing Load list (Open -> loadGame -> the loaded view), and asserts the load camera's own contract (the seat hero at the viewport centre). test:visual is 13/13 green on two consecutive runs.
-- Each new scene is proven not blind, one surface per scene: `districtTierForCount` off by one turns `district-map` red at 1.773%; removing the district's buildings from cityScene turns `district-city-view` red at 1.038%; `resolveLoadCameraCenter` returning the map centre and the Load row's own `round` line changed each turn `load-path-adventure` red alone (the camera assert names the offset; the row assert names the missing row).
-- Measured, not assumed: the district ROAD band still cannot be pinned by a whole-canvas 0.5% diff. Repainting ROAD_SURFACE moves 55 px at gameplay zoom and 861 px at maximum zoom with a settled district ring, against the 5,120 px the 0.5% budget needs. The band is 0.55-1.5 px wide, under one screen pixel at every gameplay zoom (docs/settlements.md "Map visualisation"), so this is recorded as a measured limitation rather than a covered surface.
+Copilot's two comments on the landed load path. The browser's own seat is resolved instead of the first claimed one: a remembered seat, then the handle it claimed with, then the server-bound auth email, and NO seat when none of the three identifies the browser (this supersedes #292's `resolveInitialLocalSeat`, whose lowest-claimed-seat fallback was the same first-claim guess merely narrowed). The load promise is returned through the toolbar callback, so a failed load stays observable by the dialog that awaits it.
 
 ## [0.38.13] - 2026-11-03
 
@@ -31,6 +147,7 @@ Copilot's review comment on PR #288 is real, and it is a defect PR #288 introduc
 The fix is the cursor/snapshot pairing the design already implied: `mp:resynced` now carries `pairedCursor`, the cursor the client's state was paired with going into the fetch -- `null` for an unseeded start, where that GET is the client's FIRST pairing, so its snapshot's own cursor is the one the client's state will be held against and dropping it can only leave the cursor ahead of the only state the client holds (permanently, not until the next boundary: every later unflagged `initial` resync was refused by the same reason gate). `garrisonEventBridge` therefore reconciles an unpaired snapshot wherever the phase is not one the local client is driving (`safeForDeltas()`, re-checked after `flushPendingCommands`) instead of dropping it. A non-null `pairedCursor` keeps every existing rule byte-identical -- those refusals are phase-scoped, and the next boundary resync repairs them, which is why the guard stays.
 
 `patch`: this diverged; the loss was silent and permanent for the session (a pending `BattleOffered`, a troop total, a hero position). New field on an existing bus event, no schema or wire-contract change, new test `test/io/multiplayerSyncGarrisonBridge.test.ts`.
+
 
 ## [0.38.11] - 2026-11-03
 
