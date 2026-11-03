@@ -239,3 +239,47 @@ test("F2: a classic game (no reveal set) keeps the locked two-state fog", () => 
   assert.equal(info!.explored, false, "no reveal set means nothing is explored");
   assert.deepEqual(panelText(info!), ["Tile 6, 12", "Unexplored"]);
 });
+
+// ---------------------------------------------------------------------------
+// The tile panel prints a PRICE, not a float. `GameMap.cost` discounts a
+// district-roaded hex by ROAD_MOVEMENT_MULTIPLIER (0.75), so a roaded forest
+// costs 1.2 * 0.75 = 0.8999999999999999 in IEEE-754. The panel printed that raw
+// (`${label} · move cost ${cost}`), and the twenty-character line no longer fit
+// the panel's 202-px body: the rows beneath it reflowed, which is the 4,669 px
+// that moved the district-map visual baseline. The value the engine USES must
+// stay exact; only its RENDERING rounds, in one place (`formatMoveCost`).
+// ---------------------------------------------------------------------------
+
+test("a roaded hex's discounted price renders as one exact decimal, while the engine keeps the raw product", () => {
+  const rows: TileRow[] = [
+    { q: 0, r: 0, terrain: "grass", resource: null },
+    { q: 1, r: 0, terrain: "forest", resource: null },
+  ];
+  const map = GameMap.fromTiles(rows);
+  const installed = map.setRoadTiles(["1,0"]);
+  assert.equal(installed, 1, "the road is installed over the forest hex");
+
+  const hero = makeCommander(1, 0, 6);
+  const info = describeTile({
+    map,
+    state: makeState({ selectedHeroId: hero.id }),
+    heroes: [hero],
+    castles: [],
+    viewPlayerId: 0,
+    tile: { q: 1, r: 0 },
+  });
+
+  assert.ok(info);
+  // The engine is untouched: the price a unit actually pays is the exact float
+  // product of the terrain cost and the road discount, not a rounded copy.
+  assert.equal(info!.terrain!.cost, 1.2 * 0.75, "the engine keeps the exact discounted price");
+  assert.notEqual(info!.terrain!.cost, 0.9, "and that exact price is not the rounded 0.9");
+  // The panel rounds it for display only -- twenty characters of noise must not return.
+  assert.equal(tilePanelLines(info!)[0].text, "Forest · move cost 0.9");
+  assert.deepEqual(panelText(info!), [
+    "Tile 1, 0",
+    "Forest · move cost 0.9",
+    "Commander (Player 1) — 24 troops, 6 move",
+  ]);
+});
+

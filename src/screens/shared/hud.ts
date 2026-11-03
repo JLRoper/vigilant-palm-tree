@@ -13,6 +13,7 @@ import {
   liveEmpireUpkeepCost,
 } from "./heroUpkeepCost";
 import { makePillDivider, makePillLabel, makePillValueSpan, makeStatPill } from "./statPill";
+import { formatMoveCost } from "./moveCost";
 
 export { canEndTurn, canEndTurnFromSeat } from "@heroes/engine";
 
@@ -247,8 +248,8 @@ function getEconomyHudSnapshot(state: GameState, ownerId: PlayerId): EconomyHudS
 function formatPathReadout(readout: PathCostReadout | null): string {
   if (!readout) return "";
   return readout.destinationReachable
-    ? `Path ${readout.costToSplit.toFixed(1)}/7`
-    : `Path ${readout.costToSplit.toFixed(1)} of ${readout.totalCost.toFixed(1)}`;
+    ? `Path ${formatMoveCost(readout.costToSplit)}/7`
+    : `Path ${formatMoveCost(readout.costToSplit)} of ${formatMoveCost(readout.totalCost)}`;
 }
 
 function fmtNum(n: number): string {
