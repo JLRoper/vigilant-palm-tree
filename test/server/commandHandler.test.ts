@@ -14,7 +14,7 @@ import type {
 import type { HydratableGameRow, UnitType } from "@heroes/engine";
 import { CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS, GameMap, platoonTroopTotal, resolveSavedMapGenVersion, WAGON_GOLD_CAPACITY } from "@heroes/engine";
 import { hexDistance } from "@heroes/contracts";
-import { handleCommand, handleCommandTransactional } from "../../server/app/commandHandler";
+import { endTurnSeatRefusal, handleCommand, handleCommandTransactional } from "../../server/app/commandHandler";
 import {
   createMockCharterRepo,
   createMockEventRepo,
@@ -2927,4 +2927,58 @@ test("EndTurn without any removal appends no TradeRouteRemoved rows (a fully-pai
     "no removal rows",
   );
   assert.equal(eventRepo.events[0].kind, "TurnEnded");
+});
+
+// F1 (playthrough round 2b): EndTurn's seat-attribution rule, read straight
+// off the exported predicate. The route-level cases (403/400/200 over HTTP)
+// live in commandsRoute.test.ts; this pins the rule matrix itself -- above all
+// the paths that must NOT change: the in-process callers (dropPolicy's
+// runServerEndTurnForSeat, the AI driver) declare no seat at all and are the
+// server acting on the seat's own behalf, and a browser-driven AI seat's turn
+// is ended by seat 0's client.
+function seatPlayer(id: number, faction: Player["faction"]): Player {
+  return { id, faction, name: `P${id}`, color: "#000000", heroIds: [], settlementIds: [] };
+}
+
+function seatCmd(actor: number, clientSeat?: number | null): Command {
+  return { kind: "EndTurn", gameName: "test-game", actor, clientSeat };
+}
+
+test("F1: endTurnSeatRefusal refuses a seat that is not the one asking, and keeps every legitimate path", () => {
+  const twoHumans = [seatPlayer(0, "player"), seatPlayer(1, "player")];
+  const humanAndAi = [seatPlayer(0, "player"), seatPlayer(1, "ai")];
+
+  assert.equal(
+    endTurnSeatRefusal({ players: twoHumans }, seatCmd(1, 1)),
+    null,
+    "the seat holding the turn ends its own turn",
+  );
+  assert.equal(
+    endTurnSeatRefusal({ players: twoHumans }, seatCmd(1, 0)),
+    "forbidden_not_your_turn",
+    "seat 0's client may not end seat 1's turn (the F1 defect)",
+  );
+  assert.equal(
+    endTurnSeatRefusal({ players: twoHumans }, seatCmd(1)),
+    null,
+    "no declared seat = an in-process caller (dropPolicy / AI driver): unchanged",
+  );
+  assert.equal(
+    endTurnSeatRefusal({ players: humanAndAi }, seatCmd(1, 0)),
+    null,
+    "seat 0's client ends a browser-driven AI seat's turn for it",
+  );
+  assert.equal(
+    endTurnSeatRefusal({ players: humanAndAi, lobby: { aiDriver: "server" } }, seatCmd(1, 0)),
+    "forbidden_not_your_turn",
+    "a server-driven game's AI seats belong to the driver alone (D10)",
+  );
+  assert.equal(
+    endTurnSeatRefusal(
+      { players: [seatPlayer(0, "player"), seatPlayer(1, "player"), seatPlayer(2, "ai")] },
+      seatCmd(2, 1),
+    ),
+    "forbidden_not_your_turn",
+    "only the primary seat drives the AI",
+  );
 });

@@ -322,10 +322,19 @@ export function parseCommand(body: unknown, gameName: string): Command | null {
     if (b.growthRate !== undefined && typeof b.growthRate !== "number") {
       return null;
     }
+    // F1 (playthrough round 2b): the request has to say which seat it is
+    // playing. The handler's turn-ownership guard only checks that the named
+    // seat HOLDS the turn, which a seat-0 client satisfies by naming seat 1 --
+    // that is how it ended another seat's turn. The in-process callers
+    // (dropPolicy's runServerEndTurnForSeat, the AI driver) build the command
+    // themselves and never reach this parser, so requiring it here costs them
+    // nothing and closes the HTTP path completely.
+    if (!isNonNegativeInt(b.clientSeat)) return null;
     return {
       kind: "EndTurn",
       gameName,
       actor: b.actor,
+      clientSeat: b.clientSeat,
       growthRate: b.growthRate as number | undefined,
     };
   }

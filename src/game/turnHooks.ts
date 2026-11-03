@@ -138,7 +138,15 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
       const sync = getMultiplayerSync();
       sync.stop();
       try {
-        const result = await endTurn(name, state.activePlayerId, settings().populationGrowthRate);
+        // F1 (playthrough round 2b): `actor` is the seat whose turn is ending,
+        // `clientSeat` is the seat THIS browser is playing. They differ only on
+        // the browser-driven AI turn below (seat 0 ends the AI seat's turn for
+        // it) -- and a mismatch anywhere else is exactly the command the server
+        // must refuse, so the seat is resolved here rather than assumed: an
+        // unknown local seat (a solo game nobody claimed) speaks for the seat
+        // holding the turn, which is the only client there is.
+        const clientSeat = opts.localSeat?.() ?? state.activePlayerId;
+        const result = await endTurn(name, state.activePlayerId, settings().populationGrowthRate, clientSeat);
         const merged = mergeFromEndTurn(state, result, opts.localSeat?.() ?? null);
         sync.start(name);
         return merged;
