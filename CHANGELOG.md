@@ -10,10 +10,13 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.9] - 2026-11-03
+
+load never substitutes a starter game for a failed or empty load
+
 ## [0.39.8] - 2026-11-03
 
-- Logistics: the wagon steppers no longer stay pressable when the engine can only refuse. The route row's +1 is off with an empty unassigned-wagon pool, its −1 is off on a one-wagon route, and the hero's cargo/treasury −1 is off for a slot the hero holds nothing in — each carrying the panel's own sentence for that refusal.
-- Engine: the one-wagon route floor is one exported constant (`MIN_TRADE_ROUTE_WAGONS`), read by both the clamp and the client's gate.
+A fresh database's first boot tags mage, warhound, giant eagle and eagle prince as human instead of leaving them neutral: migration 006 backfilled rows that 015/020 had not inserted yet, so the recruit gate refused them until a second boot. test:unit against a brand-new PGDATABASE is green on the first run.
 
 ## [0.39.7] - 2026-11-03
 

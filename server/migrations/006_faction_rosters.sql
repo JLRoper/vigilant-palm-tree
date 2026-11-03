@@ -15,6 +15,15 @@
 --   neutral — the four monsters (griffin, hydra, wisp, black_dragon):
 --             catalog-only wild creatures, recruitable by nobody
 --
+-- Ordering note (this file was renumbered from 023): it now runs BEFORE 015
+-- and 020, so on a FRESH database mage/warhound/giant_eagle/eagle_prince do
+-- not exist yet when the UPDATEs below run -- it can only tag 002's rows. The
+-- four late units are therefore tagged by the migration that inserts them
+-- (015/020), the same "a migration declares its own inserts' faction" rule
+-- 024/025/026 follow. Their ids stay in the IN-list below because it is the
+-- canonical statement of the human roster and because every later boot finds
+-- them present (already tagged -> the guard makes it a no-op).
+--
 -- The UPDATEs are guarded on faction_id = 'neutral' (the column DEFAULT) so
 -- re-runs only fill rows that still carry the default — a later tuning pass
 -- or faction-plan migration that retags a unit is never clobbered by a
