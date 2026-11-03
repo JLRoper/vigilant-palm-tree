@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.41.0] - 2026-11-03
+
+Per-faction troop upkeep: the three non-human rosters pay their own bill (migration 037)
+
 ## [0.40.2] - 2026-11-03
 
 an AI seat draws its roster faction from the game seed, so a default single-player game can meet the Ashen Court, the Ironmark Holds or the Verdant Wild instead of every AI seat being pinned to "human"
