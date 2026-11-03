@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.1] - 2026-11-03
+
+The native confirm() freezes the renderer: the toolbar's gear -> + New Game, the landing page's delete-game row and the Asset Manager's delete-asset now route through the app's own in-page dialog (`openConfirmDialog`). Measured in a real browser with the tab foregrounded, a native confirm() blocked the renderer thread outright -- `Page.handleJavaScriptDialog` returned {} while every `Runtime.evaluate` timed out after 5s, the rAF counter advanced 0 ticks across a 2s window that otherwise carried 274, and the click that opened it never even acked -- and the tab answered again in 0.0s the moment the box was dismissed. The same click now returns in 0.01s with the dialog on screen, 177 rAF ticks across the same window and zero native confirms. The prompt raised from the landing page or the Asset Manager is mounted above the surface that raised it (z-index 320 over the Load dialog's 300 and the home overlay's 200), so it is clickable rather than merely visible. Three tests, one per site: cancelling deletes nothing, starts nothing and loses no cache entry; confirming acts on exactly the named game/asset.
+
 ## [0.39.0] - 2026-11-03
 
 Cargo a hero picks up on the map can now be delivered: the settlement panel's Warehouse
