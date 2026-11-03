@@ -10,7 +10,7 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.39.2] - 2026-11-03
+## [0.39.4] - 2026-11-03
 
 F3 (the camera could lose the map): there was no pan clamp, so repeated drags walked it arbitrarily far off the map and the renderer -- which clamps the tiles it asks about to the map's bounds -- painted nothing. Measured on a 40x30 map at zoom 1 in a 1280x800 viewport: forty `pan(-400,-400)` drags took `mapTilesOnScreen` from 369 to 0 with the camera parked at (-16000,-16000), a black viewport whose only exit was a minimap click. `Camera.clampToMap` now keeps the map's world-pixel extent (measured from the four corner hexes) overlapping the viewport, compared against `viewport/zoom` so it holds at every zoom level, and centres a map that fits entirely. Every surface that moves the camera routes through `AdventureView.clampCamera`: the drag pan, the minimap frame drag, the wheel zoom, `centerOn` (minimap click, load centring, resize, focus-hero/settlement) and the zoom-out setting callback.
 
@@ -19,6 +19,80 @@ F2 (the tile panel lied about what you can see): outside every vision ring the p
 F4 (cosmetic, same family): the minimap painted every explored-but-unwatched hex as flat slate, so uncovered ground lost its biome the moment the hero walked away. `minimapCellKind` / `minimapCellFill` give the cell its tier -- visible and explored share the terrain colour (explored under a veil), uncharted stays opaque black, classic fog stays the slate.
 
 `patch`: three presentation/view-layer fixes, no schema or wire-contract change. New tests `test/render/camera.test.ts`, the F2 cases in `test/screens/adventure/tileInfoPanel.test.ts`, the F4 cases in `test/render/minimap.test.ts`; docs/map.md updated.
+
+## [0.39.3] - 2026-11-03
+
+- fix(types): the type gate checks the application and ratchets the test tree (eac6850)
+- test(uncharted): ask the game for passability instead of a hand-rolled terrain set (9fe5300)
+- chore(release): 0.39.1 with the settings-panel truthfulness fixes (da5ae39)
+- chore(release): 0.38.15 with the settings-panel truthfulness fixes (70b17fa)
+- chore(release): 0.38.14 with the settings-panel truthfulness fixes (5dfb37d)
+- chore(release): 0.38.12 with the settings-panel truthfulness fixes (26cfea1)
+- docs(player-guide): the New Game form opens on the stored preference, not the last game created (0f5ab42)
+- fix(settings): show every slider's name and value, and let a player set the default mode (2a93c68)
+- fix(sync): reconcile an unpaired resync snapshot instead of orphaning the cursor (#293) (a895975)
+- chore(release): 0.38.12, test:visual tells the truth again (8d9c69a)
+- test(visual): re-baseline the three city-view scenes (cf67390)
+- test(visual): re-baseline the three adventure/charter scenes (c242ff8)
+- chore(release): 0.38.10 with the seat-resolver and load-promise fixes (ec541c3)
+- fix(load): return the load promise through the toolbar callback (fe61e52)
+- fix(load): resolve the browser's OWN seat, not the first claimed one (6f89ece)
+- fix(ui): the hero panel's transfer buttons are gold, and now say so (821e906)
+- feat(ui): deliver hero cargo into a settlement's warehouse (547aab0)
+- chore(release): 0.38.9 with the settlement UI telling the truth (25536b3)
+- chore(release): 0.38.9 with the Load-path fixes (f97d5cb)
+- docs(settlements): record the cap-aware upgrade refusal and the panel's one rate (4a6a6bd)
+- chore(release): 0.38.8, the ledger learns to hold district buildings (f0ddd20)
+- chore(release): 0.38.8 with the Load-path fixes (fefd133)
+- chore(release): 0.38.7, the ledger learns to hold district buildings (71dbc7e)
+- fix(settlements): the panel's food rate is one entry, not two that could drift (c56671c)
+- chore(release): 0.38.7 with the Load-path fixes (3494421)
+- fix(city-view): a blocked upgrade says why, and names the cap when the cap is the blocker (a5311d3)
+- test(server): retarget the last HTTP EndTurn caller to the declared seat (2b3088b)
+- chore(release): 0.38.6, the ledger learns to hold district buildings (faf478a)
+- chore(release): 0.38.3, the ledger learns to hold district buildings (a3b8a76)
+- test(migrations): find the settlement by id, not by read order (87fc0f8)
+- chore(release): 0.38.6 with the Load-path fixes (b427bc7)
+- docs(settlements): say where a district's buildings actually persist (0d83238)
+- fix(persistence): the granular ledger holds district buildings (E8) (1efaef9)
+- chore(release): 0.38.3 with the turn-control and seat-truth fixes (deb4647)
+- fix(seats): a browser plays the seat it claimed; the hotseat decision is written down (9592c0e)
+- chore(release): 0.38.5 with the Load-path fixes (e988d3c)
+- chore(release): 0.38.3 with the district-road feedback and fidelity fixes (b541b9d)
+- docs(roads): decide the workforce reading and record the harbour rule (92aaa03)
+- fix(roads): a shipyard harbour gets its pier, and the width reading is pinned (94ab561)
+- fix(districts): speak each refused district entry on the map's toast (cca252d)
+- fix(client): reconcile the settlement mirror on the per-frame state diff (b94b862)
+- fix(logistics): Accept all is disabled when no recommendation can be accepted (45887e6)
+- fix(api): availableSeats means what it says -- the seats that are actually free (5c87f42)
+- fix(turn-control): an End Turn names the seat it acts as, and must be its own (646127a)
+- fix(load): centre the camera on what the loaded game actually has, not (6,5) (9ea9d25)
+- chore(release): 0.38.4 with the battle-persistence fixes (b9a028c)
+- fix(combat): the troops scalar tracks its stacks on BOTH sides of a battle (F3) (9b8724b)
+- fix(sync): an unseeded load never replays the event log into a settled battle (F2 client half) (73194b7)
+- fix(combat): refuse a defender-seat resolve the lobby no longer marks pending (F2) (f3023f7)
+- fix(load-modal): close the dialog the Open actually used, so no overlay is left (f16c21c)
+- chore(release): 0.38.3 with the town-hall L2/L3 re-art (5aeab4d)
+- fix(sprites): the town hall's L2 and L3 lots are 30 deg and plinth-less too (78de92f)
+- docs(design): record the town-hall L2/L3 wave - the candidates and the pick (20c548e)
+- fix(home): the landing Load list reads the round, not the frozen games.turn (9f55061)
+- chore(release): 0.38.2 with the town-centre sprite audit (5ecbfe2)
+- docs(town-center): record the audit — the asset, the defect, and the test's verdict (21d9632)
+- test(town-center): measure the whole town-hall art family, and calibrate the drawn lot (38235d3)
+- test(town-center): prove the town center's grid misalignment end to end (94058c7)
+- chore(release): 0.38.1 (4525641)
+- fix(test): route the two turnover specs through the typed GameDebugApi seam (311cf86)
+- …and 215 more commits
+
+## [0.39.2] - 2026-11-03
+
+the uncharted suite stops guessing the engine's terrain table
+
+`test:uncharted` part [D] was red on main (a895975 / 0.38.12) and inherited: it fails identically on 44e0f1d (0.38.9), f8686e1 (0.38.10) and 6a80df0 (0.38.11). The fixture picked its destination from a hand-rolled `IMPASSABLE = new Set(["water", "mountain"])` kept inside the test, while the engine's own cost table (`TERRAIN_COST` in `packages/engine/src/map/terrain.ts`) prices `denseForest` at `Infinity` as well. On seed 424242 with mapGenVersion 5 the hero starts at (5,7) and the first direction the fixture's set calls passable two hexes out resolves to (7,7) -- a `denseForest`; `/tiles` reports it as denseForest, `__gameDebug.isPassable(7,7)` is `false`, and `requestMove` correctly returns `false`, so [D] failed on its own fixture line (`requestMove to 7,7 rejected client-side`) before it ever reached the assertion it exists for.
+
+The fix removes the second copy of the terrain table outright: destination selection asks the LIVE game through `__gameDebug.isPassable` (the engine's own `GameMap.isPassable` / `TERRAIN_COST`, rivers included). Part [D] scans the six directions for a two-hex run the engine prices; part [B] walks `MIN_TRAIL_DISTANCE` (10) hexes along the most open direction the engine prices. The assertions are untouched -- [D] still proves a non-uncharted move never persists a `revealedTiles` key, and the destination stays a real, non-trivial two-hex move. No engine, terrain, persistence or wire change; `terrain.ts` is not modified.
+
+`patch`: the failure was in the test, not the game. Measured green on a895975 / 0.38.12 with a private database and kernel-assigned ports (never client port 5173): test:uncharted ([A]-[D]), test:settlements, test:districts, build, lint:deps, docs:check.
 
 ## [0.39.1] - 2026-11-03
 

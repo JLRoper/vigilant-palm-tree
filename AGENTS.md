@@ -79,9 +79,18 @@ while other worktrees are live: the wipe then covers the pod's throwaway games, 
 
 ## Pre-commit / pre-PR gate (automatic)
 Before ANY `git commit`, `git switch -c`, `gh pr create`, or `gh repo create`:
-1. Invoke the `precommit-checker` subagent (it runs `npm run build` + `npm run lint:deps` + the `docs:check` documentation gate scoped to changed modules + `npm run test:all`). Tests run only when the changeset touches game code: `npm run test:scope -- --changed-from origin/main` (`tools/test-scope.mjs`) reports `TESTS SKIPPED` when every changed file is documentation or agent tooling (`*.md`, `docs/`, `.kilo/`, `.claude/`, `.github/agents|hooks|prompts|skills/`, etc.), and the PR workflow `validate-game.yml` applies the same rule to its boot check and smoke test. Unknown paths fail safe to running tests.
+1. Invoke the `precommit-checker` subagent (it runs `npm run build` + `npm run lint:deps` + `npm run test:types` + the `docs:check` documentation gate scoped to changed modules + `npm run test:all`). Tests run only when the changeset touches game code: `npm run test:scope -- --changed-from origin/main` (`tools/test-scope.mjs`) reports `TESTS SKIPPED` when every changed file is documentation or agent tooling (`*.md`, `docs/`, `.kilo/`, `.claude/`, `.github/agents|hooks|prompts|skills/`, etc.), and the PR workflow `validate-game.yml` applies the same rule to its boot check and smoke test. Unknown paths fail safe to running tests.
 2. If it fails, do not commit/push/PR. Report the failure and ask the user how to proceed.
 The `/precommit` and `/pre-pr` slash commands are manual equivalents you can offer the user.
+
+### The type gate (`npm run test:types`)
+
+`tools/typecheck-gate.mjs` asserts two things, and both are required:
+
+- **The application is clean.** `src/`, `server/` and `packages/*/src` — everything the production build compiles (`tsconfig.json`) — must have **zero** type errors. No baseline applies to this half.
+- **The test tree did not get worse.** `test/**` (`tsconfig.test.json`) is measured against `test/typecheck-baseline.json`, which records the debt that predates the gate: **287 errors across 75 files**. A file outside that list with an error, or a listed file whose count grows, fails the run and prints the offending lines.
+
+The baseline is a ratchet, not a hiding place. Nothing is excluded, nothing is `ts-nocheck`'d, and every known error is still counted and printed (`npm run test:types:list`). Fix a file, then `npm run test:types:baseline` to record the smaller number. **Never add a baseline entry to silence a regression introduced by your own change** — fix the error, or say in the PR why the test was wrong.
 
 ## Versioning
 
