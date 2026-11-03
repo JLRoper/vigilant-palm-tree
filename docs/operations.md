@@ -1,6 +1,6 @@
 # Operations Guide
 
-<!-- docs:verified 2026-10-16 -->
+<!-- docs:verified 2026-11-03 -->
 
 This guide covers local development and deployment. See [`AGENTS.md`](../AGENTS.md) for the complete workspace/test safety rules.
 
@@ -33,6 +33,7 @@ Multiplayer state changes are pushed through SSE (`GET /api/games/:name/events/s
 
 - Build Docker images with `npm run docker:build`, not bare `docker compose build`. The wrapper resolves the Git commit on the host and passes it into the image; a bare compose build can stamp the fallback `dev` value. Redeploy with `docker compose up -d --remove-orphans api web` so any legacy `game_gateway` container is removed before `game_web` (`nginx:1.27-alpine`, `docker/Dockerfile` `web-runtime` stage + `docker/nginx.conf`) binds host port `5173`. `game_web` serves `/usr/share/nginx/html` (`/app/dist` symlinked) directly from disk on ports `80` and `5173` with `Cache-Control: public, max-age=31536000, immutable` on `/assets/` and proxies `/api/` directly to `api:3001` via Docker's runtime DNS resolver (`127.0.0.11`).
 - The root `package.json` version is the app version. Use `npm run version:bump -- patch|minor|major|X.Y.Z`; it updates the package version and `CHANGELOG.md`. Release tags use `v<semver>`.
+- **`package-lock.json` is not a second app version.** Its top-level `version` and its root entry's `packages[""].version` are npm's own copy of `package.json`'s — npm writes both from it and rewrites them on every `npm install` / `npm ci` (an install whose lock `version` disagreed still exits 0). `scripts/bump-version.mjs` deliberately does not write the lock, so the lock's `version` lags the package (`0.32.0` while the app is `0.39.11`) and a bare `npm install` on an otherwise clean tree shows a two-line diff in it. Both are expected: read the app version from `package.json`, never from the lock, and leave the lock's copies to npm. Nothing in the repo, the tooling or the CI reads them.
 - Run the pre-commit gate before committing; it now includes the `docs:check` documentation gate. This documentation task does not commit or run the full build/test gate.
 
 See [`multiplayer.md`](./multiplayer.md), [`plans-track-map.md`](./plans-track-map.md), and the root [technical specification](../TECHNICAL_SPECIFICATIONS.MD) for architecture details.
