@@ -30,6 +30,7 @@ import { createServer } from "node:net";
 import { setTimeout as wait } from "node:timers/promises";
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
+import type { GameDebugApi } from "../src/io/debugCommands";
 import {
   getApiPort,
   getClientPort,
@@ -227,7 +228,7 @@ async function run(): Promise<void> {
       `the web under test must serve source modules (got "${moduleType}") -- another server owns ${WEB_PORT}`,
     );
 
-    await page.waitForFunction(() => !!(window as unknown as { __gameDebug?: unknown }).__gameDebug, { timeout: 60000 });
+    await page.waitForFunction(() => !!(window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug, { timeout: 60000 });
     await wait(500);
 
     // ── 1. open the form at 1258x566 ────────────────────────────────────
@@ -272,7 +273,7 @@ async function run(): Promise<void> {
     await page.locator("button").filter({ hasText: /^Create Game$/ }).first().click();
 
     await page.waitForFunction(
-      (want: string) => (window as unknown as { __gameDebug?: { activeGameName?: string } }).__gameDebug?.activeGameName === want,
+      (want: string) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === want,
       gameName,
       { timeout: 30000 },
     );
@@ -287,7 +288,7 @@ async function run(): Promise<void> {
     assert.equal(submitted[0].name, gameName, "the submitted game must be the one the form was filled in with");
     assert.equal(submitted[0].gameMode, "settlers", "the submitted game must carry the mode the form picked");
     assert.equal(
-      await page.evaluate(() => (window as unknown as { __gameDebug?: { getState: () => { gameMode?: string } } }).__gameDebug?.getState().gameMode),
+      await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.getState().gameMode),
       "settlers",
       "the client must open the settlers game it just created",
     );
