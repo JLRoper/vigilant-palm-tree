@@ -16,7 +16,7 @@ import { gameModeSettings } from "@heroes/contracts";
 import { districtKey } from "../control";
 import { disconnectedDistrictKeys } from "./districtConnectivity";
 import { type CitySpot } from "./citySpots";
-import { hasExplicitStaffing } from "./workforce";
+import { newPlacementsAutoCrew } from "./workforce";
 
 // The server-side (and optimistic client-side) commit of the city view's
 // working cart -- the F4 gap closer. Mirrors the client's own net-cost model
@@ -138,7 +138,7 @@ export function applyPlaceBuildings(
     return { ok: false, state, reason: "wrong_faction" };
   }
 
-  const newPlacementWorkers = hasExplicitStaffing(s) ? 0 : undefined;
+  const newPlacementWorkers = newPlacementsAutoCrew(s) ? undefined : 0;
 
   if (district) {
     if (buildings.some((b) => b.kind === "townHall")) {
