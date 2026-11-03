@@ -12,7 +12,7 @@ import type { Game } from "../io/api";
 import { hydrateClientGame } from "../io/hydrateClientGame";
 import type { FactionId, GameMode } from "@heroes/contracts";
 import { notePersisted } from "../io/commands";
-import { setInMemoryLocalPlayerId } from "../players/localPlayer";
+import { getLocalPlayerId, resolveInitialLocalSeat, setInMemoryLocalPlayerId } from "../players/localPlayer";
 import { getMultiplayerSync, getEntityMirror } from "../io/multiplayerSync";
 import { clearServerDriven, syncServerDrivenFromGame } from "../io/serverDrivenGames";
 import { setUncharted } from "../io/unchartedGames";
@@ -84,9 +84,18 @@ export class GameSessionManager {
     void this.session.logEvent(loaded.name, "load_game", {});
 
     const claimed = (loaded as unknown as { lobby?: { claimed?: Record<string, { handle: string }> } }).lobby?.claimed ?? {};
-    const claimedSeat = Number(Object.keys(claimed).find((k) => claimed[k]) ?? "");
-    if (Number.isInteger(claimedSeat) && claimedSeat >= 0) {
-      setInMemoryLocalPlayerId(loaded.name, claimedSeat);
+    // F2 (playthrough round 2b): the lobby holds several claims in a
+    // multi-human game, and the browser must play the one IT claimed -- not
+    // whichever happens to come first in the jsonb (that reset a browser that
+    // had claimed seat 1 back to seat 0). Stored in localStorage by the lobby
+    // flows; see resolveInitialLocalSeat for the fallback.
+    const claimedSeats = Object.keys(claimed)
+      .filter((k) => claimed[k])
+      .map(Number)
+      .filter((n) => Number.isInteger(n));
+    const localSeat = resolveInitialLocalSeat(claimedSeats, getLocalPlayerId(loaded.name));
+    if (localSeat !== null) {
+      setInMemoryLocalPlayerId(loaded.name, localSeat);
     }
     // Seed the event-cursor poller from the same response the full hydrate
     // above came from (#146), so its first poll asks for events *after* this
