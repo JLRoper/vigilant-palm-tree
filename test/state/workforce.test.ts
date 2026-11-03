@@ -571,10 +571,12 @@ test("C-MAJOR-2: the first assignment leaves the settlement legacy and does not 
   assert.equal(workforcePool(before), 5);
   assert.equal(hasLegacyStaffing(before), true, "the city starts legacy");
 
-  // Before: a legacy city running at full effort.
+  // Before: a legacy city running at full effort. The rates are the payment
+  // loop's own arithmetic (each producer rounded separately), so they are whole
+  // numbers -- see the E1 commit (edde1ca).
   assert.deepEqual(
     dailyNets(before),
-    { wood: 4.3, stone: 9.36, food: 13.03 },
+    { wood: 3, stone: 9, food: 13 },
     "pinned before-rates: tile rates + 3 huts / 3 mines / 3 fields at full effort, minus upkeep and food",
   );
 
@@ -601,7 +603,7 @@ test("C-MAJOR-2: the first assignment leaves the settlement legacy and does not 
   // identical fixture, the same click left wood -3.05 / stone 1.3 / food -0.94
   // and eight buildings (five of them producers) at 0 workers.
   const afterNets = dailyNets(after);
-  assert.deepEqual(afterNets, { wood: 2.7, stone: 9.36, food: 13.03 }, "pinned after-rates");
+  assert.deepEqual(afterNets, { wood: 2, stone: 9, food: 13 }, "pinned after-rates");
   assert.ok(afterNets.wood > 0, "wood stays positive");
   assert.ok(afterNets.stone > 0, "stone stays positive");
   assert.ok(afterNets.food > 0, "food stays positive");
@@ -613,13 +615,17 @@ test("C-MAJOR-2: the first assignment leaves the settlement legacy and does not 
   assert.ok(hutBefore && hutAfter);
   assert.equal(hutBefore.effort, 1, "legacy effort is 1");
   assert.equal(hutAfter.effort, 1 / 3, "1 of its 3 worker slots");
+  // The panel reports whole units now (E1: each producer is rounded the way the
+  // payment loop rounds it), so the clicked hut's own step is the difference of
+  // its ROUNDED outputs -- 3 -> 2 wood/day on this fixture -- not the raw
+  // fraction (2.4 -> 0.8).
   assert.equal(
-    round2(4.3 - afterNets.wood),
-    round2(hutBefore.amount - hutAfter.amount),
+    round2(3 - afterNets.wood),
+    Math.round(hutBefore.amount) - Math.round(hutAfter.amount),
     "wood loses exactly the clicked hut's own step and nothing else",
   );
-  assert.equal(afterNets.stone, 9.36, "the stone mines were never touched");
-  assert.equal(afterNets.food, 13.03, "the farm fields were never touched");
+  assert.equal(afterNets.stone, 9, "the stone mines were never touched");
+  assert.equal(afterNets.food, 13, "the farm fields were never touched");
 });
 
 test("advanceSettlementUpgrades: 1/day by default, accel adds more, staffed townHall doubles", () => {

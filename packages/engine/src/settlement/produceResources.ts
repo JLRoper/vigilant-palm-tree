@@ -57,7 +57,9 @@ export interface SettlementProductionRates {
  * farm-only settlement must not read "no warehouse production" while its
  * warehouse receives food every turn. `seed` is the game seed the production
  * loop passes (state.castleSeed client-side), so the numbers shown are the
- * numbers paid.
+ * numbers paid -- including the payment loop's own per-addition rounding, so a
+ * rate row equals the store's daily DELTA rather than a sum of raw fractions
+ * (see the note in the body; playthrough round 2b, E1).
  */
 export function settlementProductionRates(
   settlement: Pick<SettlementState, "resourceRates" | "buildings" | "q" | "r" | "citySpots"> & {
@@ -67,9 +69,21 @@ export function settlementProductionRates(
   seed: number,
   heroes?: Iterable<{ ownerId: PlayerId; q: number; r: number }> | Record<string, { ownerId: PlayerId; q: number; r: number }>,
 ): SettlementProductionRates {
+  // E1 (playthrough round 2b): these numbers must be the numbers the turn PAYS.
+  // The payment loop (`produceSettlementResources` below) adds the tile half in
+  // one addition and each producer's output in its own, rounding the STOCK
+  // after every one of them -- `Math.round(addStockClamped(stock, amount,
+  // cap))` -- while this function used to sum the raw amounts and round the
+  // TOTAL once. On an integral store (the only kind the turn loop leaves
+  // behind: consumption and every clamp round) the paid delta is therefore
+  // round(tile) + the sum of round(each producer), and a panel that rounded the
+  // sum instead was off by up to a unit per resource per day, in whichever
+  // direction the fractional parts fell -- measured on the round-2b Gold hold,
+  // the panel advertised -2.89/day of wood and the store lost 2/day. The
+  // rounding below is the payment's own arithmetic rather than a new rule.
   const totals = new Map<WarehouseResource, number>();
   for (const { resource, perTurn } of warehouseRates(settlement.resourceRates)) {
-    totals.set(resource, (totals.get(resource) ?? 0) + perTurn);
+    totals.set(resource, (totals.get(resource) ?? 0) + Math.round(perTurn));
   }
   let gold = 0;
   for (const b of settlement.buildings) {
@@ -82,7 +96,7 @@ export function settlementProductionRates(
     if (output.resource === "gold") {
       gold += output.amount;
     } else {
-      totals.set(output.resource, (totals.get(output.resource) ?? 0) + output.amount);
+      totals.set(output.resource, (totals.get(output.resource) ?? 0) + Math.round(output.amount));
     }
   }
   for (const d of Object.values(settlement.districts ?? {})) {
@@ -97,7 +111,7 @@ export function settlementProductionRates(
       if (output.resource === "gold") {
         gold += output.amount;
       } else {
-        totals.set(output.resource, (totals.get(output.resource) ?? 0) + output.amount);
+        totals.set(output.resource, (totals.get(output.resource) ?? 0) + Math.round(output.amount));
       }
     }
   }
@@ -106,7 +120,10 @@ export function settlementProductionRates(
     const perTurn = totals.get(resource) ?? 0;
     if (perTurn > 0) rates.push({ resource, perTurn: round2(perTurn) });
   }
-  return { rates, goldPerTurn: round2(gold) };
+  // Gold is different in kind: the loop sums every gold producer's raw amount
+  // and rounds ONCE, as it writes the treasury (`Math.round(s.gold +
+  // Math.min(gold, treasuryHeadroom))`), so the paid figure is the rounded sum.
+  return { rates, goldPerTurn: Math.round(gold) };
 }
 
 export function produceSettlementResources(
