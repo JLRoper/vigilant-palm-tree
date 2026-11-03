@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.38.1] - 2026-11-03
+
+Fix `test:unit` on main: the two PR #281 playthrough specs (`cityGridTurnover`, `newGameFormViewport`) now reach `window.__gameDebug` through the typed `GameDebugApi` seam instead of a loose inline cast, so the debug-contract guard goes green again.
+
 ## [0.38.0] - 2026-11-03
 
 District roads: a purely decorative ground layer joins each district to its settlement's tile.
