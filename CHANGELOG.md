@@ -20,6 +20,16 @@ The defect is the price, not the grant. The grant scales x5 with level while the
 - The population grant is deliberately NOT flattened. The report's own value curve (a flat 300/500/700) halves a built-out level-3 castle's population cap (80,000 -> 40,000) and takes the workforce binding that landed after the report (P2: a pool of 266 against a 275-slot demand) to 133 -- 48% of demand. The three shapes and their exact numbers are in the card's report.
 - Pinned by `test/engine/houseRebalance.test.ts` (five cases red on the base commit), with every moved expectation retargeted by name: the House's placement price in `test/engine/placeBuildings.test.ts` and `test/server/commandsRoute.test.ts`, the apartment's grant in `test/engine/districts.test.ts` and `test/engine/housePopulation.test.ts`, the starter set's 12 wood + 2 stone in `test/engine/init.test.ts`, `test/engine/starterLayout.test.ts`, `test/state/economy.test.ts` and `test/state/workforce.test.ts`, and the palette's own upkeep/shortfall wording in `test/screens/settlements/`. `docs/resource-gathering.md` and `docs/settlements.md` carry the new numbers.
 
+## [0.47.1] - 2026-11-03
+
+The tile panel and the toolbar print a movement PRICE, not an IEEE-754 float
+
+The district-road discount (827d187) reaches `GameMap.cost`, so a roaded forest costs `1.2 × 0.75`, which in IEEE-754 is `0.8999999999999999`. The tile-info panel printed it raw — read out of the live DOM on `github/main` 9b4f17f (0.47.0), the line was `Forest · move cost 0.8999999999999999` — and twenty characters of float noise no longer fitted the panel's 202-px body, so every row under it reflowed: the body measured `[23,141,202,92]` with the noise and `[23,141,202,75]` without.
+
+- ONE formatting rule, `formatMoveCost` (`src/screens/shared/moveCost.ts`): one decimal place, trailing `.0` trimmed. It is used at both player-visible movement-cost sites — the tile panel's terrain line (`terrainLine`, which was printing the raw value) and the toolbar's path readout (`formatPathReadout`, which had its own `.toFixed(1)`). One decimal is the granularity the HUD already showed movement at (`Movement 6/7`, `Path 5.8/7`) and the coarsest grid that still separates every price the terrain table can make; whole numbers stay whole, so `move cost 1` and `move cost 2` read as they always did.
+- Display only, engine untouched: `GameMap.cost` still returns the exact product. A roaded forest hex stays `0.8999999999999999`; the same four-hex roaded route a hero walks still costs `3` (`test/engine/roadMovement.test.ts`, 8/8) against `4` unworn. No movement or pathfinding maths, no road discount and no MapGenVersion changed.
+- The `district-map` visual baseline was re-cut for the reflow it had just absorbed; the DOM reads `Forest · move cost 0.9` with the body back at `[23,141,202,75]`.
+
 ## [0.47.0] - 2026-11-03
 
 Three limits of the AI's capital-taking, measured by DRIVING the real server-side driver over real generated boards — not by reading code.

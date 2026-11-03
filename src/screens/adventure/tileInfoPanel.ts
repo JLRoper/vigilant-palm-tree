@@ -1,5 +1,6 @@
 import { FloatingPanel, createPanel } from "@screens/shared/panel";
 import { toolbarHeight } from "@screens/shared/panelRail";
+import { formatMoveCost } from "@screens/shared/moveCost";
 import type { TileInfo } from "./tileInfo";
 import { foundSettlementRefusalToast, pickupRefusalToast } from "./clickIntent";
 
@@ -43,7 +44,7 @@ function makeLine(
 
 function terrainLine(terrain: NonNullable<TileInfo["terrain"]>): string {
   const { label, cost, passable } = terrain;
-  return passable ? `${label} · move cost ${cost}` : `${label} · impassable`;
+  return passable ? `${label} · move cost ${formatMoveCost(cost)}` : `${label} · impassable`;
 }
 
 function riverLine(river: NonNullable<TileInfo["river"]>): string {
