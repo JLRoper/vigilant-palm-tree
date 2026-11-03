@@ -14,7 +14,8 @@ import { openDialog } from "@screens/shared/dialog";
 import { openConfirmDialog } from "@screens/shared/confirmDialog";
 // The Load Game progress line is ONE function for both Load surfaces (this
 // landing list and the in-game toolbar modal). It reads the ROUND; see
-// loadRowProgress for why `games.turn` must not be rendered.
+// loadRowProgress for why the games row's old `turn` column was never the
+// progress (and is no longer a field at all).
 import { LOAD_LIST_EMPTY, LOAD_LIST_UNREACHABLE, loadRowProgress } from "@screens/shared/loadGameModal";
 import type { MapSize } from "../../map/gameMap";
 import { openSettingsMenu } from "./settingsMenu";

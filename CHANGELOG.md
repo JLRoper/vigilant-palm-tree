@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.14] - 2026-11-03
+
+games.turn is gone: a column written once by its own DEFAULT 1 (POST /games' INSERT never named it) and read by nothing, so every save claimed "turn 1" while the round advanced -- 329 games on the shared database held one distinct turn value against rounds up to 1996, and driving End Turn across two real seats took the round 1 -> 4 with turn never leaving 1. Dropped in server/migrations/036_drop_games_turn.sql, removed from schema.sql, from GAME_COLUMNS/GameRow/FullGameRow and from the client's Game payload, with the drop pinned by a new test/migrations/migration.test.ts case. The round (with day and active_player_id) is the only progress field a save carries. No turn or round semantics changed.
+
 ## [0.39.13] - 2026-11-03
 
 fix(events): a caravan's whole journey reaches the log, so a client that is not driving it can react

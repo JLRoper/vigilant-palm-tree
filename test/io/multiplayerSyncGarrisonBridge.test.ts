@@ -149,7 +149,6 @@ function makeGameRow(name: string, opts: GameRowOpts = {}) {
     seed: 1,
     hero_q: 2,
     hero_r: 2,
-    turn: 1,
     gold: 0,
     enemy_positions: [],
     created_at: "2026-08-21T00:00:00.000Z",

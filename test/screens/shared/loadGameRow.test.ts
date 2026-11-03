@@ -1,14 +1,15 @@
 // C-POLISH-1: the Load Game row's progress line.
 //
-// The row read `games.turn`, a column written once when the game is created
+// The row read `games.turn`, a column written once when the game was created
 // and never advanced by End Turn -- so a game on round 37 advertised itself as
 // "turn 1" and the player had no way to tell a long-running save from a fresh
-// one. The line now reads the round, the counter the HUD's Round pill and the
-// End Turn cycle actually move.
+// one. The line reads the round, the counter the HUD's Round pill and the End
+// Turn cycle actually move. The dead column itself is gone from the row and
+// from the database (server/migrations/036_drop_games_turn.sql), pinned by
+// test/migrations/migration.test.ts.
 //
 // The line is a pure function of the server row, so it is asserted directly
-// (the same seam style as settlementInfoMenu's rows): a fixture with a stale
-// `turn` and a live `round` is the whole defect.
+// (the same seam style as settlementInfoMenu's rows).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -40,7 +41,7 @@ const { loadRowProgress } = await import("../../../src/screens/shared/loadGameMo
 
 const SEEN = "2026-10-25T22:42:20.526Z";
 
-/** A server row as GET /api/games returns it: `turn` frozen at creation, round/day live. */
+/** A server row as GET /api/games returns it: round/day/active_player_id live, no turn counter. */
 function serverRow(over: Partial<Game> = {}): Game {
   return {
     id: 7,
@@ -48,7 +49,6 @@ function serverRow(over: Partial<Game> = {}): Game {
     seed: 515690,
     hero_q: 12,
     hero_r: 7,
-    turn: 1,
     gold: 5500,
     enemy_positions: [],
     created_at: "2026-09-18T00:00:00Z",
@@ -73,10 +73,4 @@ test("load row: the progress line reads the round, not the frozen turn column", 
 test("load row: a round-1 game still reads as its own round", () => {
   const line = loadRowProgress(serverRow({ round: 1, day: 1, gold: 0 }), SEEN);
   assert.equal(line, `round 1 · 0g · seen ${new Date(SEEN).toLocaleString()}`);
-});
-
-test("load row: the stale turn column cannot leak into the line, whatever it holds", () => {
-  const line = loadRowProgress(serverRow({ turn: 99, round: 12 }), SEEN);
-  assert.match(line, /^round 12 · /);
-  assert.doesNotMatch(line, /99/, "the turn column is not the row's progress");
 });

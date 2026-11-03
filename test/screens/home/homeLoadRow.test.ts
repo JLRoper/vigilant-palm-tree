@@ -1,9 +1,10 @@
 // F4 (playthrough round 2b): the LANDING page's own Load list rendered
 // `turn ${server.turn}` while the in-game Load modal rendered `round ${server.round}`.
-// `games.turn` is a column written once at INSERT (DEFAULT 1) and never advanced
-// -- measured on the shared database: every row has turn = 1 while `round` runs
+// `games.turn` was a column written once at INSERT (DEFAULT 1) and never advanced
+// -- measured on the shared database: every row had turn = 1 while `round` ran
 // from 1 to 1996 -- so the landing list advertised a round-4 save as "turn 1"
-// and the two surfaces disagreed about which save was which.
+// and the two surfaces disagreed about which save was which. (The column itself
+// is gone: server/migrations/036_drop_games_turn.sql.)
 //
 // The fix routes the landing row through the SAME `loadRowProgress` helper the
 // in-game modal uses, so the two cannot drift again. This test drives the real
@@ -55,7 +56,6 @@ function serverRow(over: Partial<Game> = {}): Game {
     seed: 51847157,
     hero_q: 12,
     hero_r: 7,
-    turn: 1,
     gold: 2485,
     enemy_positions: [],
     created_at: "2026-10-25T20:00:00Z",

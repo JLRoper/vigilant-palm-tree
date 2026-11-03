@@ -1,0 +1,46 @@
+-- games.turn is dropped: a column nothing read, pinned at 1 for the life of
+-- every game while the round advanced.
+--
+-- ── What it was ──
+-- `games.turn INTEGER NOT NULL DEFAULT 1` (schema.sql) had no writer at all.
+-- POST /games' INSERT names its columns explicitly and never named `turn`, and
+-- nothing in the repo ever ran UPDATE games SET turn = ... — so the DEFAULT was
+-- the only writer and every row read turn = 1 forever, however many rounds it
+-- had played. The real progression lives in `games.round` / `games.day` /
+-- `games.active_player_id`, which the EndTurn case (server/app/commandHandler.ts,
+-- via gameRepo.saveHeroesAndSettlements) advances atomically with the turn
+-- cycle, and which the engine's turn/round.ts advanceRound() computes.
+--
+-- ── What read it ──
+-- Nothing, functionally. It rode the API payload (GAME_COLUMNS / GameRow in
+-- gameRepo.ts, FullGameRow in routes.ts, the client's `Game` type in
+-- src/io/api.ts) and the client's type comment already told readers it was
+-- "LEGACY, FROZEN AT CREATION ... payload-only ... Read `round` for a save's
+-- progress". The Load surfaces had already been moved onto the round, and
+-- test/screens/shared/loadGameRow.test.ts pinned that the stale column must not
+-- leak into a row's progress line. Its only asserted value anywhere was
+-- test/smoke.ts's `turn === 1` on a brand-new game — an assertion of the lie.
+-- Measured over the shared `game_poc` on 2026-11-03: 329 games, one distinct
+-- `turn` value (1), while `round` runs 1 to 1996. Reproduced locally by driving
+-- EndTurn across two real seats — six successful End Turns took the round 1 -> 4
+-- and `turn` never left 1.
+--
+-- The two honest shapes were "make it track on the same event as the round" and
+-- "drop it". It is dropped: a turn counter that merely mirrored `round` would be
+-- a second home for one number (the exact drift this repo's GAME_COLUMNS
+-- single-source rule exists to prevent), and any other definition — a
+-- seat-turn ordinal within the round — would be invented state that no reader
+-- has ever wanted. A column nothing reads that also lies is worse than no
+-- column.
+--
+-- ── Idempotence ──
+-- initSchema() re-runs every migration file at every boot with no error
+-- handling (server/db.ts, sorted by filename), so this must never raise:
+-- DROP COLUMN IF EXISTS is a clean no-op on a database that already lost it.
+-- schema.sql no longer declares the column either, so a fresh database never
+-- creates it and this is a no-op there too; for an existing database (the
+-- shared `game_poc`, every pod) this is the upgrade. Removing a column cannot
+-- fail on its data: there is no index, no constraint, no view and no other
+-- column referencing `games.turn`.
+
+ALTER TABLE games DROP COLUMN IF EXISTS turn;
