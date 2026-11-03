@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.40.0] - 2026-11-03
+
+district roads now price movement: entering a roaded hex costs ROAD_MOVEMENT_MULTIPLIER 0.75x its terrain cost, a modifier on the engine's one movement-cost table (GameMap.cost) derived from the live settlements -- no second cost path, no terrain value or MapGenVersion change
+
 ## [0.39.18] - 2026-11-03
 
 fix(ui): the native alert() freezes the renderer too — the landing page's backend-offline notice is the app's own dialog
