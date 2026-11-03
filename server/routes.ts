@@ -499,8 +499,12 @@ router.post("/games", async (req, res) => {
         : 0;
     // Seat factions (faction-registry foundation): the creator's local
     // per-seat faction choice, riding the enemySlots precedent. Absent or
-    // short = every seat stays "human" (the engine default); entries beyond
-    // the seat count are never read by makePlayers, which is the clamp.
+    // short = every seat keeps the human default; entries beyond the seat
+    // count are never read by makePlayers, which is the clamp.
+    //
+    // An explicit entry ALWAYS wins at its seat -- that is the creator's own
+    // choice and nothing here may take it away. What the request does not
+    // assign is filled for the AI seats below, from the game seed.
     let seatFactionsSafe: FactionId[] | undefined;
     if (seatFactions !== undefined) {
       if (
@@ -539,6 +543,14 @@ router.post("/games", async (req, res) => {
       // own stream from (§2.3).
       gameMode: resolvedGameMode,
       mapSeed: seed,
+      // The AI seats the request did not assign draw their roster faction from
+      // the game seed (init.ts's resolveSeatFactions -> seatFactions.ts): a
+      // default single-player game meets the Ashen Court, the Ironmark Holds or
+      // the Verdant Wild instead of every AI seat sitting on "human". Passing
+      // the seed ALWAYS -- not only when a faction was picked -- is what makes
+      // the assignment a property of the game, reproducible from its seed
+      // alone. A non-finite seed (junk body) yields no draw.
+      aiSeatFactionSeed: seed,
       ...(seatFactionsSafe ? { seatFactions: seatFactionsSafe } : {}),
     };
     const initial = makeInitialStatePayload(map, mulberry32(seed ^ 0x706c6179), initOpts);
