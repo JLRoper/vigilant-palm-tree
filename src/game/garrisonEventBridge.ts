@@ -179,14 +179,38 @@ export function attachGarrisonEventBridge(deps: GarrisonEventBridgeDeps): () => 
   // Server-driven games additionally reconcile initial/cursor_gap fetches
   // (aiTurnSuperseded): unflagged games keep the event_not_derivable-only
   // behavior byte-identical.
+  //
+  // UNPAIRED snapshots (ev.pairedCursor === null) are the other way round, and
+  // dropping one loses rows for the whole session rather than merely deferring
+  // them: the client's state carries NO cursor -- an unseeded load or EndTurn
+  // restart, where the poller's fetching GET is the client's FIRST pairing --
+  // and the poller took that snapshot's cursor, opened its event stream at it
+  // and (applyRows) discards every row at or below it, so the rows the snapshot
+  // jumped over could never be re-delivered: a pending BattleOffered, a troop
+  // total, a hero position, gone. The snapshot IS that client's pairing, so it
+  // is reconciled instead, wherever the phase is one the local client is not
+  // actively driving.
+  //
+  // The window this trades away: a command this client issued between the fetch
+  // that produced the snapshot and its adoption is not inside ev.state, and
+  // flushPendingCommands (below) persists rather than re-applies it, so the
+  // local view holds that command's previous state until the next full resync.
+  // It is the first snapshot after a start() and one round-trip wide, against
+  // rows that would otherwise be lost outright.
   const onResynced = (ev: MpResyncedEvent): void => {
     const serverDriven = isServerDriven(ev.gameName);
-    if (!serverDriven && ev.reason !== "event_not_derivable") return;
+    // Absent reads as paired: only the poller sets the field.
+    const unpaired = ev.pairedCursor === null;
     if (merging) return;
-    if (!safeForResync()) return;
-    if (serverDriven && ev.reason !== "event_not_derivable") {
-      const tc = deps.getController();
-      if (!tc || !aiTurnSuperseded(tc.getState(), ev.state)) return;
+    if (unpaired) {
+      if (!safeForDeltas()) return;
+    } else {
+      if (!serverDriven && ev.reason !== "event_not_derivable") return;
+      if (!safeForResync()) return;
+      if (serverDriven && ev.reason !== "event_not_derivable") {
+        const tc = deps.getController();
+        if (!tc || !aiTurnSuperseded(tc.getState(), ev.state)) return;
+      }
     }
     void (async () => {
       merging = true;
@@ -194,7 +218,7 @@ export function attachGarrisonEventBridge(deps: GarrisonEventBridgeDeps): () => 
         const tc = deps.getController();
         if (!tc) return;
         await tc.flushPendingCommands();
-        if (!safeForResync()) return;
+        if (unpaired ? !safeForDeltas() : !safeForResync()) return;
         const current = deps.getController();
         if (!current) return;
         // The snapshot is server truth at its fetch cursor, so every queued

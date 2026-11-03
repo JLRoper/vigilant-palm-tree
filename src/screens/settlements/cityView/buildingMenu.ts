@@ -21,10 +21,12 @@ import {
   assignedWorkersExplicit,
   hasLegacyStaffing,
   staffingBase,
+  TOWN_HALL_COSTS,
   type RecruitEntry,
 } from "@heroes/engine";
 import type { Warehouse } from "@heroes/contracts";
 import { footprintLine } from "./footprint";
+import { upgradeRefusalTitle } from "../upgradeRefusal";
 
 function formatEffectLine(kind: BuildingKind, level: number, effort = 1): string[] {
   const lines: string[] = [];
@@ -121,10 +123,12 @@ export interface BuildingMenuWorkforce {
   getSettlement: () => SettlementState | undefined;
 }
 
-const TOWN_HALL_UPGRADE_COSTS: Record<number, { gold: number; wood: number; stone: number; days: number }> = {
-  1: { gold: 1500, wood: 15, stone: 10, days: 7 },
-  2: { gold: 5000, wood: 40, stone: 25, days: 12 },
-};
+// The town hall's own price list is the ENGINE's (`TOWN_HALL_COSTS`,
+// packages/engine/src/settlement/upgradeTownHall.ts) rather than a copy: the
+// menu used to keep a second table that merely happened to match, so the price
+// a player reads and the price the reducer charges could drift apart without
+// anything failing.
+const TOWN_HALL_UPGRADE_COSTS = TOWN_HALL_COSTS;
 
 interface ShowArgs {
   building: BuildingDef;
@@ -315,7 +319,8 @@ export class BuildingMenu {
         info.style.opacity = "0.75";
         row.appendChild(info);
 
-        const canAfford = settlement && settlement.gold >= cost.gold
+        const canAfford = settlement !== undefined
+          && settlement.gold >= cost.gold
           && (settlement.warehouse.wood ?? 0) >= cost.wood
           && (settlement.warehouse.stone ?? 0) >= cost.stone
           && !settlement.upgrade;
@@ -330,6 +335,16 @@ export class BuildingMenu {
           upgradeBtn.style.cursor = "not-allowed";
         }
         upgradeBtn.disabled = !canAfford;
+        // A dead control carries its reason in its own `title` -- the channel
+        // the build palette's dead rows already use (buildEntryStatus.ts), since
+        // this menu has no notice row of its own and the palette's belongs to
+        // another panel. F-2/F-6: the reason names the cap when the cap, not the
+        // income, is what stands in the way (see upgradeRefusal.ts).
+        upgradeBtn.title = !settlement
+          ? "Open this settlement to see what the upgrade needs"
+          : canAfford
+            ? `Raise the town hall to L${building.level + 1} (${cost.gold}g ${cost.wood}w ${cost.stone}s, ${cost.days} days)`
+            : upgradeRefusalTitle({ settlement, cost, inProgress: !!settlement.upgrade });
         upgradeBtn.addEventListener("click", () => {
           if (canAfford) {
             this.onUpgradeTownHall?.();
@@ -358,7 +373,8 @@ export class BuildingMenu {
         info.style.opacity = "0.75";
         row.appendChild(info);
 
-        const canAfford = settlement && settlement.gold >= cost.gold
+        const canAfford = settlement !== undefined
+          && settlement.gold >= cost.gold
           && (settlement.warehouse.wood ?? 0) >= cost.wood
           && (settlement.warehouse.stone ?? 0) >= cost.stone
           && !settlement.upgrade
@@ -374,6 +390,17 @@ export class BuildingMenu {
           upgradeBtn.style.cursor = "not-allowed";
         }
         upgradeBtn.disabled = !canAfford;
+        // Same channel and vocabulary as the town hall row above.
+        upgradeBtn.title = !settlement
+          ? "Open this settlement to see what the upgrade needs"
+          : canAfford
+            ? `Raise this building to L${building.level + 1} (${cost.gold}g ${cost.wood}w ${cost.stone}s, ${cost.days} days)`
+            : upgradeRefusalTitle({
+                settlement,
+                cost,
+                inProgress: !!settlement.upgrade,
+                extra: building.construction ? ["Still under construction"] : [],
+              });
         upgradeBtn.addEventListener("click", () => {
           if (canAfford) {
             this.onUpgradeBuilding?.(building);

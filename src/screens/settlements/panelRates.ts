@@ -83,7 +83,17 @@ export function settlementDailyRates(
     };
   };
 
-  return { rows: WAREHOUSE_RESOURCES.map(entryFor), food: entryFor("food") };
+  const rows = WAREHOUSE_RESOURCES.map(entryFor);
+  // ONE entry, two surfaces. The panel renders the top section's Food row from
+  // `food` and the warehouse block's Food row from the matching entry of
+  // `rows`, so the two must be the SAME object rather than two equal ones: the
+  // round-2 city-view card read two different Food rates off one panel
+  // (+3.4/day against -5/day, its F-3), and the only shape that makes that
+  // impossible instead of merely unlikely is one entry serving both. WAREHOUSE_RESOURCES
+  // carries food by contract, so the index is a type-level invariant.
+  const food = rows[WAREHOUSE_RESOURCES.indexOf("food")];
+
+  return { rows, food };
 }
 
 /** A rate with no sign, trailing zeros trimmed: 3, 2.5, 0. */

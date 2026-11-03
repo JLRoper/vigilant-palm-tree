@@ -196,9 +196,14 @@ export type BankGoldResult = {
 export async function endTurn(
   name: string,
   actor: number,
-  growthRate?: number
+  growthRate?: number,
+  clientSeat?: number
 ): Promise<EndTurnResult> {
-  return postCommand<EndTurnResult>(name, { kind: "EndTurn", actor, growthRate });
+  // F1 (playthrough round 2b): the request has to say which seat it is playing
+  // -- the endpoint refuses (400) an EndTurn that does not, and refuses (403)
+  // one whose declared seat is not the seat it is ending. `actor` is the seat
+  // whose turn ends; clientSeat is this browser's own.
+  return postCommand<EndTurnResult>(name, { kind: "EndTurn", actor, growthRate, clientSeat });
 }
 
 export async function spendMovement(

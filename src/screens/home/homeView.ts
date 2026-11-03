@@ -11,6 +11,10 @@ import {
 } from "../../io/auth";
 import { styleButton, styleInput, panelTheme } from "@screens/shared/panel";
 import { openDialog } from "@screens/shared/dialog";
+// The Load Game progress line is ONE function for both Load surfaces (this
+// landing list and the in-game toolbar modal). It reads the ROUND; see
+// loadRowProgress for why `games.turn` must not be rendered.
+import { loadRowProgress } from "@screens/shared/loadGameModal";
 import type { MapSize } from "../../map/gameMap";
 import { openSettingsMenu } from "./settingsMenu";
 import { createNewGameScreen } from "./newGameScreen";
@@ -407,7 +411,7 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
     meta.style.opacity = "0.6";
     meta.style.fontSize = "11px";
     if (entry.server) {
-      meta.textContent = `turn ${entry.server.turn} · ${entry.server.gold}g · seen ${formatTime(entry.lastSeenAt)}`;
+      meta.textContent = loadRowProgress(entry.server, entry.lastSeenAt);
     } else {
       meta.textContent = `game no longer exists · seen ${formatTime(entry.lastSeenAt)}`;
     }
