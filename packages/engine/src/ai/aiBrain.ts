@@ -42,7 +42,6 @@ interface Target {
 }
 
 const ENEMY_REACH = 7;
-const SETTLEMENT_REACH = 8;
 const RESOURCE_REACH = 8;
 const SETTLEMENT_RESOURCE_BUFFER = 2;
 
@@ -55,6 +54,23 @@ export function aiTargetReachForMap(
   const total = w * h;
   if (!(total > 24 * 18)) return baseReach;
   return Math.round(baseReach * Math.sqrt(total / (24 * 18)));
+}
+
+/**
+ * The settlement target band spans the whole map. A settlement anywhere is a
+ * candidate, so the reach is derived from the map's own dimensions -- its hex
+ * diameter, the greatest straight-line distance between any two of its hexes --
+ * rather than a fixed radius scaled by area. The hardcoded radius it replaces
+ * (8, sqrt-scaled to 12 on a 36x27 map) left the far corner of a medium board
+ * invisible: the sixth capital stood 19-20 hexes away, never entered the target
+ * list, and the seat converted five of six capitals and then wandered in place.
+ * The band keeps its distance-decayed priorities, so a nearer settlement still
+ * outranks a far one; only the "not a target at all" cutoff moves.
+ */
+export function aiSettlementReachForMap(map: { width?: number; height?: number }): number {
+  const w = map.width ?? 24;
+  const h = map.height ?? 18;
+  return Math.max(0, w + h - 2);
 }
 
 // Target priority bands (higher wins; ties break by distance decay). Enemy
@@ -816,7 +832,7 @@ export function pickAiMove(
 
   const targets: Target[] = [];
   const enemyReach = aiTargetReachForMap(ENEMY_REACH, map);
-  const settlementReach = aiTargetReachForMap(SETTLEMENT_REACH, map);
+  const settlementReach = aiSettlementReachForMap(map);
 
   for (const [otherId, otherHero] of Object.entries(state.heroes)) {
     if (otherId === heroId) continue;

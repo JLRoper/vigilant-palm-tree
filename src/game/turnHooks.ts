@@ -52,7 +52,7 @@ import type { BattleResult } from "@heroes/engine";
 import { deriveNextTradeRouteId, FOUND_SETTLEMENT_REFUSALS, type FoundSettlementRefusal } from "@heroes/engine";
 import { foundSettlementRefusalToast } from "@screens/adventure/clickIntent";
 import { showToast } from "@screens/shared/toast";
-import { pickAiMove as pickAiMoveBrain, pickGarrisonRecruitment } from "../ai/aiBrain";
+import { pickAiMove as pickAiMoveBrain, pickGarrisonRecruitment, pickHeroArmyBuildings, pickHeroArmyRecruitment, pickHeroRefitStep } from "../ai/aiBrain";
 import { cachedUnitTypes } from "../data/unitCatalog";
 import type { GameMap } from "../map/gameMap";
 import type { Axial } from "../core/hex";
@@ -676,6 +676,16 @@ export function buildTurnHooks(opts: BuildTurnHooksOptions): TurnControllerHooks
     pickGarrisonRecruitment: (state: GameState, seat: number) => {
       return pickGarrisonRecruitment(state, seat, cachedUnitTypes());
     },
+    pickHeroArmyRecruitment: (state: GameState, seat: number) => {
+      return pickHeroArmyRecruitment(state, seat, cachedUnitTypes());
+    },
+    pickHeroArmyBuildings: (state: GameState, seat: number) => {
+      return pickHeroArmyBuildings(state, seat, cachedUnitTypes());
+    },
+    pickHeroRefitStep: (state: GameState, heroId: HeroId) => {
+      return pickHeroRefitStep(state, heroId, opts.gameMap(), cachedUnitTypes());
+    },
+    unitTypes: () => cachedUnitTypes(),
     logEvent: (event: { type: string; payload: Record<string, unknown> }) => {
       const name = opts.gameName();
       if (opts.logToConsole ?? true) {

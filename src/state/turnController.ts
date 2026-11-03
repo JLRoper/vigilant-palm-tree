@@ -1,6 +1,6 @@
 import type { GameState, HeroId, PlayerId, SettlementId, TransferDirection, WarehouseResource, RecruitHeroResult, StartCharterPayload, TradeRouteEndpoint, TradeRoutePayload } from "./gameState";
 import type { BuildingDef, BuildingKind, HeroBattleVerdict, HeroState, HeroTradeOffer, Platoon, Player, SettlementState, TradeRouteState } from "@heroes/contracts";
-import { platoonsHaveTroops, platoonTroopTotal, settlementStacks, normalizePlatoons } from "./units";
+import { platoonsHaveTroops, platoonPower, platoonTroopTotal, settlementStacks, normalizePlatoons } from "./units";
 import type { GameMap } from "../map/gameMap";
 import {
   applyEngineEvent,
@@ -61,7 +61,8 @@ import {
 import { findPath } from "../map/pathfinding";
 import { hexDistance } from "../core/hex";
 import { bus } from "../core/eventBus";
-import { GARRISON_BACKOFF_ROUNDS, type GarrisonRecruitment } from "../ai/aiBrain";
+import { GARRISON_BACKOFF_ROUNDS, HERO_ARMY_TARGET_POWER, type AiMove, type GarrisonRecruitment, type HeroArmyPlacement, type HeroArmyRecruitment } from "../ai/aiBrain";
+import { isCoveredWagonId, resolveGameMode } from "@heroes/contracts";
 
 export type BankGoldDirection = "deposit" | "withdraw";
 
@@ -86,6 +87,17 @@ export interface TurnControllerHooks {
   // caller-held unit catalog. Optional so tests and headless embeds can omit
   // it (the tick then skips recruitment entirely).
   pickGarrisonRecruitment?(state: GameState, seat: number): GarrisonRecruitment[];
+  // The same three brain calls the server's army pass makes (aiBrain's
+  // pickHeroArmyRecruitment / pickHeroArmyBuildings / pickHeroRefitStep), so
+  // an unflagged legacy game's browser-driven AI seat grows a hero army
+  // exactly as a server-driven seat does. All optional and omitted by tests
+  // and headless embeds, which then skip army growth entirely.
+  pickHeroArmyRecruitment?(state: GameState, seat: number): HeroArmyRecruitment[];
+  pickHeroArmyBuildings?(state: GameState, seat: number): HeroArmyPlacement[];
+  pickHeroRefitStep?(state: GameState, heroId: HeroId): AiMove | null;
+  // The seat's unit catalog, so the army pass can size a hero against
+  // HERO_ARMY_TARGET_POWER the same way the server's pass does. Optional.
+  unitTypes?(): Record<string, UnitType>;
   logEvent(event: { type: string; payload: Record<string, unknown> }): void;
   getMap(): GameMap;
   rng(): number;
@@ -277,10 +289,13 @@ export interface AiTurnMemory {
   // B1: the round+seat the AI last ran garrison recruitment for, so the
   // shopping list runs at most once per AI turn even across repeated ticks.
   aiRecruitedFor: { round: number; seat: number } | null;
+  // The round+seat the AI last ran hero-army growth for (same once-per-turn
+  // guard as aiRecruitedFor).
+  aiArmyFor: { round: number; seat: number } | null;
 }
 
 export function createAiTurnMemory(): AiTurnMemory {
-  return { garrisonBackoff: new Map(), aiRecruitedFor: null };
+  return { garrisonBackoff: new Map(), aiRecruitedFor: null, aiArmyFor: null };
 }
 
 export interface TurnControllerOptions {
@@ -1517,6 +1532,81 @@ export class TurnController {
     }
   }
 
+  // The browser-driven twin of the server's army pass (server/app/aiDriver.ts):
+  // place the recruit buildings the brain asks for, recruit into the city
+  // garrison, then hand the waiting garrison to the hero standing on it (the
+  // TransferUnits toHero the player's own panel issues). Once per round+seat
+  // (aiArmyFor), the same guard the garrison pass above uses. Per-item local
+  // rejections log and continue and never stall the AI turn; an empty plan
+  // costs nothing, and a controller without the army hooks (tests, headless
+  // embeds) skips the whole pass.
+  private runAiArmyGrowth(seat: number): void {
+    if (!this.hooks.pickHeroArmyRecruitment && !this.hooks.pickHeroArmyBuildings && !this.hooks.pickHeroRefitStep) return;
+    if (this.aiMemory.aiArmyFor?.round === this.state.round && this.aiMemory.aiArmyFor.seat === seat) return;
+    this.aiMemory.aiArmyFor = { round: this.state.round, seat };
+    const placements = this.hooks.pickHeroArmyBuildings?.(this.state, seat) ?? [];
+    const bySettlement = new Map<SettlementId, HeroArmyPlacement[]>();
+    for (const placement of placements) {
+      const list = bySettlement.get(placement.settlementId) ?? [];
+      list.push(placement);
+      bySettlement.set(placement.settlementId, list);
+    }
+    for (const [settlementId, list] of bySettlement) {
+      const settlement = this.state.settlements[settlementId];
+      if (!settlement) continue;
+      const result = this.placeBuildings(settlementId, [
+        ...settlement.buildings,
+        ...list.map((p) => ({ kind: p.kind, gx: p.gx, gy: p.gy, level: 1 as const })),
+      ]);
+      if (!result.ok) {
+        this.hooks.logEvent({
+          type: "ai_army_building_rejected",
+          payload: { seat, settlementId, reason: result.reason, kinds: list.map((p) => `${p.kind}@${p.gx},${p.gy}`) },
+        });
+      }
+    }
+    for (const item of this.hooks.pickHeroArmyRecruitment?.(this.state, seat) ?? []) {
+      const ok = this.recruitUnits(
+        item.settlementId,
+        item.buildingKind,
+        item.gx,
+        item.gy,
+        item.unitTypeId,
+        item.count,
+        item.district,
+      );
+      if (!ok) {
+        this.hooks.logEvent({
+          type: "ai_army_recruit_rejected",
+          payload: { seat, settlementId: item.settlementId, unitTypeId: item.unitTypeId, count: item.count },
+        });
+      }
+    }
+    for (const heroId of this.state.players.find((p) => p.id === seat)?.heroIds ?? []) {
+      this.collectHeroArmy(heroId);
+    }
+  }
+
+  // Hand every unit waiting in the hero's own city garrison to the hero (the
+  // TransferUnits toHero the panel issues), the other half of the army pass.
+  // Mirrors the server's runHeroCollect: a covered wagon, a settlers game, a
+  // hero already at HERO_ARMY_TARGET_POWER, and a hero not standing on one of
+  // its seat's settlements all collect nothing.
+  private collectHeroArmy(heroId: HeroId): void {
+    const hero = this.state.heroes[heroId];
+    if (!hero) return;
+    if (isCoveredWagonId(heroId)) return;
+    if (resolveGameMode(this.state.gameMode) === "settlers") return;
+    if (platoonPower(hero.stacks, this.hooks.unitTypes?.() ?? {}) >= HERO_ARMY_TARGET_POWER) return;
+    const settlement = Object.values(this.state.settlements).find(
+      (s) => s.ownerId === hero.ownerId && s.q === hero.q && s.r === hero.r,
+    );
+    if (!settlement) return;
+    for (const entry of settlementStacks(settlement).flatMap((p) => p.entries)) {
+      this.transferUnits(heroId, settlement.id, "toHero", entry.unitTypeId, entry.count);
+    }
+  }
+
   // Active I1 backoff exclusions for one hero: settlement ids whose backoff
   // window still covers the current round. Expired entries are pruned here
   // (silent expiry, filter by round).
@@ -1855,13 +1945,16 @@ export class TurnController {
     if (!aiPlayer) return;
 
     this.runAiGarrisonRecruitment(aiPlayerId);
+    this.runAiArmyGrowth(aiPlayerId);
 
     let moved = false;
     for (const heroId of aiPlayer.heroIds) {
       const hero = this.state.heroes[heroId];
       if (!hero || hero.movementRemaining <= 0) continue;
       if (hero.isChartering) continue;
-      const move = this.hooks.pickAiMove(this.state, heroId, this.activeGarrisonBackoff(heroId));
+      const move =
+        this.hooks.pickHeroRefitStep?.(this.state, heroId) ??
+        this.hooks.pickAiMove(this.state, heroId, this.activeGarrisonBackoff(heroId));
       if (!move) continue;
       const map = this.hooks.getMap();
       const path = findPath(map, { q: hero.q, r: hero.r }, move.toTile);

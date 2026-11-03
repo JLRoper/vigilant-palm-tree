@@ -2445,3 +2445,83 @@ test("applyRemoteHeroMove works mid-AI_TURN (the phase the server driver is play
   assert.equal(after.phase.kind === "AI_TURN" ? after.phase.playerId : null, 1);
   assert.equal(after.activePlayerId, 1);
 });
+
+test("the browser-driven AI tick grows a hero army: the army pass hands the city garrison to the hero once per round+seat", () => {
+  const s1 = makeSettlement("s1", 1, 2, 2);
+  s1.stacks = stackOf("ghoul", 3);
+  const h1 = makeHero("h1", 1, 2, 2, { stacks: [] });
+  const initial = makeState({
+    heroes: [h1],
+    settlements: [s1],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  const transfers: unknown[][] = [];
+  hooks.onTransferUnits = ((...args: unknown[]) => {
+    transfers.push(args);
+    return Promise.resolve();
+  }) as TurnControllerHooks["onTransferUnits"];
+  let buildingCalls = 0;
+  let refitCalls = 0;
+  hooks.pickHeroArmyBuildings = () => {
+    buildingCalls += 1;
+    return [];
+  };
+  hooks.pickHeroArmyRecruitment = () => [];
+  hooks.pickHeroRefitStep = () => {
+    refitCalls += 1;
+    return null;
+  };
+  hooks.unitTypes = () => ({});
+
+  const memory = createAiTurnMemory();
+  const controller = new TurnController(initial, hooks, { aiMemory: memory });
+  controller.tick(0);
+
+  assert.equal(transfers.length, 1, "the waiting garrison is transferred to the hero standing on the city");
+  assert.deepEqual(transfers[0].slice(0, 6), [1, "h1", "s1", "toHero", "ghoul", 3]);
+  assert.equal(controller.getState().settlements.s1?.stacks?.[0]?.entries.length ?? 0, 0, "the city garrison is emptied");
+  assert.equal(controller.getState().heroes.h1?.stacks?.[0]?.entries[0]?.count, 3, "the hero now holds the troops");
+  assert.equal(buildingCalls, 1, "the army pass asks the brain for recruit buildings");
+  assert.ok(refitCalls >= 1, "the tick consults the refit step before the ordinary move");
+
+  const hooks2 = buildHooks(initial);
+  const transfers2: unknown[][] = [];
+  hooks2.onTransferUnits = ((...args: unknown[]) => {
+    transfers2.push(args);
+    return Promise.resolve();
+  }) as TurnControllerHooks["onTransferUnits"];
+  hooks2.pickHeroArmyBuildings = () => [];
+  hooks2.pickHeroArmyRecruitment = () => [];
+  hooks2.pickHeroRefitStep = () => null;
+  hooks2.unitTypes = () => ({});
+
+  const controller2 = new TurnController(initial, hooks2, { aiMemory: memory });
+  controller2.tick(0);
+  assert.equal(transfers2.length, 0, "the army pass runs at most once per round+seat, across controller rebuilds");
+});
+
+test("the browser-driven AI tick skips army growth when the controller has no army hooks (tests, headless embeds)", () => {
+  const s1 = makeSettlement("s1", 1, 2, 2);
+  s1.stacks = stackOf("ghoul", 3);
+  const h1 = makeHero("h1", 1, 2, 2, { stacks: [] });
+  const initial = makeState({
+    heroes: [h1],
+    settlements: [s1],
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+  const hooks = buildHooks(initial);
+  const transfers: unknown[][] = [];
+  hooks.onTransferUnits = ((...args: unknown[]) => {
+    transfers.push(args);
+    return Promise.resolve();
+  }) as TurnControllerHooks["onTransferUnits"];
+
+  const controller = new TurnController(initial, hooks);
+  controller.tick(0);
+
+  assert.equal(transfers.length, 0, "no army hooks means no army growth, exactly the pre-wiring behaviour");
+  assert.equal(controller.getState().settlements.s1?.stacks?.[0]?.entries[0]?.count, 3, "the garrison is untouched");
+});

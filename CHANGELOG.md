@@ -10,6 +10,16 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.47.0] - 2026-11-03
+
+Three limits of the AI's capital-taking, measured by DRIVING the real server-side driver over real generated boards — not by reading code.
+
+The settlement target band was a fixed radius (8, sqrt-scaled to 12 on a 36x27 map), so a capital 19-20 hexes away was never a target: on seed 12 / `medium` the seat took five of six neutral capitals and then bounced in place for 45 rounds with the sixth at d=20. The reach is now derived from the board's own hex diameter (`aiSettlementReachForMap` = `width + height - 2`, `packages/engine/src/ai/aiBrain.ts`), so a settlement anywhere is a candidate; the enemy band keeps its area-scaled radius and every priority band is unchanged. Same seed, same harness: 7/7 capitals taken by round 14, the sixth reached (d=14 → 9 → 2) and assaulted and won.
+
+- `packages/engine/src/ai/aiBrain.ts`: the settlement target band is map-derived; `SETTLEMENT_REACH` is gone. Pinned by `test/ai/aiBrain.test.ts` (a behaviour case red by assertion on the old source) and `test/engine/aiSettlementReach.test.ts` (the derivation at every size tier).
+- `src/state/turnController.ts` + `src/game/turnHooks.ts`: the browser-driven AI tick (legacy/unflagged games) now runs the same hero-army pass the server's `aiDriver` runs — `pickHeroArmyBuildings` → `pickHeroArmyRecruitment` → collect the city garrison onto the hero, plus `pickHeroRefitStep` ahead of the ordinary move — once per round+seat through new optional hooks; a controller without them skips the pass. Pinned by two cases in `test/state/turnController.test.ts`.
+- Deliberately NOT changed: the garrison table/strength, `MapGenVersion`, the settlers bare-wilderness invariant, and the army PLACEMENT kind (the power-per-gold "ghoul swarm") — the last is a named balance decision left open, not a defect: the army reaches the target and wins.
+
 ## [0.46.1] - 2026-11-03
 
 Two defects that share one symptom: `test:all` could read as a full pass while most of it never ran, and the suite that went red was comparing a value that was still moving.
