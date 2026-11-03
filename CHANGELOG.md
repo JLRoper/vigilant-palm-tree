@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.40.2] - 2026-11-03
+
+the type-gate baseline is exact: the 7 phantom settingsMenu errors are pruned, a stale entry now fails the gate, and --write-baseline refuses to raise a count or add an entry
+
 ## [0.40.1] - 2026-11-03
 
 fix(ui): the native prompt() freezes the renderer too — the asset-upload key comes from the app's own text-input dialog
