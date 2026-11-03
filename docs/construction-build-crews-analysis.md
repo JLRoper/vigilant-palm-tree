@@ -29,9 +29,9 @@ decrement. What the design gets wrong is of three narrower kinds, listed in thre
   rest are claims that read as engine facts but are not.
 - **S — a decision written as a slogan instead of arithmetic.** Seven findings, the design's own
   §11.2-2 "untouched building builds in exactly the same time" first, as the worked example of the class.
-- **I — an implementation step that cannot be done as written.** Eleven findings: a constant naming a
-  function that does not exist, a call site the design does not own, and a gate that will fight the
-  design's own acceptance test.
+- **I — an implementation step that cannot be done as written.** Twelve findings: a constant naming a
+  function that does not exist, call sites the design does not own (including the canvas drag and the
+  client's second AI placement path), and a gate that will fight the design's own acceptance test.
 
 Each finding carries a one-line counter-proposal and its cost. **Nothing here reopens stage 1's scope
 decisions** (§6 restates them so no one mistakes a critique for a reopening).
@@ -279,6 +279,19 @@ over the union. Recorded so stage 4 does not read a green build as evidence the 
 *Counter:* none — the design is right here; this is the check, not a defect.
 *Cost:* nil.
 
+### I12. §7-11 names one AI placement path; there are two.
+The AI's building programme runs on the server (`server/app/aiDriver.ts:919-946`) **and** locally, inside
+the client's own turn controller, for hotseat/single-player seats: `runAiArmyGrowth`
+(`src/state/turnController.ts:1543-1560`) calls `this.hooks.pickHeroArmyBuildings(...)` and commits the
+same `PlaceBuildings` shape, wired at `src/game/turnHooks.ts:682-684`. **Both** paths build
+`{kind, gx, gy, level: 1}` with no `workers` (`aiDriver.ts:940`, `turnController.ts:1557`), so both
+produce `workers: 0` sites that freeze under `buildRate(0) = 0` — §5.e's own diagnosis. §7-11 names only
+the server driver.
+*Counter:* put the staffing rule where both callers reach it (a shared step beside
+`pickHeroArmyBuildings` in `aiBrain.ts`), or name and edit **both** `aiDriver.ts` and `turnController.ts`.
+*Cost:* one extra call site; without it the local-AI seats freeze while the server's do not — the hardest
+divergence to notice, because it shows only in hotseat play.
+
 ---
 
 ## 4. Counter-proposals at a glance
@@ -308,9 +321,11 @@ over the union. Recorded so stage 4 does not read a green build as evidence the 
 | I9 | `buildTimeLine` import set | Note the added import | nil |
 | I10 | "the AI's placement step" is two seams | Name `aiBrain.ts` and `aiDriver.ts` separately | nil |
 | I11 | union addition | (design is right; recorded as checked) | nil |
+| I12 | §7-11 names one AI placement path; there are two | Put the rule where both reach it, or edit `aiDriver.ts` *and* `turnController.ts` | one extra call site |
 
 **Net cost of the critique:** one table row rewritten, one AI gate re-scoped from "keep" to "build", one
-canvas gesture moved from "untouched" to "edited", one signature changed, and a set of wording fixes.
+canvas gesture moved from "untouched" to "edited", one AI programme from one path to two, one signature
+changed, and a set of wording fixes.
 **No finding changes the mechanic, the curve, the ceiling, the trim, the pool model or the scope.**
 
 ---
@@ -401,6 +416,8 @@ A short, additive list — everything else in the design's §7 stands:
 - `recruitmentPanelModel.ts:199/213/302/310/334` — the recruitment panel's `maxWorkers` (I5).
 - `aiBrain.ts:418` — the idle-slot gate, as **new** code (N4/I2).
 - `aiDriver.ts:933` — the `AssignWorkers` dispatch for the AI, as **new** code (I2/I10).
+- `src/state/turnController.ts:1543-1560` — the **second** AI placement path (hotseat/local seats), which
+  needs the same staffing step, plus its gate (I12).
 - `cityScene.ts:206` — the outer `4` becomes the constant or is dropped (I4).
 - `docs/settlements.md` — the two lines, plus the marker; and the doc's own "Construction sites" sentence
   (`:238`) plus the per-kind caps sentence (`:239`) are the right targets.
