@@ -10,10 +10,22 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.39.5] - 2026-11-03
+## [0.39.6] - 2026-11-03
 
 - **The settlement, city-view and logistics panels stop stating what is not true (playthrough round 2b, E1-E7, plus round 4's F6).** The per-day rate rows are now the rate the turn PAYS (each producer rounded the way `produceSettlementResources` rounds it: the Gold hold's wood really moved -2/day where the row read -2.89, and food +15 where it read +15.72); a full STORE says it is discarding production, with the same amber row, tooltip sentence and one-time End Turn toast the treasury cap already had (`src/screens/settlements/warehouseCap.ts`); the town-hall upgrade states that it levels the WHOLE city and what that does to the daily upkeep (11 wood + 2 stone -> 22 wood + 4 stone on the card's city); the build palette refuses a row the grid has no room for (a level-1 starter city has no free 2x2 anchor at all) and states each row's build time and the upkeep it pays while it builds; a landed placement leaves no stale refusal line (pinned, not reproduced); the logistics heading no longer reprints the player's wagon pool under every settlement; and a trade recommendation names the SHORTFALL instead of the stock it is short of ("Larder short by 2 food - 3 in the larder, 5 food/wk army").
 - Docs: `docs/settlements.md`, `docs/player-guide.md` and `docs/resource-gathering.md` carry the new contracts (the palette's space and build-time rules, the store-cap indicator, the town-hall scope line, the paid-rate rounding and the recommendation copy).
+
+## [0.39.5] - 2026-11-03
+
+the load path remembers the seat it claimed, so a reload opens where you are
+
+`test:districts` was red on main. Re-measured on the real tip first: `git fetch github` → `f7e02a3` (0.39.2), where `districts.e2e.ts:372` failed verbatim — `AssertionError [ERR_ASSERTION]: district did not re-open after reload` / `false !== true` (`>> threw:` … `at run (test/districts.e2e.ts:372:12)`). Attributed by RUNNING the suite at the commit on either side of each candidate in `a895975..fd18ec0`, not by reading: green at `a895975` (0.38.12), green at `adcbc18` (0.38.13, PR #297), **red from `0bc64b7` (0.38.14, PR #296 — the load-path/seat-resolver landing) on**, red again at `fd18ec0` (0.39.0, PR #295) and at the tip. The flip is PR #296's, and it is a real product regression, not test drift.
+
+- **the mechanism, read out of the running client at the culprit commit:** after the reload `resolveLocalSeat` answered `{"seat":null,"source":"unknown"}` for a game whose claim map held `{"0":{"handle":"Player 1",…}}`, so the load camera centred `{"q":17.5,"r":13,"source":"map-centre"}` instead of the seat's own castle at `(2,9)`. Every claim check falls back to seat 0, so nothing else refused — the district hex had simply fallen off screen and the double-click never reached it.
+- **the cause:** the client's own self-claims — the New Game form and the auto-created starter, both seat 0, `src/managers/GameSessionManager.ts` — claimed a seat server-side and never recorded it locally. PR #296 removed the old fallback (the *lowest* claimed seat, which happened to be the creator's 0), so a browser that had claimed its own seat now had nothing to be identified BY on reload. Verified against the DB, not inferred: `SELECT lobby->'claimed' FROM games` on the run's own game returns exactly that single seat-0 claim.
+- **the fix is the missing memory, never a softened guess:** both self-claim sites now call the same `rememberSelfClaim()` (`src/players/localPlayer.ts`) the multiplayer lobby's Host/Join tabs already used, which writes the remembered seat, the claim handle and the in-memory seat. `resolveLocalSeat` still refuses to assert a seat the browser cannot prove it holds.
+- **surfaces:** the reload path is shared by every game a browser self-claims through `GameSessionManager.loadGame` → `resolveLocalSeat` (the load camera and the in-memory seat). Verified in a browser by `test:districts` (green on this tree) and by `test:settlements` (green, unaffected); pinned by a new unit file `test/state/selfClaimMemory.test.ts` whose last case reads `src/` and fails if ANY `.claimLobbySeat(` call site stops remembering its seat, so a new claim path cannot reintroduce this silently.
+- docs: `docs/multiplayer.md`'s Local-seat-identity row now states the rule — claiming a seat and remembering it are one act.
 
 ## [0.39.4] - 2026-11-03
 
