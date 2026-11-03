@@ -194,7 +194,7 @@ Crew `n` beyond the first is worth +0.20× additive or ×1.20 compounding:
 A site's outcome the player sees is the **whole number of day ticks** (`ceil(buildDays / rate)`;
 `buildDays` values in the registry — `buildingRegistry.ts:17`, `:819` — are 0, 2, 3, 4, 5, 6):
 
-| `buildDays` | today, the kind's full crew (2.00× at max 3, 2.33× at max 4) | additive 1b | additive 2b | additive 3b | additive 4b | compounding 4b |
+| `buildDays` | today, the kind's own full crew (2.00× at every kind's cap) | additive 1b | additive 2b | additive 3b | additive 4b | compounding 4b |
 |---|---|---|---|---|---|---|
 | 2 (house, farmField, farmhouse, crypt, delversHall, seedlingGrove — 6 kinds) | **1** | 2 | 2 | 2 | 2 | 2 |
 | 3 (market, granary, warehouse, huntingLodge, woodcutterHut, warrenLodge — 6 kinds) | **2** | 3 | 3 | 3 | 2 | 2 |
@@ -225,7 +225,7 @@ merits, not just on obedience:
 
 **(a) Slower than today at every crew size, and slower than today's ceiling at the new maximum.**
 
-| `buildDays` | today at the kind's full crew (2.00×/2.33×) | today at 1× (an idle site) | new at 4 builders (the best there is) | verdict at best |
+| `buildDays` | today at the kind's full crew (2.00×) | today at 1× (an idle site) | new at 4 builders (the best there is) | verdict at best |
 |---|---|---|---|---|
 | 2 | 1 turn | 2 | 2 | **2× slower** |
 | 3 | 2 | 3 | 2 | equal |
@@ -617,8 +617,9 @@ finish → the crew is trimmed to the kind's cap and the menu's Workers row show
    `BUILD_RATE_PER_EXTRA_BUILDER = 0.2`, `buildRate(n)`, `staffingCeiling(b)`, `buildersOnSite(b)`.
    `effortFraction` is **not** changed: production keeps its own curve.
 2. `packages/engine/src/settlement/advance.ts:125` — the decrement becomes
-   `buildRate(buildersOnSite(b))`; the trim on completion (`workers = min(workers, kind cap)`) lands in
-   the same `stepBuilding` body, in the branch that clears `construction`.
+   `buildRate(buildersOnSite(b))`; the trim on completion (`workers = min(workers, kind cap)`, surplus to
+   the idle pool in §3's stated deterministic order) lands in the same `stepBuilding` body, in the branch
+   that clears `construction`. The trim must not delete a worker and must not auto-staff any site.
 3. `packages/engine/src/settlement/staffWorkers.ts:122/124/135` — validate against `staffingCeiling`.
    `workforce.ts`'s `staffingBase` / `canAssignWorkers` / `autoStaffedSlots` / `assignedWorkersExplicit`
    read the same ceiling, so the pool arithmetic cannot disagree with the reducer.
@@ -641,7 +642,9 @@ finish → the crew is trimmed to the kind's cap and the menu's Workers row show
 12. `docs/settlements.md` — the two lines this changes (`:238` the construction-site rule, `:239` the
     per-kind caps sentence) and its `docs:verified` marker; `DOC_OWNERSHIP` maps `docs/settlements.md`
     to `packages/engine/src/settlement/**`, so the doc gate will ask for it.
-13. Tests: the curve and the whole-day table (§8's rows each name the suite that can hold them).
+13. Tests: the curve and the whole-day table (§8's rows each name the suite that can hold them), plus the
+    three invariant tests §8 adds — #21 the untouched-legacy 4-builder path, #22 the deterministic lossless
+    trim, #23 the named construction constant.
 14. `CHANGELOG.md` + a version bump are the **stage 4** release step's, not this card's, per the repo's
     `/version-bump` rule (game code bumps; docs alone never do).
 
