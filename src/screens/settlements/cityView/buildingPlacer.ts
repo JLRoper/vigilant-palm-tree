@@ -507,6 +507,14 @@ export class BuildingPlacer {
           gap: "4px",
         });
         row.title = status.title;
+        // A refused row is DISABLED, not merely dimmed (playthrough finding 17):
+        // the click handler already returns early and the style already says
+        // `not-allowed`, so this changes no behaviour -- but a row that is
+        // focusable and announced as actionable while it silently does nothing
+        // is a lie to a keyboard or AT user. The dimming stays (a disabled
+        // control's own default styling is not the palette's), and the title
+        // still carries the reason: browsers show a disabled control's tooltip.
+        row.disabled = disabled;
 
         const costWrap = document.createElement("span");
         Object.assign(costWrap.style, {
