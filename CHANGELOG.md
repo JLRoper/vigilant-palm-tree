@@ -10,10 +10,14 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.39.9] - 2026-11-03
+## [0.39.10] - 2026-11-03
 
 - **The settlement, city-view and logistics panels stop stating what is not true (playthrough round 2b, E1-E7, plus round 4's F6).** The per-day rate rows are now the rate the turn PAYS (each producer rounded the way `produceSettlementResources` rounds it: the Gold hold's wood really moved -2/day where the row read -2.89, and food +15 where it read +15.72); a full STORE says it is discarding production, with the same amber row, tooltip sentence and one-time End Turn toast the treasury cap already had (`src/screens/settlements/warehouseCap.ts`); the town-hall upgrade states that it levels the WHOLE city and what that does to the daily upkeep (11 wood + 2 stone -> 22 wood + 4 stone on the card's city); the build palette refuses a row the grid has no room for (a level-1 starter city has no free 2x2 anchor at all) and states each row's build time and the upkeep it pays while it builds; a landed placement leaves no stale refusal line (pinned, not reproduced); the logistics heading no longer reprints the player's wagon pool under every settlement; and a trade recommendation names the SHORTFALL instead of the stock it is short of ("Larder short by 2 food - 3 in the larder, 5 food/wk army").
 - Docs: `docs/settlements.md`, `docs/player-guide.md` and `docs/resource-gathering.md` carry the new contracts (the palette's space and build-time rules, the store-cap indicator, the town-hall scope line, the paid-rate rounding and the recommendation copy).
+
+## [0.39.9] - 2026-11-03
+
+load never substitutes a starter game for a failed or empty load
 
 ## [0.39.8] - 2026-11-03
 

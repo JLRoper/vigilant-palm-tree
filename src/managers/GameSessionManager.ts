@@ -19,6 +19,7 @@ import { clearServerDriven, syncServerDrivenFromGame } from "../io/serverDrivenG
 import { setUncharted } from "../io/unchartedGames";
 import { clearGameMode, setGameMode } from "../io/gameModes";
 import { getCachedAuth } from "../io/authStorage";
+import { restoreUserGames } from "../io/userGames";
 import { resetReveal } from "../render/reveal";
 
 /**
@@ -236,13 +237,34 @@ export class GameSessionManager {
 
   async initBackend(): Promise<boolean> {
     const ok = await this.session.init();
-    if (ok) {
-      void loadUnitCatalog().catch((e) => console.warn("unit catalog load failed:", e));
-      const cached = this.session.getLatestGames();
-      if (cached.length === 0) {
-        await this.createFreshStarter();
-      }
+    if (!ok) return false;
+    void loadUnitCatalog().catch((e) => console.warn("unit catalog load failed:", e));
+    // The SERVER is the authority on which games exist, and boot is where the
+    // list has to be restored from it. This used to read `getLatestGames()` --
+    // the localStorage cache -- and start a fresh `starter-*` game whenever that
+    // cache was empty. The cache is per profile AND per origin, so a cleared
+    // profile, a private window, or a vite restart on a new port (dev's
+    // allocate-ports picks one) made a player with games on the server look like
+    // a brand-new player: the client created `starter-<ts>` (a game nobody asked
+    // for, on the real server), loaded it, and the player's own saves were
+    // nowhere in Load Game. That is the silent substitution this path must never
+    // make -- measured: 257 of 298 games in the shared dev DB were `starter-*`.
+    //
+    // Now: restore the cache from the server, and start a starter game only when
+    // the server itself says the account has no games. If the list cannot be
+    // read, do NOTHING -- an unreadable list is not an empty account, and
+    // creating a game on that guess is how a player loses their place.
+    let serverGames: Game[];
+    try {
+      serverGames = await this.session.listGames();
+    } catch (e) {
+      console.warn("[boot] could not list games -- not starting a game on a guess:", e);
+      return true;
     }
-    return ok;
+    restoreUserGames(serverGames);
+    if (serverGames.length === 0) {
+      await this.createFreshStarter();
+    }
+    return true;
   }
 }
