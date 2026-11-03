@@ -54,6 +54,11 @@ export interface GameRow {
   seed: number;
   hero_q: number;
   hero_r: number;
+  // LEGACY, FROZEN AT CREATION: the column's DEFAULT 1 is the only writer
+  // (POST /games' INSERT does not name it) and no query in this repo advances
+  // it. `round` is the live counter the turn cycle moves. Kept in SELECT_COLUMNS
+  // only because the client's `Game` payload still carries it; do not read it
+  // for a save's progress.
   turn: number;
   gold: number;
   enemy_positions: EnemyPos[];
