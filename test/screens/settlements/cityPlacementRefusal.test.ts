@@ -171,3 +171,25 @@ test("refusal: the cart's line retires with the snapshot, a geometry line does n
     "a treasury reading cannot retract a geometry rule",
   );
 });
+
+// E6 (playthrough round 2b) read "A building already stands there." still on the
+// palette AFTER a successful placement, which would be a refusal the game did
+// not make. The sentence is cleared by `placeAt` before it ever places and again
+// by `confirmPlacement` (buildingPlacer.ts), so the sequence is pinned here
+// rather than left to a re-read: refused click -> line; the SAME held kind lands
+// on a free cell -> no line. The row staying armed is the documented behaviour
+// and is not a refusal, which is why it is asserted separately.
+test("E6: a landed placement leaves no refusal line behind", () => {
+  const occupied: BuildingDef[] = [{ gx: 1, gy: 1, kind: "farmhouse", level: 1, w: 1, h: 1 }];
+  const { placer, body } = openPlacer(occupied);
+  placer.selectBuilding("house");
+
+  const blocked = pointFor(1, 1);
+  assert.equal(placer.placeAt(blocked.x, blocked.y, VIEWPORT.w, VIEWPORT.h), null);
+  assert.equal(paletteNotice(body), "A building already stands there.");
+
+  const free = pointFor(3, 3);
+  assert.ok(placer.placeAt(free.x, free.y, VIEWPORT.w, VIEWPORT.h), "the free cell places");
+  assert.equal(paletteNotice(body), null, "a landed placement leaves no refusal sentence behind");
+  assert.equal(placer.isActive(), true, "the kind stays armed (documented), which is not a refusal");
+});
