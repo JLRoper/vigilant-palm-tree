@@ -10,15 +10,15 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.38.14] - 2026-11-03
+
+Copilot's two comments on the landed load path. The browser's own seat is resolved instead of the first claimed one: a remembered seat, then the handle it claimed with, then the server-bound auth email, and NO seat when none of the three identifies the browser (this supersedes #292's `resolveInitialLocalSeat`, whose lowest-claimed-seat fallback was the same first-claim guess merely narrowed). The load promise is returned through the toolbar callback, so a failed load stays observable by the dialog that awaits it.
+
 ## [0.38.13] - 2026-11-03
 
-F3 (the camera could lose the map): there was no pan clamp, so repeated drags walked it arbitrarily far off the map and the renderer -- which clamps the tiles it asks about to the map's bounds -- painted nothing. Measured on a 40x30 map at zoom 1 in a 1280x800 viewport: forty `pan(-400,-400)` drags took `mapTilesOnScreen` from 369 to 0 with the camera parked at (-16000,-16000), a black viewport whose only exit was a minimap click. `Camera.clampToMap` now keeps the map's world-pixel extent (measured from the four corner hexes) overlapping the viewport, compared against `viewport/zoom` so it holds at every zoom level, and centres a map that fits entirely. Every surface that moves the camera routes through `AdventureView.clampCamera`: the drag pan, the minimap frame drag, the wheel zoom, `centerOn` (minimap click, load centring, resize, focus-hero/settlement) and the zoom-out setting callback.
-
-F2 (the tile panel lied about what you can see): outside every vision ring the panel read "Unexplored" with no terrain and no move cost, even on hexes the map itself paints as explored ground under the fog veil -- at a dirt hex the scene builder emitted `terrainHex` + `fogHex` (veiled dirt composites to `rgb(37,31,25)`) while `describeTile` returned `terrain: null`. "Unexplored" now means NEVER SEEN: `TileInfo.explored` is set from the seat's reveal set (`revealedSetForTilePanel` unions the persisted `revealedTiles` with live vision), and an explored hex reads its terrain label and move cost with a dim "Explored — not in sight" note. Deposits, settlements, heroes, charters and territory stay visibility-gated; classic games carry no reveal list, so there `explored` is false everywhere and the locked two-state fog rule is byte-identical.
-
-F4 (cosmetic, same family): the minimap painted every explored-but-unwatched hex as flat slate, so uncovered ground lost its biome the moment the hero walked away. `minimapCellKind` / `minimapCellFill` give the cell its tier -- visible and explored share the terrain colour (explored under a veil), uncharted stays opaque black, classic fog stays the slate.
-
-`patch`: three presentation/view-layer fixes, no schema or wire-contract change. New tests `test/render/camera.test.ts`, the F2 cases in `test/screens/adventure/tileInfoPanel.test.ts`, the F4 cases in `test/render/minimap.test.ts`; docs/map.md updated.
+test:visual tells the truth again
+- Six stale scene baselines are re-baselined to what main actually renders, each pinned to the commit that moved it by running the suite on either side of that commit: the three adventure/charter scenes to `2417ae8` (the hero panel's trade affordance reflows the panel and every row under it) and the three city-view scenes to `beb7854` (the town-hall re-art, which drops the thick flat plinth). No render code changed; the screenshots themselves are the record. `test:visual` is 10/10 green on two consecutive runs (it was 6/10 red on main, unchanged for two rounds).
+- What the suite cannot see, so the next round can plan for it: no scene drives districts, district roads or the Load path. The city-view captures reach the backdrop only, and nothing in the replay set opens the load flow.
 
 ## [0.38.12] - 2026-11-03
 
@@ -27,6 +27,7 @@ Copilot's review comment on PR #288 is real, and it is a defect PR #288 introduc
 The fix is the cursor/snapshot pairing the design already implied: `mp:resynced` now carries `pairedCursor`, the cursor the client's state was paired with going into the fetch -- `null` for an unseeded start, where that GET is the client's FIRST pairing, so its snapshot's own cursor is the one the client's state will be held against and dropping it can only leave the cursor ahead of the only state the client holds (permanently, not until the next boundary: every later unflagged `initial` resync was refused by the same reason gate). `garrisonEventBridge` therefore reconciles an unpaired snapshot wherever the phase is not one the local client is driving (`safeForDeltas()`, re-checked after `flushPendingCommands`) instead of dropping it. A non-null `pairedCursor` keeps every existing rule byte-identical -- those refusals are phase-scoped, and the next boundary resync repairs them, which is why the guard stays.
 
 `patch`: this diverged; the loss was silent and permanent for the session (a pending `BattleOffered`, a troop total, a hero position). New field on an existing bus event, no schema or wire-contract change, new test `test/io/multiplayerSyncGarrisonBridge.test.ts`.
+
 
 ## [0.38.11] - 2026-11-03
 
