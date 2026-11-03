@@ -34,7 +34,7 @@ import {
 } from "../../render/assetDescriptors";
 import { showToast } from "../shared/toast";
 import { styleButton, styleInput } from "@screens/shared/panel";
-import { cargoTransferRequest, ownedSettlementAt } from "../shared/cargoTransfer";
+import { cargoTransferRequest, cargoTransferTitle, ownedSettlementAt } from "../shared/cargoTransfer";
 import { openDialog } from "@screens/shared/dialog";
 import { STORAGE_GAUGE_SHEET } from "./storageGaugeAssets";
 import {
@@ -464,11 +464,15 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
           btn.style.fontSize = "10px";
           btn.style.padding = "1px 6px";
           btn.dataset.focus = "hero-cargo-" + verb;
+          // The button says what it will move, or WHICH SIDE IS FULL -- the same
+          // sentence the settlement panel's Warehouse row carries, from the same
+          // shared function (cargoTransferTitle), so the two surfaces that mount
+          // this verb tell one story about one click.
+          const title = cargoTransferTitle(verb, request);
           if (request.total <= 0) {
-            setUnavailable(
-              btn,
-              verb === "deposit" ? "the hero's wagons are empty" : "nothing to take from the warehouse",
-            );
+            setUnavailable(btn, title);
+          } else {
+            btn.title = title;
           }
           btn.addEventListener("click", () => {
             const result = opts.actions.transferResources(

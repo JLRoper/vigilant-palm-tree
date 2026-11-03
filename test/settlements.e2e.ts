@@ -200,10 +200,18 @@ async function deleteGame(name: string): Promise<void> {
 }
 
 async function walkInCapturePersisted(browser: Browser): Promise<void> {
-  console.log(">> [A] human walk-in capture persists server-side (3 fresh games)");
+  console.log(">> [A] human walk-in capture persists server-side (3 fresh games, neutral emptied)");
   for (let i = 1; i <= 3; i++) {
     const name = `settle-e2e-cap${i}`;
-    const { gameId, sid, neutral } = await seedAtNeutral(name, "p0-hero");
+    // The walk-in path is the EMPTIED settlement's: since a neutral capital
+    // starts garrisoned (engine settlement/neutralGarrison.ts, "neutral capitals
+    // start garrisoned"), server/app/commandHandler.ts's CaptureSettlement gate
+    // answers `garrison_not_defeated` for a held one and only the arena can take
+    // it -- section [B] below is that case. This section is about the walk-in
+    // itself (the human's move onto the hex persisting server-side, client state
+    // and the castle mirror agreeing, no 409), so its fixture empties the
+    // garrison first instead of relying on a neutral that ships with none.
+    const { gameId, sid, neutral } = await seedAtNeutral(name, "p0-hero", []);
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     let saw409 = false;
     page.on("response", (r) => { if (r.status() === 409 && r.url().includes("/commands")) saw409 = true; });
