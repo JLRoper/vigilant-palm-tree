@@ -10,12 +10,20 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.38.9] - 2026-11-03
+## [0.38.10] - 2026-11-03
 
 seat truth: a seat's own turn
 - End Turn is seat-scoped on both sides (playthrough round 2b, F1): the toolbar offers the control only on the local seat's own turn (`canEndTurnFromSeat`), the command declares the seat that is asking (`EndTurn.clientSeat`, required over HTTP by `parseCommand`), and `endTurnSeatRefusal` refuses a declaration that is not the seat being ended. A browser-driven AI seat's turn, ended by seat 0's client, and the drop policy's own skip keep working.
 - `GET /games/:name`'s `availableSeats` now means what it says (F3): the seats a client could still claim, instead of the falsy keys of `lobby.claimed` (structurally always `[]`). `seatTotal` is the game's seat count, AI seats included (F7).
 - A browser plays the seat it claimed (F2): `loadGame` no longer resets a client that claimed seat 1 back to seat 0. The single-browser hotseat is out of scope, with the drop-policy change it would need named in docs/multiplayer.md (Decision 4).
+
+## [0.38.9] - 2026-11-03
+
+The Load Game surfaces: three fixes, from playthrough round 2b.
+
+- **fix(home): the landing Load list reads the round, not the frozen `games.turn`.** The `games.turn` column is written once at creation (its DEFAULT 1 is the only writer) and never advances, so the landing page's Load list called a round-4 save "turn 1" while the in-game Load modal showed the real round. Both surfaces now render one shared progress line, and the column's legacy role is documented at both type sites.
+- **fix(load-modal): the in-game Load modal closes after a successful Open.** Its teardown swept a `z-index: 100` layer no dialog sits on (`openDialog` mounts its wrapper at 300), so a successful load left the modal over the game with its row stuck on "Loading…", its fullscreen backdrop eating every later click, and the panel still registered with the panel manager. The row now closes the dialog it was opened with.
+- **fix(load): loading an unfounded settlers game centres the camera on the seat's own unit.** The load path keyed off the literal hero id `p0-hero` with the classic castle-less spawn hex (6,5) as its fallback, so a settlers game with nothing founded opened fully fogged with the player's wagon off screen. The camera now resolves the local seat's wagon / commander / settlement, and the genuine nothing-to-centre-on case falls back to the map centre — documented, not a classic-game constant.
 
 ## [0.38.8] - 2026-11-03
 
@@ -38,7 +46,6 @@ The road behaviour the round-2 card proved correct is unchanged: per-terrain dra
 ## [0.38.6] - 2026-11-03
 
 Playthrough round 2's battle-persistence cluster, both findings re-measured on 0.38.2 and fixed, with both surfaces of F2 closed. A load whose payload carried no `last_event_id` (the Load list's row is the only source, and only `GET /games/:name` returns that field) left the multiplayer sync's cursor unseeded, and the sync opened the event stream at `after=0` -- the poll route's contract makes that "replay the whole game_events log" -- so every historical event was re-delivered as a live delta and a replayed `BattleOffered` re-opened a battle the server had already settled (its closing `BattleResolved` answers "resync", and that snapshot was dropped outright while the phase was blocked, so the modal stayed up and Quick Resolve POSTed a second time). The stream is now deferred until the initial resync seeds the cursor, and a row at or below the cursor is never applied -- the phase cannot be re-opened by a settled battle. The server side is closed too: a defender-seat `ResolveBattle` / `SubmitBattleResult` for a pair the lobby no longer marks pending is refused with `battle_not_pending` on server-driven games (checked before any world mutation, so a refusal leaves nothing half-written), which retires the second persisted resolution that deleted a hero, while an attacker-seat resolve and a browser-driven game's client-local defender path stay ungated. The stale `heroes.troops` scalar is gone as well: one new `withSurvivorStacks` helper now writes the scalar everywhere survivor stacks are written -- both sides of a hero battle, the conceding side, and the settlement battle's attacker -- so the persisted column, the API and `hydrate`'s re-seed all agree with `hero_platoons` instead of the winner keeping its pre-battle headcount. `patch`: both findings are defects on shipped paths, no new command kind, no schema change and no wire-contract change (the new refusal reason is one more value on the existing command error field).
-
 
 ## [0.38.5] - 2026-11-03
 

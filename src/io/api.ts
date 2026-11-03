@@ -66,6 +66,12 @@ export type Game = {
   seed: number;
   hero_q: number;
   hero_r: number;
+  // LEGACY, FROZEN AT CREATION. `games.turn` is written once by the column's
+  // DEFAULT 1 (POST /games' INSERT never names it) and no code writes it again
+  // -- the End Turn cycle moves `round`/`day`/`active_player_id` instead.
+  // Measured on the shared database: every row reads turn = 1 while `round`
+  // runs from 1 to 1996. Read `round` for a save's progress (the Load surfaces
+  // both render loadGameModal's loadRowProgress); this field is payload-only.
   turn: number;
   gold: number;
   enemy_positions: EnemyPos[];
