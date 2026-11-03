@@ -40,6 +40,13 @@ test("roster parity seeds full first-boot metadata and tier upkeep, and reruns s
     for (const row of first.rows) {
       assert.notEqual(row.faction_id, "neutral");
       assert.ok(row.description.length > 0);
+      // This is 033 IN ISOLATION: its own upkeep lines (98-99) mirror 021's
+      // tier ladder so a row inserted after 021 is not left on the column
+      // default for a boot, which is what these two assertions pin. It is not
+      // the final catalog state -- every one of these fifteen units is
+      // ashen/ironmark/verdant, and 037_faction_upkeep.sql reshapes their
+      // bills by faction afterwards at boot. That table, and the per-faction
+      // totals, are pinned in test/migrations/factionUpkeep.test.ts.
       assert.equal(row.upkeep_gold, row.tier);
       assert.equal(row.upkeep_food, Math.min(3, Math.max(1, Math.ceil(row.tier / 2))));
     }
