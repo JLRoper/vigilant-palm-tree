@@ -21,6 +21,15 @@ import type { Paint2DDep, ResolvedSprite, ResolvedSpriteDescriptor } from "./dep
 import {
   hexPath,
 } from "./geometry";
+import {
+  roadGeometryFor,
+  roadWidthForStrands,
+  ROAD_CASING_PER_SIDE,
+  ROAD_JUNCTION_PAD,
+  type RoadJunction,
+  type RoadPiece,
+  type RoadPoint,
+} from "../roadGraph";
 import { paintCityDiorama } from "./cityDiorama";
 import { HEX_SIZE } from "../../../core/hex";
 import { decorationSeed } from "../../decorationSeed";
@@ -58,6 +67,7 @@ import type {
   SceneNode,
   SelectedTileHighlightNode,
   SettlementRoadNode,
+  SettlementRoadTile,
   TerrainDecorationNode,
   TerrainHexNode,
   TerritoryOutlineEdgeNode,
@@ -83,29 +93,12 @@ const SELECTED_TILE_STROKE = "#ffffff";
 // terrain (forest, swamp) alike -- a single dark rut measured only a ~20-point
 // luminance drop on desert and read as a shadow between two sprites.
 //
-// Scale: the band is sized against the adventure-map sprites, not against the
-// hex, so it is a hairline -- a fifth of what a hex-wide road would be. At this
-// width individual cart ruts are sub-pixel and cannot be drawn, so the width
-// alone carries the workforce reading.
-//
-// Shape: a road never runs straight between two tile centres. Each edge bows
-// off the centre line by ROAD_BOW_MIN..ROAD_BOW_MAX of its own length, to a
-// side the tile pair itself picks, so a district's roads wander between its
-// sprites the way a lane worn through fields does, and two roads meeting at a
-// tile centre arrive at different angles instead of ruling a line across the
-// settlement.
+// Width and shape both come from ./roadGraph.ts, which owns the per-tile mask
+// geometry, the width mapping and the constants behind it (including the
+// 2026-11-03 landing that lifted the band out of the sub-pixel range both
+// study cards measured). This file owns the palette and the paint order only.
 const ROAD_EDGE = "rgba(46, 38, 28, 0.5)";
 const ROAD_SURFACE = "rgba(206, 190, 162, 0.55)";
-const ROAD_EDGE_OVERHANG = 0.45;
-const ROAD_WIDTH_BASE = 0.55;
-const ROAD_WIDTH_PER_STRAND = 0.05;
-const ROAD_WIDTH_MAX = 1.5;
-// Apex deviation off the centre line, as a fraction of the edge's own length.
-// Adjacent tile centres are HEX_SIZE * sqrt(3) apart, so 0.07..0.18 is a
-// 3.9px..10.0px wander -- well inside the two hexes the road joins, and wide
-// enough at sprite scale to read as a lane that wanders.
-const ROAD_BOW_MIN = 0.07;
-const ROAD_BOW_MAX = 0.18;
 
 const PARALLAX_SPEEDS: Record<number, number[]> = {
   2: [0.1, 1.0],
@@ -784,95 +777,164 @@ export function paintDistrict(ctx: CanvasRenderingContext2D, node: DistrictNode,
 }
 
 /**
- * District roads: a hairline pale gravel surface with a dark earth edge
- * underneath, drawn as a curve rather than as a ruled band.
+ * District roads: a pale gravel surface with a dark earth casing underneath,
+ * stroked per TILE from that tile's own 6-bit edge mask.
  *
- * Width carries the workforce reading (ROAD_WIDTH_BASE + ROAD_WIDTH_PER_STRAND
- * per track, capped at ROAD_WIDTH_MAX) -- at this scale individual ruts are
- * sub-pixel, so the count is expressed as width rather than as separate lines.
+ * One node per settlement. Every tile's road is a set of pieces in tile-local
+ * space (../roadGraph.ts) -- a cubic per through half, a straight spur per
+ * branch -- so a corner is one rounded curve and a T,
+ * a Y or a crossing is what the geometry does when three or more of the tile's
+ * sides are set -- a branch is not a drawn piece and nothing is baked. The two
+ * tiles either side of a shared edge both leave that edge perpendicular to it,
+ * and on this projection the perpendicular IS the inward radius they both
+ * compute, so the seam is tangent-continuous for free whatever either mask is.
  *
- * Shape carries the "worn by traffic" reading: each edge bows off the line
- * between its two tile centres by an amount that belongs to that PAIR of tiles
- * (roadControlPoint), so the road wanders through the developed districts
- * instead of ruling a line across them, and the bow survives a re-route that
- * reaches the same edge from its other end.
+ * THE PAINT ORDER IS HALF THE IDEA. Every casing goes down before ANY surface,
+ * globally across the whole network. Ordering per piece or per tile instead
+ * lets a later piece's casing land on an earlier piece's surface, which rivets
+ * every junction and every shared tile centre with a dark bead -- the defect
+ * the shipped per-segment loop had, and the one thing the losing edge-mask
+ * tileset idea had already found in it. The junction pads ride the same two
+ * passes, so a pad is never cut by a neighbouring leg's casing either.
  *
- * Districts are always adjacent to the parent they grew out from, so the curve
- * runs from tile centre to tile centre and the two sprites clip its ends --
- * that is what makes it read as joining them.
+ * Width carries the workforce reading: one track per 5 workforce points, each
+ * worth ROAD_WIDTH_PER_STRAND px of body (the mapping, and the 2026-11-03 lift
+ * out of the sub-pixel range both study cards measured, live in ../roadGraph.ts).
+ * A through-path is stroked as two pieces meeting at its own midpoint so each
+ * end keeps its OWN edge's track count.
  */
 export function paintSettlementRoad(ctx: CanvasRenderingContext2D, node: SettlementRoadNode, deps: Paint2DDep): void {
-  if (node.segments.length === 0) return;
+  if (node.tiles.length === 0) return;
+  // One geometry lookup per mask, then two global passes over the result.
+  const geometries = node.tiles.map((tile) => roadGeometryFor(tile.mask));
+
+  // Group the pieces by their own body width, so each pass can trace them all
+  // into ONE path and stroke it once. A stroked path is filled once, so
+  // sub-paths that overlap are painted once -- and the case that matters is the
+  // seam: the two tiles either side of a shared edge both end a round cap on the
+  // same seam point, and the palette is translucent, so stroking them as
+  // separate paths double-blends that cap into a bead at every tile boundary.
+  // (Measured at 4x: the casing at a seam landed at R 46 against R 52 mid-tile,
+  // where a single blend puts it.) Two tiles sharing an edge always carry the
+  // SAME track count -- `strands` is the busiest route over that edge, and both
+  // ends read it from the same segment -- so the two sides of every seam land in
+  // the same group, which is what makes this complete rather than partial. It
+  // also drops the paint to one stroke per tone per distinct track count.
+  const groups = new Map<number, Array<{ tile: SettlementRoadTile; piece: RoadPiece }>>();
+  for (let i = 0; i < node.tiles.length; i++) {
+    const tile = node.tiles[i];
+    for (const piece of geometries[i].pieces) {
+      const body = roadBodyWidth(tile, piece.edge);
+      let bucket = groups.get(body);
+      if (!bucket) {
+        bucket = [];
+        groups.set(body, bucket);
+      }
+      bucket.push({ tile, piece });
+    }
+  }
+
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  for (const segment of node.segments) {
-    const length = Math.hypot(segment.to.x - segment.from.x, segment.to.y - segment.from.y);
-    if (length <= 0) continue;
-    const control = roadControlPoint(segment.from, segment.to, length);
-    const strands = Math.max(1, Math.floor(segment.strands));
-    const width = Math.min(ROAD_WIDTH_MAX, ROAD_WIDTH_BASE + strands * ROAD_WIDTH_PER_STRAND);
-    strokeRoadBand(ctx, segment.from, segment.to, control, width + ROAD_EDGE_OVERHANG, ROAD_EDGE);
-    strokeRoadBand(ctx, segment.from, segment.to, control, width, ROAD_SURFACE);
+
+  // Pass 1: every casing, everywhere, before a single body is laid.
+  ctx.strokeStyle = ROAD_EDGE;
+  ctx.fillStyle = ROAD_EDGE;
+  for (const [body, entries] of groups) {
+    ctx.lineWidth = body + ROAD_CASING_PER_SIDE * 2;
+    ctx.beginPath();
+    for (const { tile, piece } of entries) traceRoadPiece(ctx, piece.points, tile.x, tile.y);
+    ctx.stroke();
   }
+  for (let i = 0; i < node.tiles.length; i++) {
+    const tile = node.tiles[i];
+    for (const junction of geometries[i].junctions) {
+      ctx.beginPath();
+      ctx.arc(
+        tile.x + junction.x,
+        tile.y + junction.y,
+        roadJunctionRadius(tile, junction) + ROAD_CASING_PER_SIDE,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
+    }
+  }
+
+  // Pass 2: every body.
+  ctx.strokeStyle = ROAD_SURFACE;
+  ctx.fillStyle = ROAD_SURFACE;
+  for (const [body, entries] of groups) {
+    ctx.lineWidth = body;
+    ctx.beginPath();
+    for (const { tile, piece } of entries) traceRoadPiece(ctx, piece.points, tile.x, tile.y);
+    ctx.stroke();
+  }
+  for (let i = 0; i < node.tiles.length; i++) {
+    const tile = node.tiles[i];
+    for (const junction of geometries[i].junctions) {
+      ctx.beginPath();
+      ctx.arc(tile.x + junction.x, tile.y + junction.y, roadJunctionRadius(tile, junction), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
   ctx.restore();
   void deps;
 }
 
+/** The track count edge `edge` carries on `tile`; 1 when the bit is unset. */
+function tileStrands(tile: SettlementRoadTile, edge: number): number {
+  return tile.strands[edge] || 1;
+}
+
+/** The body width for one piece: its own edge's track count. */
+function roadBodyWidth(tile: SettlementRoadTile, edge: number): number {
+  return roadWidthForStrands(tileStrands(tile, edge));
+}
+
 /**
- * The quadratic control point that bows this edge, in world space.
- *
- * The bow belongs to the TILE PAIR, not to the route that drew it: the two
- * centres are put in a canonical order before anything is derived from them, so
- * a network recompute that reaches the same edge from its other end draws the
- * identical curve instead of mirroring it. Side and magnitude both come from a
- * hash of those two centres, so the roads are pure functions of the map -- the
- * same game draws the same roads on every frame, reload and replay.
+ * A junction pad is a disc, not a stroked piece: it has no direction to leave
+ * along, and its whole job is to cover the point where a branch meets the
+ * through-path it was welded onto. Sized off the CASING half-width rather than
+ * off the body, because anything smaller than the casing is swallowed by the
+ * trunk and invisible.
  */
-function roadControlPoint(from: WorldPoint, to: WorldPoint, length: number): WorldPoint {
-  const flip = from.x > to.x || (from.x === to.x && from.y > to.y);
-  const a = flip ? to : from;
-  const b = flip ? from : to;
-  const nx = -(b.y - a.y) / length;
-  const ny = (b.x - a.x) / length;
-  const h = hashEdge(a, b);
-  const t = (h % 997) / 997;
-  const sign = (h >>> 20) & 1 ? 1 : -1;
-  // A quadratic curve reaches half of its control point's offset from the chord
-  // at its apex, so the control point sits at twice the intended bow.
-  const offset = sign * (ROAD_BOW_MIN + t * (ROAD_BOW_MAX - ROAD_BOW_MIN)) * length * 2;
-  return {
-    x: (from.x + to.x) / 2 + nx * offset,
-    y: (from.y + to.y) / 2 + ny * offset,
-  };
+function roadJunctionRadius(tile: SettlementRoadTile, junction: RoadJunction): number {
+  let strands = 1;
+  for (const edge of junction.edges) strands = Math.max(strands, tileStrands(tile, edge));
+  const casingHalf = (roadWidthForStrands(strands) + ROAD_CASING_PER_SIDE * 2) / 2;
+  return casingHalf * ROAD_JUNCTION_PAD;
 }
 
-/** FNV-1a over the two quantized tile centres; `a`/`b` are already ordered. */
-function hashEdge(a: WorldPoint, b: WorldPoint): number {
-  const key = `${Math.round(a.x)},${Math.round(a.y)}|${Math.round(b.x)},${Math.round(b.y)}`;
-  let h = 2166136261;
-  for (let i = 0; i < key.length; i++) {
-    h ^= key.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
-/** One curved stroke of the road: the two tile centres joined through `control`. */
-function strokeRoadBand(
+/**
+ * Add one tile-local road piece to the CURRENT path, offset by the tile centre.
+ * A through piece carries four cubic control points; a spur carries two
+ * endpoints. The caller opens the path: every piece of a tone goes into one path
+ * so a stroked overlap is painted once (see paintSettlementRoad). No transform is
+ * pushed for this, so the recording ctx sees the world coordinates the road
+ * actually occupies.
+ */
+function traceRoadPiece(
   ctx: CanvasRenderingContext2D,
-  from: WorldPoint,
-  to: WorldPoint,
-  control: WorldPoint,
-  lineWidth: number,
-  style: string,
+  points: readonly RoadPoint[],
+  ox: number,
+  oy: number,
 ): void {
-  ctx.strokeStyle = style;
-  ctx.lineWidth = lineWidth;
-  ctx.beginPath();
-  ctx.moveTo(from.x, from.y);
-  ctx.quadraticCurveTo(control.x, control.y, to.x, to.y);
-  ctx.stroke();
+  ctx.moveTo(points[0].x + ox, points[0].y + oy);
+  if (points.length === 4) {
+    ctx.bezierCurveTo(
+      points[1].x + ox,
+      points[1].y + oy,
+      points[2].x + ox,
+      points[2].y + oy,
+      points[3].x + ox,
+      points[3].y + oy,
+    );
+    return;
+  }
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x + ox, points[i].y + oy);
 }
 
 export function paintCharterOverlay(ctx: CanvasRenderingContext2D, node: CharterOverlayNode, deps: Paint2DDep): void {
