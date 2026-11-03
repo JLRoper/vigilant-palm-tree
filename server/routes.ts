@@ -75,7 +75,6 @@ type FullGameRow = {
   seed: number;
   hero_q: number;
   hero_r: number;
-  turn: number;
   gold: number;
   enemy_positions: EnemyPos[];
   round: number;

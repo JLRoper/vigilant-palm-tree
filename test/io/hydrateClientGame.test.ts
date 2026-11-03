@@ -19,7 +19,6 @@ function apiGame(lobby: unknown, activeFaction: "player" | "ai" = "player"): Gam
     seed: 1,
     hero_q: 2,
     hero_r: 2,
-    turn: 1,
     gold: 0,
     enemy_positions: [],
     created_at: "2026-01-01T00:00:00Z",
