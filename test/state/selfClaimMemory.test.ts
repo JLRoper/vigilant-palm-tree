@@ -103,7 +103,10 @@ test("the self-claim the New Game form makes IS what identifies the browser on r
 test("a remembered seat the server no longer backs asserts nothing (the memory is not a licence)", () => {
   rememberSelfClaim(GAME, 0, "Player 1");
   // A re-created game / wiped lobby: seat 0 is not claimed any more.
-  const seat = resolveLocalSeat({ "1": { handle: "Joiner", claimedAt: "2026-11-03T00:00:00.000Z" } }, reloadIdentity(GAME));
+  const seat = resolveLocalSeat(
+    { "1": { handle: "Joiner", claimedAt: "2026-11-03T00:00:00.000Z" } },
+    reloadIdentity(GAME),
+  );
   assert.deepEqual(seat, { seat: null, source: "unknown" });
 });
 

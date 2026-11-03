@@ -57,9 +57,7 @@ transferGold,
   AI_RETREAT_STRENGTH_RATIO,
   HERO_BATTLE_MIN_RETREAT_ROUND,
   readPendingBattle,
-  visionKeysForPlayer,
-  visionKeysAroundPoints,
-  mergePlayerReveal,
+  revealForPlayer,
   foundSettlement,
 } from "@heroes/engine";
 import type { EngineCtx, HydratableGameRow, UnitType, BattleResult, MapSize, MapGenVersion, PendingBattleMarker } from "@heroes/engine";
@@ -290,26 +288,12 @@ function sumPlayerGold(
   return total;
 }
 
-// Uncharted-mode reveal helpers (fog-from-the-start). The caller gates them
-// on `row.lobby?.uncharted === true`; reveal is only maintained for HUMAN
-// seats (faction "player") -- AI reveal is never rendered. extraPoints lets
-// MoveHero/AdvanceCharterTravel union the walked corridor's rings (not just
-// the endpoints), so a multi-hex move reveals the tiles it crossed.
-function isHuman(state: GameState, playerId: number): boolean {
-  return state.players.find((p) => p.id === playerId)?.faction === "player";
-}
-
-function revealForPlayer(
-  state: GameState,
-  playerId: number,
-  extraPoints?: readonly { q: number; r: number }[],
-): GameState {
-  const keys = visionKeysForPlayer(state, playerId);
-  if (extraPoints) {
-    for (const key of visionKeysAroundPoints(extraPoints)) keys.add(key);
-  }
-  return mergePlayerReveal(state, playerId, keys);
-}
+// Uncharted-mode reveal: the rule itself is the engine's ONE `revealForPlayer`
+// (`@heroes/engine`, packages/engine/src/reveal.ts) so the client's copy of
+// `players[].revealedTiles` applies exactly what this server persists. The
+// caller gates on `row.lobby?.uncharted === true`; the function itself no-ops
+// for a seat that maintains no reveal (an AI seat, or any seat of a classic
+// game), which is what used to be the local `isHuman` check here.
 
 // Phase 4 Track A dual-write (plan/2026-08-17-phase-4-db-deblobbing-dev-plan.md):
 // upsertMany is a full sync (deletes rows missing from the given record),
@@ -771,7 +755,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // the client sent, or at least the from/to endpoints) for its owner.
       let next = result.state;
       const ownerId = result.state.heroes[command.heroId].ownerId;
-      if (uncharted && isHuman(next, ownerId)) {
+      if (uncharted) {
         const trailPoints =
           command.trail && command.trail.length > 0
             ? command.trail
@@ -1442,7 +1426,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // (command.actor), so its controlRange ring must become revealed. No
       // extra path points -- visionKeysForPlayer already includes the flip.
       let next = result.state;
-      if (uncharted && isHuman(next, command.actor)) {
+      if (uncharted) {
         next = revealForPlayer(next, command.actor);
       }
       await deps.gameRepo.saveHeroesAndSettlements(
@@ -1606,7 +1590,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // from/to endpoints are the whole corridor -- reveal them for the hero's
       // owner (command.actor, already ownership-checked above).
       let next = result.state;
-      if (uncharted && isHuman(next, command.actor)) {
+      if (uncharted) {
         next = revealForPlayer(next, command.actor, [command.fromTile, command.toTile]);
       }
       await deps.gameRepo.saveHeroesAndSettlements(
@@ -2643,7 +2627,7 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // controlRange ring needs no extra path points (the CaptureSettlement
       // rule, one case up).
       let next = result.state;
-      if (uncharted && isHuman(next, founder.ownerId)) {
+      if (uncharted) {
         next = revealForPlayer(next, founder.ownerId);
       }
       const founded = next.settlements[result.settlementId];
