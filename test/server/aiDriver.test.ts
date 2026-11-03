@@ -34,7 +34,7 @@ import {
   type UnitType,
 } from "@heroes/engine";
 import { hexDistance, HEX_DIRECTIONS, MOVEMENT_PER_TURN, coveredWagonIdFor, gameModeSettings, seatHeroIdFor } from "@heroes/contracts";
-import type { Axial, CharterState, Command, HeroId } from "@heroes/contracts";
+import type { Axial, BuildingDef, CharterState, Command, HeroId } from "@heroes/contracts";
 import {
   AI_DEFENDER_OWNER_MISSING_AUDIT_KIND,
   AI_DEFENDER_WAIT_EXPIRED_AUDIT_KIND,
