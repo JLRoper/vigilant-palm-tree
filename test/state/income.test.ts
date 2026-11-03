@@ -2,39 +2,11 @@
 import assert from "node:assert/strict";
 import { settlementIncome, playerIncome, playerPopulation, playerWealth, effectiveSettlementIncome, playerEffectiveSettlementIncome } from "@heroes/engine";
 import type { BuildingDef } from "@heroes/contracts";
-import { createInitialState, type GameState, type PlayerId, type SettlementState, type HeroState } from "../../src/state/gameState";
+import { createInitialState, type GameState, type PlayerId, type SettlementState } from "../../src/state/gameState";
+import { makeHero, makeSettlement as makeBaseSettlement } from "../charter/_helpers";
 
 function makeSettlement(id: string, ownerId: PlayerId | null, population: number, goldTax: number, gold = 0): SettlementState {
-  return {
-    id,
-    ownerId,
-    q: 0,
-    r: 0,
-    level: 1,
-    population,
-    goldTax,
-    resourceRates: {},
-    foundedOnResource: null,
-    gold,
-    warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 },
-    citySpots: [],
-    cityMines: [],
-    morale: 100,
-    autoTrade: true,
-    buildings: [],
-  };
-}
-
-function makeHeroFields(overrides: Partial<HeroState> = {}): Partial<HeroState> {
-  return {
-    name: "test",
-    gold: 0,
-    troops: 1,
-    stacks: [],
-    isChartering: false,
-    charterId: null,
-    ...overrides,
-  };
+  return makeBaseSettlement(id, ownerId, 0, 0, { level: 1, population, goldTax, gold });
 }
 
 const MARKET_L1: BuildingDef = { gx: 0, gy: 0, kind: "market", level: 1 };
@@ -58,8 +30,8 @@ test("playerIncome sums only settlements owned by the given player", () => {
       { id: 1, faction: "ai", name: "AI", color: "#000", heroIds: ["h1"], settlementIds: ["s2"] },
     ],
     seedHeroes: [
-      { id: "h0", ownerId: 0, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], ...makeHeroFields() },
-      { id: "h1", ownerId: 1, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], ...makeHeroFields() },
+      makeHero("h0", 0, 0, 0),
+      makeHero("h1", 1, 0, 0),
     ],
     seedSettlements: [
       makeSettlement("s0", 0, 500, 1),
@@ -79,9 +51,9 @@ test("playerIncome ignores neutral settlements and returns 0 for players who own
       { id: 2, faction: "ai", name: "AI", color: "#000", heroIds: ["h2"], settlementIds: [] },
     ],
     seedHeroes: [
-      { id: "h0", ownerId: 0, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], ...makeHeroFields() },
-      { id: "h1", ownerId: 1, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], ...makeHeroFields() },
-      { id: "h2", ownerId: 2, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], ...makeHeroFields() },
+      makeHero("h0", 0, 0, 0),
+      makeHero("h1", 1, 0, 0),
+      makeHero("h2", 2, 0, 0),
     ],
     seedSettlements: [
       makeSettlement("s0", 0, 500, 1),
@@ -100,8 +72,8 @@ test("playerPopulation sums only settlements owned by the given player", () => {
       { id: 1, faction: "ai", name: "AI", color: "#000", heroIds: ["h1"], settlementIds: ["s2"] },
     ],
     seedHeroes: [
-      { id: "h0", ownerId: 0, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], ...makeHeroFields() },
-      { id: "h1", ownerId: 1, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], ...makeHeroFields() },
+      makeHero("h0", 0, 0, 0),
+      makeHero("h1", 1, 0, 0),
     ],
     seedSettlements: [
       makeSettlement("s0", 0, 500, 1),
@@ -120,8 +92,8 @@ test("playerPopulation ignores neutral settlements and returns 0 for players who
       { id: 1, faction: "player", name: "P1", color: "#aaa", heroIds: ["h1"], settlementIds: [] },
     ],
     seedHeroes: [
-      { id: "h0", ownerId: 0, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], ...makeHeroFields() },
-      { id: "h1", ownerId: 1, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], ...makeHeroFields() },
+      makeHero("h0", 0, 0, 0),
+      makeHero("h1", 1, 0, 0),
     ],
     seedSettlements: [
       makeSettlement("s0", 0, 500, 1),
@@ -139,9 +111,9 @@ test("playerWealth sums owned hero gold + owned settlement gold", () => {
       { id: 1, faction: "ai", name: "AI", color: "#000", heroIds: ["h1"], settlementIds: ["s2"] },
     ],
     seedHeroes: [
-      { id: "h0a", ownerId: 0, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], gold: 120, ...makeHeroFields({ gold: 120 }) },
-      { id: "h0b", ownerId: 0, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], gold: 30, ...makeHeroFields({ gold: 30 }) },
-      { id: "h1", ownerId: 1, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], gold: 999, ...makeHeroFields({ gold: 999 }) },
+      makeHero("h0a", 0, 0, 0, { gold: 120 }),
+      makeHero("h0b", 0, 0, 0, { gold: 30 }),
+      makeHero("h1", 1, 0, 0, { gold: 999 }),
     ],
     seedSettlements: [
       makeSettlement("s0", 0, 0, 0, 500),
@@ -160,8 +132,8 @@ test("playerWealth ignores unowned (other-player or neutral) entities", () => {
       { id: 1, faction: "ai", name: "AI", color: "#000", heroIds: ["h1"], settlementIds: [] },
     ],
     seedHeroes: [
-      { id: "h0", ownerId: 0, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], gold: 100, ...makeHeroFields({ gold: 100 }) },
-      { id: "h1", ownerId: 1, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], gold: 200, ...makeHeroFields({ gold: 200 }) },
+      makeHero("h0", 0, 0, 0, { gold: 100 }),
+      makeHero("h1", 1, 0, 0, { gold: 200 }),
     ],
     seedSettlements: [
       makeSettlement("s_neutral", null, 0, 0, 9999),
@@ -199,8 +171,8 @@ test("playerWealth ignores unowned (other-player or neutral) entities", () => {
        { id: 1, faction: "ai", name: "AI", color: "#000", heroIds: ["h1"], settlementIds: ["s2"] },
      ],
      seedHeroes: [
-       { id: "h0", ownerId: 0, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], ...makeHeroFields() },
-       { id: "h1", ownerId: 1, q: 0, r: 0, movementRemaining: 7, previousQ: null, previousR: null, previousMovementRemaining: null, trail: [{ q: 0, r: 0 }], ...makeHeroFields() },
+       makeHero("h0", 0, 0, 0),
+       makeHero("h1", 1, 0, 0),
      ],
      seedSettlements: [
        { ...makeSettlement("s0", 0, 1000, 1), morale: 90, buildings: [MARKET_L1] },

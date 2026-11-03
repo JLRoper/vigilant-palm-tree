@@ -135,3 +135,107 @@ test("a seen impassable hex still reports its terrain, marked impassable", () =>
   assert.ok(info);
   assert.deepEqual(panelText(info!), ["Tile 1, 0", "Dense forest · impassable"]);
 });
+
+// ---------------------------------------------------------------------------
+// F2 (the adventure map lies about what you can see): outside every vision
+// ring, the panel said "Unexplored" with no terrain and no move cost — even on
+// hexes the map had already painted as explored ground, so the player was told
+// nothing about dirt they could plainly see under the veil. "Unexplored" now
+// means NEVER SEEN: a hex in the seat's reveal set reads its terrain and move
+// cost, marked as seen-before. A hex that was never revealed is unchanged.
+// ---------------------------------------------------------------------------
+
+/** A map with one dirt hex at (dirtQ, dirtR) and grass everywhere else. */
+function makeGrassMapWithDirt(dirtQ: number, dirtR: number, width: number, height: number): GameMap {
+  const rows: TileRow[] = [];
+  for (let r = 0; r < height; r++) {
+    for (let q = 0; q < width; q++) {
+      rows.push({ q, r, terrain: q === dirtQ && r === dirtR ? "dirt" : "grass", resource: null });
+    }
+  }
+  return GameMap.fromTiles(rows);
+}
+
+test("F2: an explored-but-unwatched hex reads terrain and move cost, never \"Unexplored\"", () => {
+  const map = makeGrassMapWithDirt(6, 12, 16, 16);
+  // The hero stands at (0,0): (6,12) is ~15 hexes away, far outside vision.
+  const hero = makeCommander(0, 0);
+  const state = makeState({
+    players: [
+      { id: 0, faction: "player", name: "Player 1", color: "#d62828", heroIds: [], settlementIds: [], revealedTiles: ["6,12"] },
+      { id: 1, faction: "ai", name: "AI", color: "#1d7dd1", heroIds: [], settlementIds: [], revealedTiles: ["0,0"] },
+    ],
+  });
+  const info = describeTile({
+    map,
+    state,
+    heroes: [hero],
+    castles: [],
+    viewPlayerId: 0,
+    tile: { q: 6, r: 12 },
+    revealed: new Set(["6,12"]),
+  });
+
+  assert.ok(info);
+  assert.deepEqual(
+    panelText(info!),
+    ["Tile 6, 12", "Dirt · move cost 1", "Explored — not in sight"],
+    "the panel must read the ground the map has already drawn as explored",
+  );
+  assert.equal(info!.fogged, true, "the hex is outside the hero's 4-hex vision ring");
+  assert.equal(info!.explored, true, "but the map's revealed state has it");
+  assert.deepEqual(info!.terrain, {
+    kind: "dirt",
+    label: "Dirt",
+    cost: 1,
+    passable: true,
+  });
+  assert.equal(
+    tilePanelLines(info!).some((line) => line.text === "Unexplored"),
+    false,
+    "an explored hex must never be called Unexplored",
+  );
+});
+
+test("F2: a hex that was never revealed still reads \"Unexplored\" in the same game", () => {
+  const map = makeGrassMapWithDirt(6, 12, 16, 16);
+  const hero = makeCommander(0, 0);
+  const state = makeState({
+    players: [
+      { id: 0, faction: "player", name: "Player 1", color: "#d62828", heroIds: [], settlementIds: [], revealedTiles: ["6,12"] },
+      { id: 1, faction: "ai", name: "AI", color: "#1d7dd1", heroIds: [], settlementIds: [] },
+    ],
+  });
+  // (9,9) is neither visible nor in the reveal set.
+  const info = describeTile({
+    map,
+    state,
+    heroes: [hero],
+    castles: [],
+    viewPlayerId: 0,
+    tile: { q: 9, r: 9 },
+    revealed: new Set(["6,12"]),
+  });
+
+  assert.ok(info);
+  assert.equal(info!.explored, false);
+  assert.equal(info!.terrain, null);
+  assert.deepEqual(panelText(info!), ["Tile 9, 9", "Unexplored"]);
+});
+
+test("F2: a classic game (no reveal set) keeps the locked two-state fog", () => {
+  const map = makeGrassMapWithDirt(6, 12, 16, 16);
+  const hero = makeCommander(0, 0);
+  const info = describeTile({
+    map,
+    state: makeState(),
+    heroes: [hero],
+    castles: [],
+    viewPlayerId: 0,
+    tile: { q: 6, r: 12 },
+  });
+
+  assert.ok(info);
+  assert.equal(info!.explored, false, "no reveal set means nothing is explored");
+  assert.deepEqual(panelText(info!), ["Tile 6, 12", "Unexplored"]);
+});

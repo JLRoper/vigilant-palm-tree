@@ -1,6 +1,6 @@
 import { Hero } from "../entities/hero";
 import { GameMap } from "../map/gameMap";
-import { TERRAIN_COLORS } from "../map/terrain";
+import { TERRAIN_COLORS, type Terrain } from "../map/terrain";
 import { decorationSeed } from "./decorationSeed";
 import { drawMinimapPath } from "./overlays/pathOverlay";
 import { isVisible } from "./fog";
@@ -197,6 +197,37 @@ function isVisionEdge(visible: Set<string>, q: number, r: number): boolean {
   return false;
 }
 
+/**
+ * Which visibility tier a minimap cell is in — the same three tiers the map
+ * itself paints (docs/map.md "Uncharted mode"), plus classic mode's two-state
+ * fog:
+ *
+ * - `visible`: inside a vision ring right now → full terrain colour.
+ * - `explored`: revealed earlier, outside every ring → terrain colour under the
+ *   veil. This is the F4 defect's cell: the minimap used to paint it as flat
+ *   slate, so explored ground carried no biome at all.
+ * - `uncharted`: never revealed by this seat (uncharted mode only) → opaque black.
+ * - `fogged`: classic two-state fog (no reveal set at all) → the slate veil.
+ */
+export type MinimapCellKind = "visible" | "explored" | "uncharted" | "fogged";
+
+export function minimapCellKind(
+  canSee: boolean,
+  revealed: ReadonlySet<string> | null,
+  q: number,
+  r: number,
+): MinimapCellKind {
+  if (canSee) return "visible";
+  if (revealed === null) return "fogged";
+  return revealed.has(`${q},${r}`) ? "explored" : "uncharted";
+}
+
+/** The fill a minimap cell starts from. Explored ground keeps its biome. */
+export function minimapCellFill(kind: MinimapCellKind, terrain: Terrain): string {
+  if (kind === "visible" || kind === "explored") return TERRAIN_COLORS[terrain].fill;
+  return kind === "uncharted" ? "rgba(0,0,0,1)" : "rgba(12,18,24,0.92)";
+}
+
 export function drawMistCell(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -253,7 +284,7 @@ export function drawMistCell(
   ctx.fillRect(x, y, size, size);
 }
 
-function renderStaticMinimapLayer(
+export function renderStaticMinimapLayer(
   targetCtx: CanvasRenderingContext2D,
   map: GameMap,
   minimapCamera: MinimapCamera,
@@ -293,19 +324,22 @@ function renderStaticMinimapLayer(
       const cellX = x - half;
       const cellY = y - half;
       const canSee = isVisible(visible, q, r);
-      const uncharted = !canSee && revealed !== null && !revealed.has(`${q},${r}`);
+      const cellKind = minimapCellKind(canSee, revealed, q, r);
       const edgeOfVision = canSee && isVisionEdge(visible, q, r);
 
-      targetCtx.fillStyle = canSee
-        ? TERRAIN_COLORS[t].fill
-        : uncharted
-          ? "rgba(0,0,0,1)"
-          : "rgba(12,18,24,0.92)";
+      // Explored-but-unwatched ground keeps its terrain fill under a veil, so
+      // the minimap shows the biome the map has already drawn instead of the
+      // flat slate that made explored ground unreadable (F4).
+      targetCtx.fillStyle = minimapCellFill(cellKind, t);
       targetCtx.fillRect(cellX, cellY, cellSize + 0.5, cellSize + 0.5);
 
-      if (!canSee) {
-        if (!uncharted) drawMistCell(targetCtx, cellX, cellY, cellSize + 0.5, q, r, 1.22);
-      } else if (edgeOfVision) {
+      if (cellKind === "explored") {
+        targetCtx.fillStyle = "rgba(8, 10, 16, 0.62)";
+        targetCtx.fillRect(cellX, cellY, cellSize + 0.5, cellSize + 0.5);
+        drawMistCell(targetCtx, cellX, cellY, cellSize + 0.5, q, r, 0.5);
+      } else if (cellKind === "fogged") {
+        drawMistCell(targetCtx, cellX, cellY, cellSize + 0.5, q, r, 1.22);
+      } else if (cellKind === "visible" && edgeOfVision) {
         drawMistCell(targetCtx, cellX, cellY, cellSize + 0.5, q, r, 0.14);
       }
     }

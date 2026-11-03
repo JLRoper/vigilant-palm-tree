@@ -97,8 +97,11 @@ test("settlementRepo.upsertMany round-trips a partial resourceRates including go
     await repo.upsertMany(name, { s0: settlement });
     const [loaded] = await repo.loadAllForGame(name);
 
-    assert.deepEqual(loaded.resourceRates, { wood: 15, gold: 20 });
+    // The rate read-back has no stone key at all. Asserted BEFORE the
+    // deepEqual below: assert.deepEqual narrows `loaded.resourceRates` to the
+    // expected literal, so a `.stone` access after it is a type error.
     assert.equal(loaded.resourceRates.stone, undefined);
+    assert.deepEqual(loaded.resourceRates, { wood: 15, gold: 20 });
   });
 });
 
@@ -280,7 +283,7 @@ function settlementWithDistricts(): SettlementState {
         buildings: [
           { gx: 0, gy: 0, kind: "farmField", level: 1, style: "pixel" },
           { gx: 2, gy: 0, kind: "house", level: 1, style: "pixel" },
-          { gx: 3, gy: 0, kind: "stoneMine", level: 1, style: "pixel", bank: { gold: 120 }, workers: 2 },
+          { gx: 3, gy: 0, kind: "stoneMine", level: 1, style: "pixel", bank: { gold: 120, pendingOut: [] }, workers: 2 },
         ],
       },
       "20,13": {
@@ -333,7 +336,7 @@ test("settlementRepo.upsertMany writes a district's buildings as rows attributed
     // write: the 035 backfill and this writer both have to keep a district bank
     // pot and its staffing, or an existing game would lose them at cutover.
     const mine = rows.rows.find((r) => r.district_q === 20 && r.gx === 3);
-    assert.deepEqual(mine?.bank, { gold: 120 });
+    assert.deepEqual(mine?.bank, { gold: 120, pendingOut: [] });
     assert.equal(mine?.workers, 2);
   });
 });

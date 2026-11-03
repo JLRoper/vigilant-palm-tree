@@ -293,14 +293,14 @@ export function installDom(opts: InstallDomOptions = {}): MockDomHandles {
 }
 
 export function restoreDom(): void {
-  const set = (key: string, value: unknown, saved: unknown): void => {
+  const set = (key: string, saved: unknown): void => {
     if (saved === undefined) delete (globalThis as Record<string, unknown>)[key];
     else (globalThis as Record<string, unknown>)[key] = saved;
   };
-  set("document", undefined, savedDocument);
-  set("window", undefined, savedWindow);
-  set("localStorage", undefined, savedLocalStorage);
-  set("fetch", undefined, savedFetch);
+  set("document", savedDocument);
+  set("window", savedWindow);
+  set("localStorage", savedLocalStorage);
+  set("fetch", savedFetch);
 }
 
 /** The first element in `root`'s subtree whose tag + trimmed text match. */
