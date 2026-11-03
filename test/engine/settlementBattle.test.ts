@@ -292,3 +292,29 @@ test("attackerWon reports a stood verdict and removes nobody", () => {
   assert.deepEqual(result.removedHeroIds, []);
   assert.ok(result.state.heroes["h0"], "the winner stays in the record");
 });
+
+// F3 (playthrough round 2): the settlement battle's attacker is the other
+// survivor-stack writer, and it had the same hole -- the scalar was only
+// rewritten on the concession path (applyHeroConcession), so a standing
+// attacker kept its pre-battle headcount while hero_platoons said otherwise.
+// Acceptance: the attacker's troops === the total of the stacks written.
+test("applySettlementBattleResult rewrites the attacker's troops scalar with its survivors (F3)", () => {
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 5, 5, { troops: 24, stacks: stack("swordsman", 5) })],
+    settlements: [makeSettlement("s0", 0, 0, 0), garrisonedNeutralSettlement()],
+  });
+
+  const result = applySettlementBattleResult(state, {
+    attackerId: "h0",
+    settlementId: "s2",
+    outcome: "attackerWon",
+    attackerStacks: stack("swordsman", 4),
+    defenderStacks: [],
+  });
+
+  const hero = result.state.heroes["h0"];
+  assert.ok(hero);
+  assert.equal(result.attackerVerdict, "stood", "a capture is not a concession");
+  assert.equal(hero.troops, 4, "the stale 24 is replaced by the survivors the battle actually left");
+  assert.deepEqual(hero.stacks, normalizePlatoons(stack("swordsman", 4)));
+});
