@@ -38,6 +38,32 @@ function labelFor(ms: number): string {
   return SPEED_LABELS[SPEED_LABELS.length - 1].label;
 }
 
+/**
+ * The panel's one channel for a control it cannot honestly offer right now --
+ * the same shape the logistics panel gives a refusal: the control is disabled
+ * AND it carries the reason, so a dead control is never a bare dead control.
+ * `title` is the hover half of the reason; the row's own notice line is the
+ * half a player reads without hovering.
+ */
+function setUnavailable(control: HTMLInputElement, reason: string): void {
+  control.disabled = true;
+  control.title = reason;
+}
+
+/** The other half of {@link setUnavailable}: the row is live again, so it stops saying it is not. */
+function setAvailable(control: HTMLInputElement): void {
+  control.disabled = false;
+  control.title = "";
+}
+
+/**
+ * Why the four skybox-only rows are dead, in the player's words. Exported so
+ * the panel's own test asserts the prose the panel renders rather than a copy
+ * of it that can drift.
+ */
+export const SKYBOX_DEPENDENCY =
+  "Inert while City view backdrop is the Settlement diorama \u2014 this row only applies to the Watercolor skybox. Switch the backdrop above to make it take effect.";
+
 export interface MapInfo {
   name: string;
   seed: number;
@@ -773,6 +799,46 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
     children.push(gridLinesRow);
 
+    // ── The skybox-only rows ─────────────────────────────────────────────
+    //
+    // FOUR persisted settings are written by the controls below but change
+    // nothing at the DEFAULT backdrop: `paintCitySkybox` returns into the
+    // diorama painter before it ever reads the background offset, the parallax
+    // toggle or the layer count, and the default backdrop IS the diorama. So
+    // the slider really does write its value while nothing the player can see
+    // in city view moves.
+    //
+    // The state was honest and the WORDS were not: the rows were dimmed with no
+    // explanation on them anywhere, which reads as a live control that does
+    // nothing. Each such row therefore gets a notice line naming the
+    // dependency, the same way the logistics panel names a shortfall beside the
+    // control it refuses. The notice is filled only while the row really is
+    // dead, and empties the moment the skybox makes it live, so state and words
+    // stay true together. Nothing here hides a row, adds a second idiom for an
+    // unavailable control, or touches a setting's behaviour or default.
+    const skyboxOnly: Array<{
+      controls: HTMLInputElement[];
+      notice: HTMLElement;
+    }> = [];
+
+    function markSkyboxOnly(
+      row: HTMLElement,
+      keys: Array<keyof GameSettings>,
+      controls: HTMLInputElement[],
+    ): void {
+      const notice = document.createElement("div");
+      // The keys this row's notice speaks for. One row can carry two of them
+      // (the parallax toggle and its layer count share a row), so the hook
+      // holds a space-separated list. The panel's test reads this hook to prove
+      // the four rows are annotated and the other fourteen are not.
+      notice.setAttribute("data-setting-unavailable", keys.join(" "));
+      notice.style.fontSize = "10px";
+      notice.style.color = "#f9a03f";
+      notice.style.display = "none";
+      row.appendChild(notice);
+      skyboxOnly.push({ controls, notice });
+    }
+
     const bgBounds = bgOffsetBounds();
 
     // City background X offset
@@ -820,6 +886,8 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     });
     refreshList.push(() => refreshBgX(settings()));
 
+    markSkyboxOnly(bgXRow, ["cityBgOffsetX"], [bgXSlider]);
+
     children.push(bgXRow);
 
     // City background Y offset
@@ -866,6 +934,8 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
       refreshBgY(updateSettings({ cityBgOffsetY: Number(bgYSlider.value) }));
     });
     refreshList.push(() => refreshBgY(settings()));
+
+    markSkyboxOnly(bgYRow, ["cityBgOffsetY"], [bgYSlider]);
 
     children.push(bgYRow);
 
@@ -943,16 +1013,27 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
       refreshParallaxLayerLabel(s);
     });
 
+    // The parallax toggle and its layer count share this row, so one notice
+    // speaks for both keys.
+    markSkyboxOnly(parallaxToggleRow, ["parallaxEnabled", "parallaxLayerCount"], [
+      parallaxCheck,
+      parallaxLayerSlider,
+    ]);
+
     function refreshSkyboxOnlyRows(): void {
       const diorama = settings().cityBackdrop === "diorama";
       for (const row of [bgXRow, bgYRow, parallaxToggleRow]) {
         row.style.opacity = diorama ? "0.45" : "1";
         row.style.pointerEvents = diorama ? "none" : "auto";
       }
-      bgXSlider.disabled = diorama;
-      bgYSlider.disabled = diorama;
-      parallaxCheck.disabled = diorama;
-      parallaxLayerSlider.disabled = diorama;
+      for (const { controls, notice } of skyboxOnly) {
+        for (const control of controls) {
+          if (diorama) setUnavailable(control, SKYBOX_DEPENDENCY);
+          else setAvailable(control);
+        }
+        notice.textContent = diorama ? SKYBOX_DEPENDENCY : "";
+        notice.style.display = diorama ? "" : "none";
+      }
     }
     refreshList.push(refreshSkyboxOnlyRows);
     refreshSkyboxOnlyRows();
