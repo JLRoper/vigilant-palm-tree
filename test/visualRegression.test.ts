@@ -695,18 +695,32 @@ async function run(): Promise<void> {
     //    CANNOT turn this red. The road needs a scoped capture over the band,
     //    or the engine-level road-network tests, to be measured on its own.
     //
-    // STALE AS OF 2026-11-03 (the road study, stage B+C): the band is no longer
-    // 0.55-1.5 px. It is now a 1.55-2.50 px body under a 1.0 px-per-side casing,
-    // i.e. 3.55-4.50 px total, painted per tile from the tile's edge mask rather
-    // than as one bowed curve per segment -- and the geometry is a different
-    // shape, not just a wider one. That invalidates the 841 px figure: a road
-    // this wide can plausibly clear the 5,120 px budget on its own. So DO NOT
-    // treat a district-map diff as drift if this scene goes red on a road change;
-    // measure the road's own contribution (delete the network and diff, as the
-    // note above did) before deciding whether to re-cut the baseline, and justify
-    // the churn in the PR description if you do. The lesson the old note records
-    // still stands: this whole-canvas capture is a weak instrument for a ground
-    // layer, and road work wants the engine-level tests plus a scoped capture.
+    // MEASURED AS OF 2026-11-03 (the road study, stage B+C) -- and with the
+    // number in, the note above stops being a guess. The band is no longer
+    // 0.55-1.5 px: it is now a 1.55-2.50 px body under a 1.0 px-per-side
+    // casing, i.e. 3.55-4.50 px total, painted per tile from the tile's edge
+    // mask rather than as one bowed curve per segment -- and the geometry is a
+    // different shape, not just a wider one. This scene at the OLD width
+    // measures 0.000% (0/1,024,000 px) on the merge base, and at the NEW width
+    // measures 0.237% (2,426/1,024,000 px): so the whole road landing moves
+    // 2,426 px, which is 47.4% of the 5,120 px a 0.5% budget allows, with 52.6%
+    // of the budget still free. The old note's "841 px, 6x short, CANNOT turn
+    // this red" is therefore now wrong in both directions: the art no longer
+    // CANNOT move this scene, but it still does not turn it red. The baseline
+    // was deliberately NOT re-cut -- both runs below 0.5% -- and the two-sided
+    // measurement is the proof. (Both runs used this worktree's private DB
+    // `game_poc_roadgraph`; the only red scene in either run is
+    // `district-city-view`, at an identical 35,368 px on both sides, i.e.
+    // pre-existing drift that this landing neither causes nor fixes.)
+    //
+    // So DO NOT treat a district-map diff as drift if this scene goes red on a
+    // road change; measure the road's own contribution (delete the network and
+    // diff, as the note above did) before deciding whether to re-cut the
+    // baseline, and justify the churn in the PR description if you do. The
+    // lesson the old note records still stands, and now has the arithmetic to
+    // back it: 2,426 px of a 1,024,000 px whole-canvas capture is 0.24%, which
+    // is a weak instrument for a ground layer -- road work still wants the
+    // engine-level tests plus a scoped capture.
     await withPageRetry(context, "district-map", async (page) => {
       await dismissHomeAndCreateGame(page, `${GAME_NAME}-district-map`, SEED);
       await selectHero(page);
