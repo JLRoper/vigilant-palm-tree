@@ -14,6 +14,7 @@ import {
   settings,
   subscribeSettings,
   updateSettings,
+  type GameSettings,
 } from "../../src/state/settings";
 import { DEFAULT_GAME_MODE, SETTLERS_MODE_DEFAULTS, gameModeSettings } from "@heroes/contracts";
 import {
@@ -283,4 +284,62 @@ test("the mode's settings keys come from the contracts constants, not a second l
     arcane: 0,
     food: 50,
   });
+});
+
+// ── Every persisted key survives a reload ───────────────────────────────
+//
+// `updateSettings` writes the whole store as one JSON blob, and the next page
+// load reads it back through `readStoredSettings` (which the store's own
+// loadFromStorage calls). A key the read path drops is a setting the panel
+// shows and the next session silently forgets, so this probe covers EVERY key:
+// the patch must name them all AND move every one off its default.
+const RELOAD_PATCH: GameSettings = {
+  moveDurationMs: 520,
+  enemyMoveDurationMs: 640,
+  arenaMoveMsPerHex: 250,
+  resourceStyle: "iso-bubbly",
+  territoryBorderWidth: 3.5,
+  populationGrowthRate: 0.3,
+  spriteVariant: 4,
+  cityBackdrop: "skybox",
+  cityGridLines: false,
+  cityBgOffsetX: 40,
+  cityBgOffsetY: -40,
+  buildingUpgradeConfirm: false,
+  parallaxEnabled: true,
+  parallaxLayerCount: 2,
+  showLogPanel: true,
+  toolbarStyle: "classic-blue",
+  maxZoomOutHexesWide: 30,
+  gameMode: "settlers",
+};
+
+test("every key the store persists survives a reload", () => {
+  const { stored, restore } = installFakeStorage();
+  try {
+    assert.deepEqual(
+      Object.keys(RELOAD_PATCH).sort(),
+      Object.keys(DEFAULT_SETTINGS).sort(),
+      "the reload probe must cover every persisted key -- name the new key here",
+    );
+    for (const key of Object.keys(DEFAULT_SETTINGS) as Array<keyof GameSettings>) {
+      assert.notDeepEqual(
+        RELOAD_PATCH[key],
+        DEFAULT_SETTINGS[key],
+        `${key} sits at its default, so the probe would prove nothing about it`,
+      );
+    }
+
+    updateSettings(RELOAD_PATCH);
+    const written = stored.get(STORE_KEY) ?? "";
+    assert.equal(JSON.parse(written).schemaVersion, 3);
+    assert.deepEqual(
+      readStoredSettings(written),
+      settings(),
+      "a reload must read back exactly what the store wrote",
+    );
+  } finally {
+    updateSettings({ ...DEFAULT_SETTINGS });
+    restore();
+  }
 });
