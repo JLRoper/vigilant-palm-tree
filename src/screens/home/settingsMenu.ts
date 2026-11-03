@@ -1,10 +1,10 @@
 import { panelTheme, styleButton } from "@screens/shared/panel";
 import { openDialog } from "@screens/shared/dialog";
 import type { MapSize } from "../../map/gameMap";
-import { settings, updateSettings, settingsBounds, enemyMoveDurationBounds, arenaMoveMsPerHexBounds, borderWidthBounds, resourceStyleOptions, growthRateBounds, spriteVariantOptions, cityBackdropOptions, clampCityBackdrop, DEFAULT_CITY_BACKDROP, bgOffsetBounds, parallaxLayerCountBounds, maxZoomOutHexesWideBounds, clampMaxZoomOutHexesWide, PARALLAX_SPEEDS, type GameSettings, type ResourceStyle, DEFAULT_RESOURCE_STYLE } from "../../state/settings";
+import type { GameMode } from "@heroes/contracts";
+import { settings, updateSettings, DEFAULT_SETTINGS, settingsBounds, enemyMoveDurationBounds, arenaMoveMsPerHexBounds, borderWidthBounds, resourceStyleOptions, growthRateBounds, spriteVariantOptions, cityBackdropOptions, clampCityBackdrop, bgOffsetBounds, parallaxLayerCountBounds, maxZoomOutHexesWideBounds, clampMaxZoomOutHexesWide, PARALLAX_SPEEDS, gameModeOptions, gameModeHint, type GameSettings, type ResourceStyle } from "../../state/settings";
 import {
   clampToolbarStyle,
-  DEFAULT_TOOLBAR_STYLE,
   TOOLBAR_THEMES,
   toolbarStyleOptions,
 } from "../../state/toolbarThemes";
@@ -177,10 +177,75 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     makeFoldableSection(content, "Map info", children, true);
   }
 
+  // ─── New game Section ──────────────────────────────────────────────────
+
+  {
+    const children: HTMLElement[] = [];
+
+    // The new-game DEFAULT mode (SETTLERS-PLAN.md §1/§4 W4). The store's
+    // gameMode key is a PREFERENCE: it is what the New Game form pre-selects
+    // on both surfaces, and it never rewrites an existing game's mode (that
+    // lives per game, in games.lobby). Until this row existed the key was
+    // persisted and read but had no writer a player could reach -- only
+    // __gameDebug.settings.update could set it (playthrough round 4, F2).
+    const modeRow = document.createElement("div");
+    modeRow.style.display = "flex";
+    modeRow.style.flexDirection = "column";
+    modeRow.style.gap = "6px";
+
+    const modeLabel = document.createElement("span");
+    modeLabel.textContent = "Default mode for a new game";
+    modeRow.appendChild(modeLabel);
+
+    const modeSelect = document.createElement("select");
+    modeSelect.setAttribute("data-setting", "gameMode");
+    modeSelect.style.width = "100%";
+    modeSelect.style.padding = "8px";
+    modeSelect.style.fontSize = "12px";
+    modeSelect.style.border = "1px solid #444";
+    modeSelect.style.borderRadius = "4px";
+    modeSelect.style.backgroundColor = "#1a1a1a";
+    modeSelect.style.color = "#eee";
+    modeSelect.style.accentColor = "#f77f00";
+
+    for (const option of gameModeOptions()) {
+      const opt = document.createElement("option");
+      opt.value = option.value;
+      opt.textContent = option.label;
+      modeSelect.appendChild(opt);
+    }
+    modeSelect.value = current.gameMode;
+    modeRow.appendChild(modeSelect);
+
+    const modeHint = document.createElement("div");
+    modeHint.setAttribute("data-setting-hint", "gameMode");
+    modeHint.style.fontSize = "10px";
+    modeHint.style.opacity = "0.55";
+    modeRow.appendChild(modeHint);
+
+    function refreshMode(next: GameSettings): void {
+      modeSelect.value = next.gameMode;
+      modeHint.textContent = `${gameModeHint(next.gameMode)}. The New Game form starts on this mode; it never changes the mode of an existing game.`;
+    }
+    refreshMode(current);
+    modeSelect.addEventListener("change", () => {
+      refreshMode(updateSettings({ gameMode: modeSelect.value as GameMode }));
+    });
+    refreshList.push(() => refreshMode(settings()));
+
+    children.push(modeRow);
+
+    makeFoldableSection(content, "New game", children, true);
+  }
+
   // ─── Game Section ──────────────────────────────────────────────────────
 
   {
     const children: HTMLElement[] = [];
+    // Every slider row in this panel shows a player its own name and its
+    // current value: the label row is appended WITH the slider. Building that
+    // row and never appending it is the round-4 F1 defect -- seven sliders
+    // rendered as a bare number with no name and no value.
 
     // Movement speed
     const heroRow = document.createElement("div");
@@ -208,7 +273,8 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     slider.step = "10";
     slider.style.width = "100%";
     slider.style.accentColor = "#f77f00";
-    heroRow.appendChild(slider);
+    slider.setAttribute("data-setting", "moveDurationMs");
+    heroRow.append(heroLabelRow, slider);
 
     const hint = document.createElement("div");
     hint.style.fontSize = "10px";
@@ -222,7 +288,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     }
     refresh(current);
     slider.addEventListener("input", () => {
-      updateSettings({ moveDurationMs: Number(slider.value) });
+      refresh(updateSettings({ moveDurationMs: Number(slider.value) }));
     });
     refreshList.push(() => refresh(settings()));
 
@@ -253,7 +319,8 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     enemySlider.step = "10";
     enemySlider.style.width = "100%";
     enemySlider.style.accentColor = "#f77f00";
-    enemyRow.appendChild(enemySlider);
+    enemySlider.setAttribute("data-setting", "enemyMoveDurationMs");
+    enemyRow.append(enemyLabelRow, enemySlider);
 
     const enemyHint = document.createElement("div");
     enemyHint.style.fontSize = "10px";
@@ -267,7 +334,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     }
     refreshEnemy(current);
     enemySlider.addEventListener("input", () => {
-      updateSettings({ enemyMoveDurationMs: Number(enemySlider.value) });
+      refreshEnemy(updateSettings({ enemyMoveDurationMs: Number(enemySlider.value) }));
     });
     refreshList.push(() => refreshEnemy(settings()));
 
@@ -300,7 +367,8 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     arenaSlider.step = "10";
     arenaSlider.style.width = "100%";
     arenaSlider.style.accentColor = "#f77f00";
-    arenaRow.appendChild(arenaSlider);
+    arenaSlider.setAttribute("data-setting", "arenaMoveMsPerHex");
+    arenaRow.append(arenaLabelRow, arenaSlider);
 
     const arenaHint = document.createElement("div");
     arenaHint.style.fontSize = "10px";
@@ -314,7 +382,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     }
     refreshArena(current);
     arenaSlider.addEventListener("input", () => {
-      updateSettings({ arenaMoveMsPerHex: Number(arenaSlider.value) });
+      refreshArena(updateSettings({ arenaMoveMsPerHex: Number(arenaSlider.value) }));
     });
     refreshList.push(() => refreshArena(settings()));
 
@@ -346,7 +414,8 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     borderSlider.step = "0.1";
     borderSlider.style.width = "100%";
     borderSlider.style.accentColor = "#f77f00";
-    borderRow.appendChild(borderSlider);
+    borderSlider.setAttribute("data-setting", "territoryBorderWidth");
+    borderRow.append(borderLabelRow, borderSlider);
 
     const borderHint = document.createElement("div");
     borderHint.style.fontSize = "10px";
@@ -360,7 +429,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     }
     refreshBorder(current);
     borderSlider.addEventListener("input", () => {
-      updateSettings({ territoryBorderWidth: Number(borderSlider.value) });
+      refreshBorder(updateSettings({ territoryBorderWidth: Number(borderSlider.value) }));
     });
     refreshList.push(() => refreshBorder(settings()));
 
@@ -400,7 +469,8 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     growthSlider.step = "0.01";
     growthSlider.style.width = "100%";
     growthSlider.style.accentColor = "#f77f00";
-    growthRow.appendChild(growthSlider);
+    growthSlider.setAttribute("data-setting", "populationGrowthRate");
+    growthRow.append(growthLabelRow, growthSlider);
 
     const growthHint = document.createElement("div");
     growthHint.style.fontSize = "10px";
@@ -414,7 +484,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     }
     refreshGrowth(current);
     growthSlider.addEventListener("input", () => {
-      updateSettings({ populationGrowthRate: Number(growthSlider.value) });
+      refreshGrowth(updateSettings({ populationGrowthRate: Number(growthSlider.value) }));
     });
     refreshList.push(() => refreshGrowth(settings()));
 
@@ -455,6 +525,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     confirmToggle.type = "checkbox";
     confirmToggle.checked = current.buildingUpgradeConfirm;
     confirmToggle.style.accentColor = "#f77f00";
+    confirmToggle.setAttribute("data-setting", "buildingUpgradeConfirm");
     confirmToggle.style.transform = "scale(1.2)";
     confirmToggle.style.cursor = "pointer";
     confirmRow.appendChild(confirmToggle);
@@ -487,6 +558,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
     const toolbarStyleSelect = document.createElement("select");
     toolbarStyleSelect.setAttribute("data-testid", "toolbar-style-select");
+    toolbarStyleSelect.setAttribute("data-setting", "toolbarStyle");
     toolbarStyleSelect.style.width = "100%";
     toolbarStyleSelect.style.padding = "8px";
     toolbarStyleSelect.style.fontSize = "12px";
@@ -539,6 +611,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     styleSelect.style.backgroundColor = "#1a1a1a";
     styleSelect.style.color = "#eee";
     styleSelect.style.accentColor = "#f77f00";
+    styleSelect.setAttribute("data-setting", "resourceStyle");
 
     for (const style of resourceStyleOptions()) {
       const opt = document.createElement("option");
@@ -583,6 +656,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     variantSelect.style.backgroundColor = "#1a1a1a";
     variantSelect.style.color = "#eee";
     variantSelect.style.accentColor = "#f77f00";
+    variantSelect.setAttribute("data-setting", "spriteVariant");
 
     for (const v of spriteVariantOptions()) {
       const opt = document.createElement("option");
@@ -630,6 +704,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     backdropSelect.style.backgroundColor = "#1a1a1a";
     backdropSelect.style.color = "#eee";
     backdropSelect.style.accentColor = "#f77f00";
+    backdropSelect.setAttribute("data-setting", "cityBackdrop");
 
     for (const option of cityBackdropOptions()) {
       const opt = document.createElement("option");
@@ -684,6 +759,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     gridLinesToggle.setAttribute("aria-describedby", "city-grid-lines-hint");
     gridLinesToggle.checked = current.cityGridLines;
     gridLinesToggle.style.accentColor = "#f77f00";
+    gridLinesToggle.setAttribute("data-setting", "cityGridLines");
     gridLinesToggle.style.transform = "scale(1.2)";
     gridLinesToggle.style.cursor = "pointer";
     gridLinesRow.appendChild(gridLinesToggle);
@@ -725,7 +801,8 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     bgXSlider.step = "1";
     bgXSlider.style.width = "100%";
     bgXSlider.style.accentColor = "#f77f00";
-    bgXRow.appendChild(bgXSlider);
+    bgXSlider.setAttribute("data-setting", "cityBgOffsetX");
+    bgXRow.append(bgXLabelRow, bgXSlider);
 
     const bgXHint = document.createElement("div");
     bgXHint.style.fontSize = "10px";
@@ -739,7 +816,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     }
     refreshBgX(current);
     bgXSlider.addEventListener("input", () => {
-      updateSettings({ cityBgOffsetX: Number(bgXSlider.value) });
+      refreshBgX(updateSettings({ cityBgOffsetX: Number(bgXSlider.value) }));
     });
     refreshList.push(() => refreshBgX(settings()));
 
@@ -771,7 +848,8 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     bgYSlider.step = "1";
     bgYSlider.style.width = "100%";
     bgYSlider.style.accentColor = "#f77f00";
-    bgYRow.appendChild(bgYSlider);
+    bgYSlider.setAttribute("data-setting", "cityBgOffsetY");
+    bgYRow.append(bgYLabelRow, bgYSlider);
 
     const bgYHint = document.createElement("div");
     bgYHint.style.fontSize = "10px";
@@ -785,7 +863,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     }
     refreshBgY(current);
     bgYSlider.addEventListener("input", () => {
-      updateSettings({ cityBgOffsetY: Number(bgYSlider.value) });
+      refreshBgY(updateSettings({ cityBgOffsetY: Number(bgYSlider.value) }));
     });
     refreshList.push(() => refreshBgY(settings()));
 
@@ -810,6 +888,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     const parallaxCheck = document.createElement("input");
     parallaxCheck.type = "checkbox";
     parallaxCheck.style.accentColor = "#f77f00";
+    parallaxCheck.setAttribute("data-setting", "parallaxEnabled");
     parallaxCheck.checked = current.parallaxEnabled;
     parallaxToggleRow2.appendChild(parallaxCheck);
 
@@ -840,6 +919,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     parallaxLayerSlider.value = String(current.parallaxLayerCount);
     parallaxLayerSlider.style.width = "100%";
     parallaxLayerSlider.style.accentColor = "#f77f00";
+    parallaxLayerSlider.setAttribute("data-setting", "parallaxLayerCount");
     parallaxLayerSlider.style.display = parallaxCheck.checked ? "" : "none";
     parallaxLayerCountLabel.style.display = parallaxCheck.checked ? "" : "none";
     parallaxToggleRow.appendChild(parallaxLayerSlider);
@@ -896,6 +976,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     const logPanelCheck = document.createElement("input");
     logPanelCheck.type = "checkbox";
     logPanelCheck.style.accentColor = "#f77f00";
+    logPanelCheck.setAttribute("data-setting", "showLogPanel");
     logPanelCheck.checked = current.showLogPanel;
     logPanelToggleRow2.appendChild(logPanelCheck);
 
@@ -945,6 +1026,7 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     zoomOutSlider.step = "1";
     zoomOutSlider.style.width = "100%";
     zoomOutSlider.style.accentColor = "#f77f00";
+    zoomOutSlider.setAttribute("data-setting", "maxZoomOutHexesWide");
     zoomOutRow.appendChild(zoomOutSlider);
 
     const zoomOutHint = document.createElement("div");
@@ -977,26 +1059,12 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   styleButton(resetBtn);
   resetBtn.style.alignSelf = "flex-end";
   resetBtn.addEventListener("click", () => {
-    const bgBounds = bgOffsetBounds();
-    const pBounds = parallaxLayerCountBounds();
-    updateSettings({
-      moveDurationMs: bounds.default,
-      enemyMoveDurationMs: enemyBounds.default,
-      arenaMoveMsPerHex: arenaBounds.default,
-      toolbarStyle: DEFAULT_TOOLBAR_STYLE,
-      resourceStyle: DEFAULT_RESOURCE_STYLE,
-      territoryBorderWidth: borderBounds.default,
-      populationGrowthRate: growthBounds.default,
-      spriteVariant: 1,
-      cityBackdrop: DEFAULT_CITY_BACKDROP,
-      cityGridLines: true,
-      cityBgOffsetX: bgBounds.default,
-      cityBgOffsetY: bgBounds.default,
-      parallaxEnabled: false,
-      parallaxLayerCount: pBounds.default,
-      showLogPanel: false,
-      maxZoomOutHexesWide: zoomOutBounds.default,
-    });
+    // Reset is EVERY key the store owns, read off the one exported default
+    // object rather than a hand-kept list. The list this replaces named 16 of
+    // the 18 keys, so gameMode and buildingUpgradeConfirm stayed at the
+    // player's value while the button claimed the defaults were restored
+    // (playthrough round 4, F2).
+    updateSettings({ ...DEFAULT_SETTINGS });
     for (const fn of refreshList) fn();
   });
   content.appendChild(resetBtn);
