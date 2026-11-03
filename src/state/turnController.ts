@@ -18,6 +18,7 @@ import {
   SETTLEMENT_BATTLE_MIN_RETREAT_ROUND,
   rollbackCaptureSettlement,
   assignWorkers as assignWorkersReducer,
+  revealForPlayer,
 } from "@heroes/engine";
 import type { HorseVariant } from "./settings";
 import type { BattleResult, CitySpot, SettlementBattleOutcome, UnitType } from "@heroes/engine";
@@ -424,6 +425,32 @@ export class TurnController {
     }
   }
 
+  /**
+   * Uncharted-mode reveal (playthrough round 3, F1), applied to this client's
+   * own state by the SAME engine rule the server persists
+   * (`@heroes/engine`'s `revealForPlayer`, called from commandHandler's MoveHero
+   * / CaptureSettlement / AdvanceCharterTravel / FoundSettlement cases).
+   *
+   * The client's `players[].revealedTiles` is a projection of the server's
+   * persisted one, and it is what `GameEngine.draw` seeds the renderer from and
+   * what `__gameDebug.getState()` reports -- so a client that applies only the
+   * move reducer and never the reveal leaves that projection at its load-time
+   * value for the rest of the session (measured: 36 keys behind the server after
+   * one move, never reconciled). Nothing showed, because the render unions the
+   * live vision ring every frame; that is the compensating path, not the fix.
+   *
+   * No-ops for a seat that maintains no reveal -- an AI seat, or any seat of a
+   * classic game -- so a non-uncharted game's state stays byte-identical.
+   */
+  private revealReconciled(
+    state: GameState,
+    ownerId: number | null | undefined,
+    extraPoints?: readonly { q: number; r: number }[],
+  ): GameState {
+    if (ownerId === null || ownerId === undefined) return state;
+    return revealForPlayer(state, ownerId, extraPoints);
+  }
+
   selectHero(heroId: HeroId): void {
     if (this.state.phase.kind !== "PLAYER_TURN") return;
     const hero = this.state.heroes[heroId];
@@ -512,10 +539,22 @@ export class TurnController {
     cost: number,
     trailExtension?: { q: number; r: number }[],
   ): boolean {
+    const mover = this.state.heroes[heroId];
+    const fromTile = mover ? { q: mover.q, r: mover.r } : toTile;
     const result = startMoveReducer(this.state, heroId, toTile, cost, trailExtension);
     this.state = result.state;
     if (!result.ok) return false;
     const hero = this.state.heroes[heroId];
+    // Uncharted reveal, on the optimistic apply: the server unions this seat's
+    // post-move vision (plus the walked corridor) into players[].revealedTiles
+    // in the same MoveHero case this command persists through. Applying it here
+    // too is what keeps the client's copy of that projection from sitting at its
+    // load-time value for the rest of the session (see revealReconciled).
+    this.state = this.revealReconciled(
+      this.state,
+      hero?.ownerId,
+      trailExtension && trailExtension.length > 0 ? trailExtension : [fromTile, toTile],
+    );
     bus.emit({ type: "hero:moved", heroId, from: { q: hero?.previousQ ?? hero?.q ?? 0, r: hero?.previousR ?? hero?.r ?? 0 }, to: toTile, playerId: hero?.ownerId ?? 0 });
     this.hooks.logEvent({
       type: "move_completed",
@@ -632,7 +671,11 @@ export class TurnController {
     if (!result.captured) return false;
     const previousOwnerId = result.previousOwnerId;
     const afterMove = this.lastMovePersist;
-    this.commit(result.state, {
+    // Uncharted reveal: the captured settlement's controlRange ring belongs to
+    // the capturer now, so the seat's reveal grows with the capture -- the same
+    // rule the server applies in commandHandler's CaptureSettlement case.
+    const committed = this.revealReconciled(result.state, result.state.heroes[heroId]?.ownerId);
+    this.commit(committed, {
       events: [{ type: "settlement:captured", heroId, settlementId }],
       log: {
         type: "settlement_captured",
@@ -1059,7 +1102,11 @@ export class TurnController {
     if (!result.ok) return { ok: false, reason: result.reason };
 
     const settlementId = result.settlementId;
-    this.commit(result.state, {
+    // Uncharted reveal: the new settlement is the founder's the moment it
+    // exists, so its controlRange ring is revealed with the founding (the server
+    // applies the same rule in commandHandler's FoundSettlement case).
+    const committed = this.revealReconciled(result.state, founder.ownerId);
+    this.commit(committed, {
       log: {
         type: "settlement_founded",
         payload: { founderId, q, r, settlementId, consumedFounder: result.consumedFounder },
@@ -1068,7 +1115,7 @@ export class TurnController {
         try {
           await this.hooks.onFoundSettlement(actor, founderId);
         } catch (e) {
-          if (this.state === result.state) {
+          if (this.state === committed) {
             this.state = before;
             this.hooks.logEvent({
               type: "found_settlement_rolled_back",
@@ -1144,6 +1191,13 @@ export class TurnController {
         }
         const fromTile = { q: hero.q, r: hero.r };
         this.state = result.state;
+        // Uncharted reveal: one hex-step of chartered travel reveals its own
+        // corridor (the server applies the same rule in its
+        // AdvanceCharterTravel case).
+        this.state = this.revealReconciled(this.state, hero.ownerId, [
+          fromTile,
+          { q: nextStep.q, r: nextStep.r },
+        ]);
         bus.emit({ type: "hero:moved", heroId: hero.id, from: fromTile, to: { q: nextStep.q, r: nextStep.r }, playerId: hero.ownerId });
         // #152: wrapped in trackCommand for the same reason every other
         // fire-and-forget hook is (this class's own pendingCommands

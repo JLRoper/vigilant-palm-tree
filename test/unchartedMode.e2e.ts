@@ -300,6 +300,28 @@ async function corridorAndPersistence(browser: Browser): Promise<void> {
   assert(corridorKey, "no corridor tile at hex-distance 5 from origin revealed (trail not wired into MoveHero)");
   console.log(`>> [B] move landed, destination + corridor ${corridorKey} revealed server-side`);
 
+  // The client's OWN copy of that projection, read BEFORE the reload that
+  // rehydrates it from the server: this is the value GameEngine.draw seeds the
+  // renderer from and what a playthrough card measures. It used to stay at its
+  // load-time value for the whole session -- measured 98 keys against the
+  // server's 134, 36 keys behind, never reconciled (playthrough round 3, F1) --
+  // masked only because the render re-unions the live vision ring every frame.
+  const inSession = await page.evaluate(() => {
+    const st = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getState();
+    const p = st.players.find((x) => x.id === 0);
+    return (p?.revealedTiles ?? []) as string[];
+  });
+  assert(
+    inSession.includes(`${dest.q},${dest.r}`),
+    `the client's own revealedTiles is behind the server (client ${inSession.length} keys, server ${reveal.length}): destination ${dest.q},${dest.r} missing in-session`,
+  );
+  assert(inSession.includes(corridorKey!), `the client's own revealedTiles is behind the server: corridor ${corridorKey} missing in-session`);
+  assert(
+    inSession.length >= reveal.length,
+    `the client's own revealedTiles (${inSession.length}) is behind the server's (${reveal.length}) after a move`,
+  );
+  console.log(`>> [B] in-session client mirror holds ${inSession.length} keys vs the server's ${reveal.length} -- destination + corridor present`);
+
   // Full reload: client hydrates players[] from the games JSONB, so the
   // persisted reveal must come back with the same keys.
   await page.reload({ waitUntil: "load" });

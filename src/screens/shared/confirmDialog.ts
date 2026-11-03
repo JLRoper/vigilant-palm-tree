@@ -7,6 +7,15 @@ export interface ConfirmDialogOptions {
   confirmLabel?: string;
   cancelLabel?: string;
   destructive?: boolean;
+  /**
+   * The dialog wrapper's z-index. The default (120) keeps the prompt under the
+   * home overlay (200) and the regular dialogs (300), which is right for a
+   * caller raised from the map. A caller raised from a surface that is ITSELF
+   * above 120 -- the landing page's Load dialog, the Asset Manager -- must pass
+   * a higher one: the prompt is a modal, and a backdrop drawn under the surface
+   * that raised it is a prompt the player can see but not click.
+   */
+  zIndex?: number;
   onConfirm: () => void;
 }
 
@@ -15,7 +24,7 @@ export function openConfirmDialog(opts: ConfirmDialogOptions): FloatingPanel {
   // centring, the teardown and (via panelManager) Escape, so this file is only
   // the message and the two buttons. zIndex 120 keeps the prompt under the
   // home overlay (200) and the regular dialogs (300), as before.
-  const menu = openDialog(document.body, opts.title, 360, false, true, undefined, { zIndex: 120 });
+  const menu = openDialog(document.body, opts.title, 360, false, true, undefined, { zIndex: opts.zIndex ?? 120 });
 
   const msg = document.createElement("div");
   msg.textContent = opts.message;
