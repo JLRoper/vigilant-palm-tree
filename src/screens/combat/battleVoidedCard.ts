@@ -12,18 +12,16 @@
 
 import { styleButton } from "@screens/shared/panel";
 import { openDialog } from "@screens/shared/dialog";
-import type { HeroBattleResolvedPayload } from "./serverVoidedBattle";
+import {
+  BATTLE_VOIDED_TITLE,
+  battleVoidedMessage,
+  battleVoidedOutcomeLines,
+  type HeroBattleResolvedPayload,
+} from "./serverVoidedBattle";
 
-export const BATTLE_VOIDED_TITLE = "This fight was voided";
-
-export function battleVoidedMessage(): string {
-  return (
-    "The server resolved this battle before your result arrived, so the fight you played was not " +
-    "recorded — a battle that goes quiet for longer than the wait deadline is settled by the server " +
-    "instead of waiting forever.\n\n" +
-    "The map shows the server's outcome, not the one you played."
-  );
-}
+// The detection, the title and the wording itself live in
+// ./serverVoidedBattle (DOM-free, unit-tested); this file renders them.
+export { BATTLE_VOIDED_TITLE, battleVoidedMessage, battleVoidedOutcomeLines };
 
 export interface BattleVoidedCardOptions {
   /** The server's own BattleResolved payload, when the client saw it land. */
@@ -31,22 +29,6 @@ export interface BattleVoidedCardOptions {
   attackerLabel: string;
   defenderLabel: string;
   onReturnToMap: () => void;
-}
-
-/** The server's verdict lines, reusing the shared wording helper. */
-export async function battleVoidedOutcomeLines(
-  payload: HeroBattleResolvedPayload | null | undefined,
-  attackerLabel: string,
-  defenderLabel: string,
-): Promise<string[]> {
-  if (!payload) return [];
-  const { battleVerdictCardLine } = await import("./battleResultText");
-  const lines: string[] = [];
-  const attacker = battleVerdictCardLine(attackerLabel, payload.attackerVerdict);
-  if (attacker) lines.push(`Server's result — ${attacker}`);
-  const defender = battleVerdictCardLine(defenderLabel, payload.defenderVerdict);
-  if (defender) lines.push(`Server's result — ${defender}`);
-  return lines;
 }
 
 export function showBattleVoidedCard(opts: BattleVoidedCardOptions): void {

@@ -50,6 +50,8 @@ export interface ServerVoidWatch {
   voided(): boolean;
   /** The settling event's payload (the server's own outcome), once known. */
   payload(): HeroBattleResolvedPayload | null;
+  /** The game_events row id that carried the void (null until it fires). */
+  rowId(): string | null;
   /**
    * Resolves the moment the pair is settled server-side, so a caller racing
    * the arena's own outcome can stop waiting for a fight that can no longer
@@ -76,6 +78,7 @@ export function watchServerBattleVoid(
   subscribe: Subscribe = defaultSubscribe,
 ): ServerVoidWatch {
   let settled: HeroBattleResolvedPayload | null = null;
+  let settledRowId: string | null = null;
   let resolveWhenVoided: (payload: HeroBattleResolvedPayload) => void = () => {};
   const whenVoided = new Promise<HeroBattleResolvedPayload>((resolve) => {
     resolveWhenVoided = resolve;
@@ -85,13 +88,46 @@ export function watchServerBattleVoid(
     if (settled !== null) return;
     if (!isServerVoidOfWatchedBattle(ev, watched)) return;
     settled = ev.payload as HeroBattleResolvedPayload;
+    settledRowId = ev.id;
     resolveWhenVoided(settled);
   });
 
   return {
     voided: () => settled !== null,
     payload: () => settled,
-    whenVoided,
+    rowId: () => settledRowId,
+    whenVoided: () => whenVoided,
     detach,
   };
+}
+
+// ---------------------------------------------------------------------------
+// What the player is told. Kept here (not in the DOM module) so the wording a
+// reader checks -- "plainly that the fight was voided" -- is unit-testable.
+
+export const BATTLE_VOIDED_TITLE = "This fight was voided";
+
+export function battleVoidedMessage(): string {
+  return (
+    "The server resolved this battle before your result arrived, so the fight you played was not " +
+    "recorded — a battle that goes quiet for longer than the wait deadline is settled by the server " +
+    "instead of waiting forever.\n\n" +
+    "The map shows the server's outcome, not the one you played."
+  );
+}
+
+/** The server's own verdict lines, in the shared wording. */
+export async function battleVoidedOutcomeLines(
+  payload: HeroBattleResolvedPayload | null | undefined,
+  attackerLabel: string,
+  defenderLabel: string,
+): Promise<string[]> {
+  if (!payload) return [];
+  const { battleVerdictCardLine } = await import("./battleResultText");
+  const lines: string[] = [];
+  const attacker = battleVerdictCardLine(attackerLabel, payload.attackerVerdict);
+  if (attacker) lines.push(`Server's result — ${attacker}`);
+  const defender = battleVerdictCardLine(defenderLabel, payload.defenderVerdict);
+  if (defender) lines.push(`Server's result — ${defender}`);
+  return lines;
 }

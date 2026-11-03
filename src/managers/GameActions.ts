@@ -15,6 +15,11 @@ import { submitBattleResult, submitSettlementBattleResult, type SubmitBattleResu
 import { sendWithRetry } from "../io/commandRetry";
 import { isServerDriven } from "../io/serverDrivenGames";
 import { consumeResolveBattleVerdicts, mergeBattleOutcomeHero, mergeBattleOutcomeHeroes } from "../game/turnHooks";
+import { hydrateClientGame } from "../io/hydrateClientGame";
+import {
+  watchServerBattleVoid,
+  type HeroBattleResolvedPayload,
+} from "@screens/combat/serverVoidedBattle";
 import {
   evaluateUpkeepWarnings,
   upkeepSummaryToastMessage,
@@ -173,6 +178,21 @@ export class GameActions {
           }
           return;
         }
+        if (fought.kind === "voided") {
+          // The server settled this pair while the arena was open (the offer
+          // went idle past the driver's deadline): the played result cannot
+          // land, so it is never POSTed at all -- the client adopts the
+          // server's world and says plainly that the fight was voided.
+          await this.adoptServerResolvedBattle(
+            gameName,
+            attackerId,
+            defenderId,
+            fought.payload,
+            attackerName,
+            defenderName,
+          );
+          return;
+        }
         if (fought.kind === "done") {
           // Submission failed and the pre-battle position was already
           // restored inside fightInArena (flee semantics), or the BATTLE
@@ -279,6 +299,7 @@ export class GameActions {
       }
     | { kind: "done" }
     | { kind: "unavailable" }
+    | { kind: "voided"; payload: HeroBattleResolvedPayload | null }
   > {
     // The arena resolves unit stats from the server-backed catalog (same
     // source the auto-resolver uses server-side, via /api/units).
@@ -308,9 +329,21 @@ export class GameActions {
         ? () => {}
         : startArenaHeartbeat((at) => telemetry(ARENA_HEARTBEAT_PHASE, { at }));
 
+    // While this fight is open the server may settle it out from under the
+    // player (the offer went idle past the driver's deadline). Watch for that
+    // verdict: the moment it lands the played result can no longer be
+    // recorded, so the arena is torn down and the server's outcome adopted
+    // instead of POSTing into the server's refusal.
+    const voidWatch = watchServerBattleVoid({
+      gameName,
+      attackerId,
+      defenderId,
+      localSeat: getInMemoryLocalPlayerId(gameName ?? ""),
+    });
+
     const { openManualBattleArena } = await import("@screens/combat/arena/openManualBattleArena");
     let closeArena: () => void = () => {};
-    const outcome: ManualBattleOutcome = await new Promise<ManualBattleOutcome>((resolve) => {
+    const arenaOutcome = new Promise<ManualBattleOutcome>((resolve) => {
       const handle = openManualBattleArena(
         humanHero.stacks,
         enemyHero.stacks,
@@ -334,6 +367,19 @@ export class GameActions {
         handle.close();
       };
     });
+    const raced = await Promise.race([
+      arenaOutcome,
+      voidWatch.whenVoided().then((payload) => ({ serverVoid: payload })),
+    ]);
+    voidWatch.detach();
+    // The server settled this pair while the arena was open: the fight the
+    // player is playing cannot land. Take the overlay down here (which is also
+    // what stops the heartbeat) before the caller adopts the server's world.
+    if ("serverVoid" in raced) {
+      closeArena();
+      return { kind: "voided", payload: raced.serverVoid };
+    }
+    const outcome = raced;
 
     // Only the "applied" result hands the open arena to the caller (its result
     // card's Carry On closes it). Every other exit -- phase gone, rejected or
@@ -391,6 +437,15 @@ export class GameActions {
       }),
     );
     if (!sent.ok) {
+      // Backstop for a void the client never saw land (a missed or dead event
+      // stream): the server no longer holds this offer, so the played result
+      // cannot be recorded no matter what. Adopt the server's world and say
+      // the fight was voided, instead of the "Couldn't record this battle"
+      // dead end -- the world already holds the server's own resolution.
+      if (sent.reason.startsWith("battle_not_pending")) {
+        await this.adoptServerResolvedBattle(gameName, attackerId, defenderId, null, attackerId, defenderId);
+        return { kind: "done" };
+      }
       // No authoritative result to apply. Restore the pre-battle position
       // (same as Flee) so the game is not stuck in the BATTLE phase, and tell
       // the player why the battle they just fought did not count.
@@ -444,6 +499,69 @@ export class GameActions {
   private async showSubmitFailed(reason: string): Promise<void> {
     const { showBattleSubmitFailedCard } = await import("@screens/combat/battleSubmitFailedCard");
     showBattleSubmitFailedCard({ reason, onReturnToMap: () => {} });
+  }
+
+  /**
+   * The server settled a battle this client was still fighting (the reader's
+   * card, half two). The played result can no longer be recorded, so it is
+   * never submitted: the client adopts the server's own post-resolution world
+   * and says plainly that the fight was voided. `payload` is the server's own
+   * BattleResolved when the client saw it land (the arena path); null when
+   * the client only learned about it from the server's refusal.
+   */
+  private async adoptServerResolvedBattle(
+    gameName: string | null,
+    attackerId: string,
+    defenderId: string,
+    payload: HeroBattleResolvedPayload | null,
+    attackerName: string,
+    defenderName: string,
+  ): Promise<void> {
+    const name = gameName ?? this.session.getActiveGameName();
+    let adopted = false;
+    if (name) {
+      try {
+        // The resync path cannot help here: a full snapshot is dropped while
+        // the phase is blocked (the battle overlay is up), so the server's
+        // world has to be fetched and adopted by hand.
+        const game = await api.getGame(name);
+        this.state.replaceState(hydrateClientGame(game));
+        adopted = true;
+      } catch (err) {
+        console.warn("[battle] could not adopt the server's resolved battle; restoring the pre-battle position:", err);
+      }
+    }
+    if (!adopted) {
+      // No authoritative state to adopt (the fetch failed): at least unstick
+      // the client from the BATTLE phase the way a failed submission does, so
+      // the player is not stranded on the arena.
+      const tc = this.state.getTurnController();
+      tc.abandonBattle(attackerId);
+      this.state.replaceState(tc.getState());
+    }
+    const after = this.state.getState();
+    const attackerAfter = after.heroes[attackerId];
+    bus.emit({
+      type: "battle:resolved",
+      attackerId,
+      defenderId,
+      attackerSurvived: attackerAfter ? platoonsHaveTroops(attackerAfter.stacks) : false,
+    });
+    await this.showVoidedBattle(payload, attackerName, defenderName);
+  }
+
+  private async showVoidedBattle(
+    payload: HeroBattleResolvedPayload | null,
+    attackerName: string,
+    defenderName: string,
+  ): Promise<void> {
+    const { showBattleVoidedCard } = await import("@screens/combat/battleVoidedCard");
+    showBattleVoidedCard({
+      payload,
+      attackerLabel: `Hero ${attackerName}`,
+      defenderLabel: `Hero ${defenderName}`,
+      onReturnToMap: () => {},
+    });
   }
 
   /**
