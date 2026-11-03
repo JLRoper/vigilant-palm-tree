@@ -15,6 +15,11 @@ interface LobbySeat {
   // Drop policy (2026-09-27): the server marked this seat disconnected
   // (60s without a heartbeat). Surface it in the seat grid.
   disconnected: boolean;
+  // An AI combatant seat (`players[i].faction === "ai"`, docs/multiplayer.md):
+  // a real player in the game, but not a lobby seat. An explicit seat count
+  // larger than the human count fills the remaining seats with these, so they
+  // are rendered as themselves and never block the Start gate.
+  isAi: boolean;
 }
 
 interface LobbySnapshot {
@@ -31,8 +36,8 @@ interface CreateMultiplayerLobbyOptions {
 
 const SEAT_COUNTS: Array<2 | 3 | 4> = [2, 3, 4];
 
-const SEAT_COUNT_LABEL = `Maximum seats (${SEAT_COUNTS[0]}-${SEAT_COUNTS[SEAT_COUNTS.length - 1]})`;
-const HUMAN_COUNT_LABEL = "Number of human players (1 to the maximum seats)";
+const SEAT_COUNT_LABEL = `Number of seats (${SEAT_COUNTS[0]}-${SEAT_COUNTS[SEAT_COUNTS.length - 1]})`;
+const HUMAN_COUNT_LABEL = "Number of human players (1 to the number of seats)";
 
 function defaultGameName(): string {
   const d = new Date();
@@ -52,6 +57,7 @@ function snapshotFromGame(game: Game, localPlayerId: number | null): LobbySnapsh
       handle: claim?.handle,
       isLocal: localPlayerId === i,
       disconnected: lobby.presence?.[String(i)]?.connected === false,
+      isAi: game.players?.[i]?.faction === "ai",
     });
   }
   return {
@@ -133,7 +139,7 @@ export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): voi
     hostPanel.replaceChildren();
     const intro = document.createElement("div");
     intro.textContent =
-      "Pick the maximum seats and game name. Share the LAN URL with other players; they'll open this page and click Join.";
+      "Pick the number of seats and a game name. Seats no human player takes are filled by AI opponents. Share the LAN URL with other players; they'll open this page and click Join.";
     intro.style.opacity = "0.7";
     intro.style.fontSize = "11px";
     hostPanel.appendChild(intro);
@@ -254,6 +260,15 @@ export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): voi
         return;
       }
       const humanSlots = Math.max(1, Math.min(selectedSeats, Number(humanInput.value) || 1));
+      // The chip row's choice is the lobby's SEAT count and the input is how
+      // many of those seats a human fills; the seats nobody fills become AI
+      // combatant seats. All three ride the create request, because the seat
+      // count has no other route to the server -- without it the server builds
+      // `seats` from the human count alone (`const seats = explicitSeats ??
+      // (humanCount !== null ? humanCount : null)`), so a 4-seat pick with 2
+      // human players silently became a two-seat lobby.
+      const seatCount = selectedSeats;
+      const aiSeats = seatCount - humanSlots;
       const handle = handleInput.value.trim() || "Host";
       create.disabled = true;
       try {
@@ -261,7 +276,20 @@ export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): voi
         const map = (await import("../../map/gameMap")).getOrCreateGameMap(seed, "huge");
         const heroQ = map.width >> 1;
         const heroR = map.height >> 1;
-        const created = await api.createGame(gameName, seed, heroQ, heroR, [], "huge", humanSlots);
+        const created = await api.createGame(
+          gameName,
+          seed,
+          heroQ,
+          heroR,
+          [],
+          "huge",
+          humanSlots,
+          aiSeats,
+          undefined,
+          undefined,
+          undefined,
+          seatCount,
+        );
         const updated = await api.claimLobbySeat(created.name, 0, handle);
         activeGameName = updated.name;
         activeLocalPlayerId = 0;
@@ -397,12 +425,13 @@ export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): voi
     actions.appendChild(close);
 
     if (activeLocalPlayerId === 0 && !snap.started) {
-      const allClaimed = snap.seats.length > 0 && snap.seats.every((s) => Boolean(s.handle));
+      const allClaimed =
+        snap.seats.length > 0 && snap.seats.every((s) => Boolean(s.handle) || s.isAi);
       const start = document.createElement("button");
       start.textContent = "Start Game";
       styleButton(start, true);
       start.disabled = !allClaimed;
-      if (!allClaimed) start.title = "All seats must be claimed first";
+      if (!allClaimed) start.title = "Every human seat must be claimed first";
       start.addEventListener("click", async () => {
         clearError();
         start.disabled = true;
@@ -449,7 +478,9 @@ export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): voi
     label.style.fontSize = "12px";
     label.textContent = seat.handle
       ? `${seat.handle}${seat.isLocal ? " (you)" : ""}${seat.disconnected ? " (disconnected)" : ""}`
-      : `Seat ${seat.id} — open`;
+      : seat.isAi
+        ? `Seat ${seat.id} — AI`
+        : `Seat ${seat.id} — open`;
     if (!seat.handle) label.style.opacity = "0.6";
     if (seat.disconnected) label.style.color = "#f88";
     row.appendChild(label);
