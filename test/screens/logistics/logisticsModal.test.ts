@@ -98,24 +98,28 @@ test("owned settlement stockpiles use treasury-first icons and compact per-turn 
     assert.equal(await name.textContent(), "Stockpile Keep (L1)");
     const groups = heading.locator(":scope > span");
     assert.equal(await groups.count(), 3);
-    const counts = groups.nth(1).locator("span");
-    for (const [i, label] of ["Supply wagons: 3", "Treasure carts: 4"].entries()) {
+    // E7: the per-settlement heading carries the Buy controls ONLY. It used to
+    // repeat the player-wide unassigned pool ("Supply wagons: 3") under every
+    // settlement's own stockpile heading -- a number that can never be true of
+    // one settlement, printed twice and identically. The pool is stated once,
+    // correctly labelled, in the "Wagon pools" block above.
+    for (const [i, label] of ["Buy wagon", "Buy cart"].entries()) {
       const group = groups.nth(i + 1);
-      const count = group.locator("span");
       const button = group.locator("button");
-      assert.equal(await count.textContent(), label);
-      assert((await count.getAttribute("title"))?.includes("player-wide shared pool"));
-      assert((await count.getAttribute("aria-label"))?.includes("Available unassigned"));
-      assert.equal(await count.evaluate((el) => getComputedStyle(el).fontWeight), "400");
-      assert.equal(await count.evaluate((el) => el.nextElementSibling?.tagName), "BUTTON");
-      assert.equal(await button.textContent(), i === 0 ? "Buy wagon" : "Buy cart");
+      assert.equal(await group.locator("span").count(), 0, "no per-settlement pool readout");
+      assert.equal(await group.textContent(), label, "the group is its Buy control alone");
+      assert.equal(await button.textContent(), label);
       assert.equal(await button.getAttribute("title"), null);
       assert((await button.getAttribute("aria-label"))?.includes("unassigned"));
-      const countBox = (await count.boundingBox())!;
-      const buttonBox = (await button.boundingBox())!;
-      assert(buttonBox.x >= countBox.x + countBox.width);
-      assert(Math.abs(buttonBox.y + buttonBox.height / 2 - countBox.y - countBox.height / 2) < 1);
     }
+    assert.equal(
+      await page.locator("text=Supply wagons").count(),
+      0,
+      "the player-wide pool is not labelled under a settlement",
+    );
+    assert.equal(await page.locator("text=Treasure carts").count(), 0, "and neither is the player-wide cart pool");
+    const poolRow = page.locator("text=Cargo:").first();
+    assert.match(await poolRow.textContent() ?? "", /Cargo: 17 owned · 3 unassigned · Treasury: 19 owned · 4 unassigned/, "the pool is stated once, with the amounts it owns");
     assert.equal(await name.evaluate((el) => getComputedStyle(el).fontWeight), "600");
     const nameBox = (await name.boundingBox())!;
     const beforeHeight = (await block.boundingBox())!.height;
@@ -137,7 +141,7 @@ test("owned settlement stockpiles use treasury-first icons and compact per-turn 
     await page.mouse.move(pointer.x + 20, pointer.y + 2);
     await checkAnchor(pointer.x + 20, pointer.y + 2);
     const measured = (await tip.boundingBox())!;
-    console.log(JSON.stringify({ pointer: { x: pointer.x + 20, y: pointer.y + 2 }, popupTopLeft: { x: measured.x, y: measured.y }, countsWeight: "400" }));
+    console.log(JSON.stringify({ pointer: { x: pointer.x + 20, y: pointer.y + 2 }, popupTopLeft: { x: measured.x, y: measured.y }, buyGroupSpans: 0 }));
     const stock = tip.locator(".logistics-stockpile");
     assert.equal(await stock.count(), 1);
     const children = stock.locator(":scope > *");
@@ -165,13 +169,18 @@ test("owned settlement stockpiles use treasury-first icons and compact per-turn 
     await name.focus();
     assert(await tip.isVisible());
     await checkAnchor(nameBox.x, nameBox.y + nameBox.height);
-    await counts.hover();
-    assert.equal(await tip.isVisible(), false, "counts suppress a keyboard-focused name tooltip");
+    const buyWagon = groups.nth(1).locator("button");
+    await buyWagon.hover();
+    assert.equal(await tip.isVisible(), false, "the Buy control suppresses a keyboard-focused name tooltip");
     assert.equal(await name.evaluate((el) => document.activeElement === el), true);
     await name.hover();
     assert(await tip.isVisible());
-    await counts.hover();
+    await buyWagon.hover();
     assert.equal(await tip.isVisible(), false, "leaving the focused name must not reopen stockpiles");
+    // The Buy control carries its own purchase-cost tooltip now that it is the
+    // only thing in the group -- that is what the pointer is over.
+    assert.equal(await priceTip.isVisible(), true, "hovering Buy shows the purchase cost");
+    await page.mouse.move(0, 0);
     assert.equal(await priceTip.isVisible(), false);
     await name.evaluate((el) => el.blur());
     await name.focus();
@@ -183,14 +192,13 @@ test("owned settlement stockpiles use treasury-first icons and compact per-turn 
     for (const width of [1000, 360]) {
       await page.setViewportSize({ width, height: 900 });
       if (width === 360) {
-        assert.equal(await heading.evaluate((el) => getComputedStyle(el).flexWrap), "wrap");
-        assert((await groups.nth(2).boundingBox())!.y > (await name.boundingBox())!.y);
+        assert.equal(await heading.evaluate((el) => getComputedStyle(el).flexWrap), "wrap", "the heading can still wrap when it must");
         for (const group of [groups.nth(1), groups.nth(2)]) {
           const groupBox = (await group.boundingBox())!;
           assert(groupBox.x >= 0 && groupBox.x + groupBox.width <= width);
-          const countBox = (await group.locator("span").boundingBox())!;
           const buttonBox = (await group.locator("button").boundingBox())!;
-          assert(buttonBox.x >= countBox.x + countBox.width);
+          assert.equal(await group.locator("span").count(), 0);
+          assert(buttonBox.x >= groupBox.x && buttonBox.x + buttonBox.width <= groupBox.x + groupBox.width);
         }
       }
       const box = await stock.boundingBox();
@@ -248,8 +256,8 @@ test("owned settlement stockpiles use treasury-first icons and compact per-turn 
       const focusPriceBox = (await priceTip.boundingBox())!;
       assert(Math.abs(focusPriceBox.x - buttonBox.x) < 0.1);
       assert(Math.abs(focusPriceBox.y - buttonBox.y - buttonBox.height) < 0.1);
-      await counts.hover();
-      assert.equal(await priceTip.isVisible(), false);
+      await name.hover();
+      assert.equal(await priceTip.isVisible(), false, "leaving the Buy control hides its price");
       await button.hover();
       await button.dispatchEvent("mousemove", { clientX: 999, clientY: 899 });
       const clampedPrice = (await priceTip.boundingBox())!;

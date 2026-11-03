@@ -558,17 +558,22 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         stock.append(image, amount, rate);
       }
       stockpileTooltip.bind(name, stock);
-      for (const [slot, label, title, countLabel, count] of [
-        ["cargo", "Buy wagon", "Buy a cargo wagon into the player's unassigned pool", "Supply wagons", player ? playerWagonsUnassigned(player) : 0],
-        ["treasury", "Buy cart", "Buy a treasury cart into the player's unassigned cart pool (gold capacity)", "Treasure carts", player ? playerTreasuryWagonsUnassigned(player) : 0],
+      // E7 (playthrough round 2b): these groups used to print the player-wide
+      // unassigned pool ("Supply wagons: N") under EVERY settlement's own
+      // stockpile heading, so two rows that could never differ both advertised
+      // the same number and each claimed it as that settlement's. The number is
+      // player-wide, the label was per-settlement, and the row cannot be made
+      // true where it stands -- so the number is GONE from here and stays stated
+      // once, correctly labelled, in the Wagon pools block above
+      // ("Cargo: N owned · M unassigned · ..."). What is left is the one thing
+      // this row really is: a control that buys a wagon OF THIS SETTLEMENT's
+      // wood and gold into the shared pool.
+      for (const [slot, label, title] of [
+        ["cargo", "Buy wagon", "Buy a cargo wagon into the player's unassigned pool"],
+        ["treasury", "Buy cart", "Buy a treasury cart into the player's unassigned cart pool (gold capacity)"],
       ] as const) {
         const group = document.createElement("span");
         group.style.cssText = "display:inline-flex;align-items:center;gap:6px;max-width:100%;";
-        const counts = document.createElement("span");
-        counts.style.fontWeight = "400";
-        counts.textContent = `${countLabel}: ${count}`;
-        counts.title = "Available unassigned wagons and carts in the owner's player-wide shared pool, not this settlement's inventory";
-        counts.setAttribute("aria-label", `${counts.textContent}; ${counts.title}`);
         const buyBtn = document.createElement("button");
         buyBtn.textContent = label;
         buyBtn.setAttribute("aria-label", title);
@@ -595,7 +600,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
           price.appendChild(item);
         }
         priceTooltip.bind(buyBtn, price);
-        group.append(counts, buyBtn);
+        group.append(buyBtn);
         heading.appendChild(group);
       }
       modal.body.appendChild(row);
