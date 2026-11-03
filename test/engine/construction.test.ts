@@ -4,6 +4,7 @@ import type { BuildingDef, GameState, SettlementState } from "@heroes/contracts"
 import {
   advanceBuildingConstructions,
   assignedWorkersExplicit,
+  autoStaffedSlots,
   BUILD_RATE_PER_EXTRA_BUILDER,
   buildersOnSite,
   buildRate,
@@ -425,4 +426,59 @@ test("an untouched building's build time changes for NO kind: the auto crew IS t
     [2, 3, 4, 5, 6],
     "a 1.60x curve moves every class but the 0-day one -- which is what makes this test able to fail",
   );
+});
+
+// ── two more rows of the design's checklist, pinned (2026-11-03) ────────────
+
+test("a crew change mid-build is a STEP: the new builders pay on the NEXT tick, and no progress is rewound", () => {
+  // The day tick is the only clock (design §5.f): a rate is read once per day,
+  // so adding builders mid-build changes the NEXT decrement and nothing else --
+  // no re-derivation from the placement, no double credit, no negative progress.
+  const started = makeSettlement("s0", 0, 2, 2, {
+    buildings: [
+      { gx: 0, gy: 0, kind: "goldMine", level: 1, style: "classic", workers: 1, construction: { daysRemaining: 6 } },
+    ],
+  });
+  const afterOneTick = advanceBuildingConstructions(makeState({ settlements: [started] }));
+  assert.equal(
+    afterOneTick.settlements.s0.buildings[0].construction?.daysRemaining,
+    5,
+    "one builder: the first tick is 1.00x",
+  );
+
+  // The player adds three more builders. What the building has already built is
+  // the state's, not the crew's.
+  const reinforced: SettlementState = {
+    ...afterOneTick.settlements.s0,
+    buildings: [{ ...afterOneTick.settlements.s0.buildings[0], workers: 4 }],
+  };
+  let state = makeState({ settlements: [reinforced] });
+  const after: Array<number | null> = [];
+  for (let i = 0; i < 4; i++) {
+    state = advanceBuildingConstructions(state);
+    after.push(state.settlements.s0.buildings[0].construction?.daysRemaining ?? null);
+  }
+  assert.deepEqual(
+    after,
+    [3, 1, null, null],
+    "5 days at 2.00x: 3, 1, done -- and the 1-day overshoot is discarded, never carried",
+  );
+  assert.equal(after.indexOf(null) + 1, Math.ceil(5 / buildRate(4)), "the ticks it took match its REMAINING days at the new rate");
+  assert.equal(1 + after.indexOf(null) + 1, Math.ceil(6 / buildRate(4)) + 1, "and the slow first tick is remembered, not re-derived");
+});
+
+test("the pool counts a site at the CONSTRUCTION ceiling, and an auto-crewed one spends nothing", () => {
+  const settlement = makeSettlement("s0", 0, 2, 2, {
+    buildings: [
+      { gx: 0, gy: 0, kind: "house", level: 1, style: "classic", workers: 4, construction: { daysRemaining: 4 } },
+      { gx: 2, gy: 0, kind: "house", level: 1, style: "classic", construction: { daysRemaining: 4 } },
+      { gx: 4, gy: 0, kind: "house", level: 1, style: "classic" },
+    ],
+  });
+  assert.equal(assignedWorkersExplicit(settlement), 4, "a 4-builder site is charged 4 slots, not the kind's cap of 1");
+  // The auto crew is COUNTED at the ceiling while the building is a site -- a
+  // house site is 4 slots, not the 1 its finished cap gives -- and spends none
+  // of the pool (nothing explicit is assigned).
+  assert.equal(autoStaffedSlots(settlement), 5, "the auto SITE counts 4 and the finished auto house counts 1");
+  assert.equal(staffingCeiling(settlement.buildings[0]), 4, "and the ceiling is why");
 });
