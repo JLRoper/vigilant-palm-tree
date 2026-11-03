@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { BuildingDef, SettlementState } from "@heroes/contracts";
+import type { BuildingDef, GameState, SettlementState } from "@heroes/contracts";
 import {
   advanceBuildingConstructions,
   assignedWorkersExplicit,
   BUILD_RATE_PER_EXTRA_BUILDER,
   buildersOnSite,
   buildRate,
+  buildingBuildDays,
   buildingConstructionProgress,
   CONSTRUCTION_MAX_BUILDERS,
   constructionStageFor,
@@ -18,6 +19,7 @@ import {
   upgradeTotalDays,
 } from "@heroes/engine";
 import { makeSettlement, makeState } from "../charter/_helpers";
+import { BUILDABLE_KINDS } from "../../src/screens/settlements/cityView/buildListSections";
 
 test("upgradeRefs: building wraps its ref, buildings unwraps the array, others are empty", () => {
   const ref = { gx: 1, gy: 2, kind: "goldMine" as const };
@@ -322,3 +324,105 @@ test("a stalled site is listed, a staffed or finished one is not", () => {
   assert.equal(stalledConstructionSites(settlement), 2, "the explicit-0 site and the district one; never the auto crew");
 });
 
+
+// ── THE INVARIANT THE READER'S CURVE EXISTS FOR (2026-11-03) ────────────────
+//
+// The curve is scaled to reach TODAY'S 2.00x at four builders (a 1/3 step, not
+// the design document's 0.2 -- that section of the design is superseded), and
+// the point of the scaling is this one: the free auto crew is a FULL crew, and
+// today's engine already reaches 2.00x at a kind's own cap, so an untouched
+// building must go on building in exactly the time it always did.
+//
+// The old rule is re-derived HERE -- `1 + effortFraction(b)`, the decrement the
+// pre-2026-11-03 engine ran and the function the engine still uses for
+// production -- rather than read back from the new `buildRate`. A test that
+// compares the new rule against itself proves nothing; this one compares the
+// real `advanceBuildingConstructions` against an independent statement of the
+// old engine, tick by tick, for every kind a settlement can raise (the palette's
+// 43, spanning all six `buildDays` in the registry), and fails the moment one
+// tick of one kind moves.
+
+/** The untouched building: no `workers` field at all -- a legacy settlement's
+ * crew, or a bootstrap settlement's own placement. */
+function autoSite(kind: BuildingDef["kind"]): BuildingDef {
+  return { gx: 0, gy: 0, kind, level: 1, style: "classic", construction: { daysRemaining: buildingBuildDays(kind) } };
+}
+
+/** The PRE-change daily pass, exactly as the engine ran it before the crew
+ * rule: one decrement per day tick, the field cleared on completion. */
+function preCrewAdvance(state: GameState, decrement: (b: BuildingDef) => number): GameState {
+  const settlements: GameState["settlements"] = {};
+  for (const [id, s] of Object.entries(state.settlements)) {
+    const step = (b: BuildingDef): BuildingDef => {
+      if (!b.construction) return b;
+      const daysRemaining = b.construction.daysRemaining - decrement(b);
+      if (daysRemaining > 0) return { ...b, construction: { daysRemaining } };
+      const { construction: _completed, ...finished } = b;
+      return finished as BuildingDef;
+    };
+    const next: SettlementState = { ...s, buildings: s.buildings.map(step) };
+    if (s.districts) {
+      const districts: NonNullable<SettlementState["districts"]> = {};
+      for (const [key, d] of Object.entries(s.districts)) districts[key] = { ...d, buildings: d.buildings.map(step) };
+      next.districts = districts;
+    }
+    settlements[id] = next;
+  }
+  return { ...state, settlements };
+}
+
+/** The site's `daysRemaining` after each of `ticks` days, `null` once it is
+ * finished -- one array per engine, compared element by element. */
+function siteTrajectory(run: (state: GameState) => GameState, kind: BuildingDef["kind"], ticks: number): Array<number | null> {
+  let state = makeState({ settlements: [makeSettlement("s0", 0, 2, 2, { buildings: [autoSite(kind)] })] });
+  const out: Array<number | null> = [];
+  for (let i = 0; i < ticks; i++) {
+    state = run(state);
+    out.push(state.settlements.s0.buildings[0].construction?.daysRemaining ?? null);
+  }
+  return out;
+}
+
+test("an untouched building's build time changes for NO kind: the auto crew IS today's full crew", () => {
+  const TICKS = 12;
+  const preCrew = (b: BuildingDef): number => 1 + effortFraction(b);
+  assert.equal(BUILDABLE_KINDS.length, 43, "the palette's kind count -- a new kind is added to this domain deliberately");
+
+  const classes = new Set<number>();
+  for (const kind of BUILDABLE_KINDS) {
+    classes.add(buildingBuildDays(kind));
+    const site = autoSite(kind);
+    // (a) The crew the invariant is about, at the kind's own operational cap or
+    //     4 -- either way the top of the curve, which is today's rate.
+    assert.equal(buildersOnSite(site), CONSTRUCTION_MAX_BUILDERS, `${kind}: the auto crew is a FULL crew, never 1 and never 0`);
+    assert.equal(buildRate(buildersOnSite(site)), preCrew(site), `${kind}: four builders IS today's full-crew rate`);
+    // (b) And the same TIME: the real pass against the pre-change pass.
+    assert.deepEqual(
+      siteTrajectory(advanceBuildingConstructions, kind, TICKS),
+      siteTrajectory((s) => preCrewAdvance(s, preCrew), kind, TICKS),
+      `${kind} (${buildingBuildDays(kind)} days): an untouched site must build in exactly the time it always did`,
+    );
+  }
+  assert.deepEqual(
+    [...classes].sort((a, b) => a - b),
+    [0, 2, 3, 4, 5, 6],
+    "every buildDays class the registry can produce is covered by the loop above",
+  );
+
+  // NOT VACUOUS, and this is the half that gives the comparison its teeth: the
+  // design document's superseded 1.60x curve (a 0.2 step) does NOT reproduce
+  // those times, so a tree that went back to it fails the rows below.
+  const superseded = (b: BuildingDef): number => 1 + 0.2 * (buildersOnSite(b) - 1);
+  const movedClasses = new Set(
+    BUILDABLE_KINDS.filter(
+      (kind) =>
+        JSON.stringify(siteTrajectory((s) => preCrewAdvance(s, superseded), kind, TICKS)) !==
+        JSON.stringify(siteTrajectory((s) => preCrewAdvance(s, preCrew), kind, TICKS)),
+    ).map((kind) => buildingBuildDays(kind)),
+  );
+  assert.deepEqual(
+    [...movedClasses].sort((a, b) => a - b),
+    [2, 3, 4, 5, 6],
+    "a 1.60x curve moves every class but the 0-day one -- which is what makes this test able to fail",
+  );
+});
