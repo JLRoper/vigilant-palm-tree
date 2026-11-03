@@ -210,10 +210,9 @@ async function runBuildInfoChecks(page: Page) {
   console.log(">> settings panel no longer renders build info (gear dropdown owns it)");
 }
 
-// NOTE: as of 2026-08-23 this function is defined but never called from
-// run() below -- see #175 for why the New/Load/Save/tiles/movement/battle
-// flows here don't currently execute. Kept correct (not deleted) for
-// whenever run() is reconnected to it.
+// Run by run() at the end of the pass: the New/Load/Save/tiles/movement flows
+// against the toolbar's own surfaces. The New Game prompt inside it is the
+// app's in-page dialog, not a native confirm() -- see the flag it asserts.
 async function runNewLoadSaveFlow(
   page: Page,
   ctx: {
@@ -231,7 +230,17 @@ async function runNewLoadSaveFlow(
 ) {
   console.log(">> New/Load/Save flow");
 
-  page.on("dialog", (dialog) => dialog.accept());
+  // A native confirm() must never be needed here: it blocks the renderer
+  // thread outright (measured: Page.handleJavaScriptDialog returned {} while
+  // every Runtime.evaluate timed out, and the rAF counter stood still), so the
+  // toolbar's New Game prompt is the app's own in-page dialog. This handler
+  // stays as the safety net for any other path and the flag below fails the
+  // run if this one ever regresses.
+  let nativeDialogSeen = false;
+  page.on("dialog", (dialog) => {
+    nativeDialogSeen = true;
+    void dialog.accept();
+  });
 
   await ctx.delete(`${API_URL}/api/games/${TEST_NEW_NAME}`).catch(() => {});
 
@@ -239,7 +248,20 @@ async function runNewLoadSaveFlow(
   const newBtn = page.locator("#toolbar button", { hasText: "New" });
   await menuBtn.click();
   await newBtn.click();
+  // With a game live the New Game item asks first, and the asking is a click on
+  // the app's own dialog rather than an answer to the browser's. Scope it to
+  // the prompt's own layer: the landing page's (hidden) card also has a
+  // "New Game" button, and an unscoped locator resolves to that one.
+  const prompt = page.locator("div[style*='z-index: 120']");
+  const promptGo = prompt.locator("button", { hasText: /^New Game$/ });
+  if ((await promptGo.count()) === 0) {
+    throw new Error("New Game with a live game must prompt before opening the form");
+  }
+  await promptGo.first().click();
   await wait(100);
+  if (nativeDialogSeen) {
+    throw new Error("a native dialog() appeared: the prompt must be the app's own in-page dialog");
+  }
   const nameInput = page.locator("input[type=text]").first();
   await nameInput.fill(TEST_NEW_NAME);
   const seedInput = page.locator("input[type=number]").first();
@@ -540,10 +562,17 @@ async function run() {
     await page.evaluate(() => localStorage.clear());
     await page.reload({ waitUntil: "load" });
 
-    // Wait for client initialization, with stronger diagnostics on timeout
+    // Wait for client initialization, with stronger diagnostics on timeout.
+    //
+    // A reload with the profile CLEARED (`localStorage.clear()` above is exactly
+    // the lost-profile state) no longer starts a game on the player's behalf:
+    // that silent substitution is the load-path bug, and
+    // test/loadSilentSubstitute.e2e.ts pins its absence. So the game is opened
+    // the way a player opens it -- from Load Game -- and the list must still
+    // offer it even though this browser remembers nothing.
     try {
       await page.waitForFunction(
-        () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
+        () => !!(window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug,
         null,
         { timeout: 60_000 }
       );
@@ -571,6 +600,37 @@ async function run() {
       throw err;
     }
 
+    const bootCreates = await ctx.get(`${API_URL}/api/games`);
+    const gamesAtBoot = (await bootCreates.json()) as Array<{ name: string }>;
+    const starterOnServer = gamesAtBoot.find((g) => g.name.startsWith("starter-"));
+    if (!starterOnServer) {
+      throw new Error(`boot on an empty account must have created its starter game; server holds ${JSON.stringify(gamesAtBoot.map((g) => g.name))}`);
+    }
+
+    await page.locator("button", { hasText: /^Load Game$/ }).last().click();
+    const openButtons = page.locator("button:visible", { hasText: /^Open$/ });
+    await openButtons.first().waitFor({ timeout: 10_000 });
+    const openCount = await openButtons.count();
+    let openedStarter = false;
+    for (let i = 0; i < openCount; i++) {
+      const rowText = await openButtons
+        .nth(i)
+        .evaluate((b: HTMLElement) => b.closest("div")?.parentElement?.textContent ?? "");
+      if (rowText.includes(starterOnServer.name)) {
+        await openButtons.nth(i).click({ timeout: 10_000 });
+        openedStarter = true;
+        break;
+      }
+    }
+    if (!openedStarter) {
+      throw new Error(`home Load Game modal did not list the starter game the server holds (${starterOnServer.name}), ${openCount} row(s) offered`);
+    }
+    await page.waitForFunction(
+      () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
+      null,
+      { timeout: 30_000 }
+    );
+
     const spawnInfo = await page.evaluate(() => {
       const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
       const heroes = dbg?.getHeroes?.() ?? [];
@@ -590,24 +650,7 @@ async function run() {
     if (typeof bootName !== "string" || !bootName.startsWith("starter-")) {
       throw new Error(`Expected starter game, got activeGameName=${bootName}`);
     }
-    await page.locator("button", { hasText: /^Load Game$/ }).last().click();
-    const openButtons = page.locator("button:visible", { hasText: /^Open$/ });
-    await openButtons.first().waitFor({ timeout: 10_000 });
-    const openCount = await openButtons.count();
-    let openedStarter = false;
-    for (let i = 0; i < openCount; i++) {
-      const rowText = await openButtons
-        .nth(i)
-        .evaluate((b: HTMLElement) => b.closest("div")?.parentElement?.textContent ?? "");
-      if (rowText.includes(bootName)) {
-        await openButtons.nth(i).click({ timeout: 10_000 });
-        openedStarter = true;
-        break;
-      }
-    }
-    if (!openedStarter) {
-      throw new Error(`home Load Game modal did not list active starter game ${bootName}`);
-    }
+    console.log(`>> starter opened from Load Game (nothing was started for us): ${bootName}`);
     await page.waitForFunction(
       () => {
         const overlay = Array.from(document.querySelectorAll("div")).find(

@@ -1,5 +1,6 @@
 import { panelTheme, styleButton } from "@screens/shared/panel";
 import { openDialog } from "@screens/shared/dialog";
+import { openConfirmDialog } from "@screens/shared/confirmDialog";
 import {
   fetchAssetList,
   uploadAsset,
@@ -199,12 +200,10 @@ export function openAssetManager(): void {
     a.click();
   });
 
-  deleteBtn.addEventListener("click", async () => {
-    if (!selectedKey) return;
-    if (!confirm(`Delete "${selectedKey}"?`)) return;
+  async function performDelete(key: string): Promise<void> {
     statusEl.textContent = "Deleting...";
     try {
-      await deleteAsset(selectedKey);
+      await deleteAsset(key);
       if (selectedKey === selectedKey) {
         selectedKey = null;
         previewImg.src = "";
@@ -217,6 +216,22 @@ export function openAssetManager(): void {
       statusEl.textContent = "Delete failed";
       console.error(err);
     }
+  }
+
+  deleteBtn.addEventListener("click", () => {
+    if (!selectedKey) return;
+    const key = selectedKey;
+    openConfirmDialog({
+      title: "Delete asset",
+      message: `Delete "${key}"?`,
+      confirmLabel: "Delete",
+      destructive: true,
+      // The manager is itself a dialog (300); the prompt has to clear it.
+      zIndex: 320,
+      onConfirm: () => {
+        void performDelete(key);
+      },
+    });
   });
 
   refresh();

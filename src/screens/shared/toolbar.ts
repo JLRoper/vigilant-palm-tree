@@ -3,6 +3,7 @@ import type { SaveStatus } from "../../managers/SessionManager";
 import { openSettingsMenu, type MapInfo } from "@screens/home/settingsMenu";
 import { openView } from "@screens/shared/viewLauncher";
 import { openNewGameModal, type NewGameHandler } from "./newGameModal";
+import { openConfirmDialog } from "@screens/shared/confirmDialog";
 import { openLoadGameModal, type LoadGameHandler } from "./loadGameModal";
 import { openHotkeysModal, attachHotkeysShortcut } from "./hotkeysModal";
 import { makeStatPill } from "./statPill";
@@ -442,10 +443,18 @@ export class Toolbar {
     this.newBtn.addEventListener("click", () => {
       closeDropdown();
       if (this.busy) return;
-      if (this.opts.state.hasActiveGame()) {
-        if (!confirm("Start a new game? Current game will be lost.")) return;
+      const openForm = (): void => openNewGameModal({ onNew: this.opts.callbacks.onNew });
+      if (!this.opts.state.hasActiveGame()) {
+        openForm();
+        return;
       }
-      openNewGameModal({ onNew: this.opts.callbacks.onNew });
+      openConfirmDialog({
+        title: "Start a new game?",
+        message: "Current game will be lost.",
+        confirmLabel: "New Game",
+        destructive: true,
+        onConfirm: openForm,
+      });
     });
 
     const testBattleItem = makeMenuItem("⚔ Test Battle");

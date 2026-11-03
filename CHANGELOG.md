@@ -10,6 +10,22 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.10] - 2026-11-03
+
+the four skybox-only settings rows now state the backdrop they need
+
+## [0.39.9] - 2026-11-03
+
+load never substitutes a starter game for a failed or empty load
+
+## [0.39.8] - 2026-11-03
+
+A fresh database's first boot tags mage, warhound, giant eagle and eagle prince as human instead of leaving them neutral: migration 006 backfilled rows that 015/020 had not inserted yet, so the recruit gate refused them until a second boot. test:unit against a brand-new PGDATABASE is green on the first run.
+
+## [0.39.7] - 2026-11-03
+
+The native confirm() freezes the renderer: the toolbar's gear -> + New Game, the landing page's delete-game row and the Asset Manager's delete-asset now route through the app's own in-page dialog (`openConfirmDialog`). Measured in a real browser with the tab foregrounded, a native confirm() blocked the renderer thread outright -- `Page.handleJavaScriptDialog` returned {} while every `Runtime.evaluate` timed out after 5s, the rAF counter advanced 0 ticks across a 2s window that otherwise carried 274, and the click that opened it never even acked -- and the tab answered again in 0.0s the moment the box was dismissed. The same click now returns in 0.01s with the dialog on screen, 177 rAF ticks across the same window and zero native confirms. The prompt raised from the landing page or the Asset Manager is mounted above the surface that raised it (z-index 320 over the Load dialog's 300 and the home overlay's 200), so it is clickable rather than merely visible. Three tests, one per site: cancelling deletes nothing, starts nothing and loses no cache entry; confirming acts on exactly the named game/asset.
+
 ## [0.39.6] - 2026-11-03
 
 F1 (the client's `players[].revealedTiles` mirror went stale and a renderer trick hid it): after a move the server's persisted reveal grew while the client's own copy of it stayed at its load-time value for the whole session -- measured 98 keys against the server's 134, 36 of them present only on the server, never reconciled -- and nothing showed, because `GameEngine.draw` handed that copy to `src/render/reveal.ts`, which re-unioned the live vision ring every frame: the render compensated for the projection instead of the projection being right. The verdict, read off the writers and the consumers: the server's persisted projection is authoritative, the client's copy is a projection of it that only hydration ever wrote, and it now has two consumers -- the renderer's seed and, since F2 above, the tile panel's `revealedSetForTilePanel` -- so the mirror is RECONCILED rather than deleted, by applying the SAME rule instead of a second one. `revealForPlayer` (`packages/engine/src/reveal.ts`) unions a seat's vision rings -- plus the walked corridor -- into its reveal, gated on the seat maintaining one, and now lives in the engine: `server/app/commandHandler.ts` imports it (its local copy and `isHuman` helper are gone, behaviour unchanged) and the client applies it on the same four commands the server does (`TurnController.revealReconciled` -- moves, chartered travel, captures, foundings), so the copy follows the server instead of waiting for a reload or a resync a solo game never performs. `src/render/reveal.ts` then draws the persisted list **as of each frame**, unioned with the tiles this session's own vision has seen, so no load-time snapshot and no monotone accumulator is left standing between the projection and the pixels. Proof at the level the defect lives: `test/state/revealMirrorReconcile.test.ts` reads the client's own `players[].revealedTiles` after a move (RED on the previous revision -- "measured: 61 keys before, 61 after; destination 12,2 MISSING"), and `test/unchartedMode.e2e.ts` reads the same value in the browser BEFORE the reload that would rehydrate it (RED without the client half -- "the client's own revealedTiles is behind the server: destination 5,17 missing in-session"; green -- in-session client mirror holds 227 keys vs the server's 227).
