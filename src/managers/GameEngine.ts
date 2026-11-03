@@ -6,7 +6,7 @@ import { MAP_SEED } from "@screens/adventure/adventureView";
 import { colorForOwner } from "../state/playerColors";
 import { emptyGameState } from "../game/initState";
 import { buildTurnHooks } from "../game/turnHooks";
-import { cityViewSizeFor, districtConnectionReason, districtKey, generateDistrictSpots, isForbiddenDistrictTerrain, resolveControllingSettlement, sampleCityBackdrop, touchesTerrain, validCharterHexes } from "@heroes/engine";
+import { cityViewSizeFor, districtConnectionReason, districtEntryDecision, districtKey, generateDistrictSpots, isForbiddenDistrictTerrain, sampleCityBackdrop, touchesTerrain, validCharterHexes } from "@heroes/engine";
 
 import { SessionManager } from "./SessionManager";
 import { GameStateManager, type PathPreviewLock } from "./GameStateManager";
@@ -25,7 +25,7 @@ import { createFrameErrorLog } from "../core/frameErrors";
 import { shouldDriveAi } from "../io/serverDrivenGames";
 import { isUnchartedGame } from "../io/unchartedGames";
 import { isSettlersGame } from "../io/gameModes";
-import { foundSettlementRefusalToast } from "@screens/adventure/clickIntent";
+import { foundSettlementRefusalToast, districtEntryRefusalToast } from "@screens/adventure/clickIntent";
 import { isCoveredWagonId, type HeroId } from "@heroes/contracts";
 import { attachCommandFailureToasts, showToast } from "@screens/shared/toast";
 import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
@@ -661,16 +661,21 @@ export class GameEngine {
     }
 
     const terrain = cityMap.get(t.q, t.r);
-    if (!terrain || terrain === "mountain") return;
-    const controlling = resolveControllingSettlement(
-      this.state.getSettlements(),
-      t.q,
-      t.r,
-      cityMap.width,
-      cityMap.height,
-    );
-    if (!controlling || controlling.ownerId !== localId) return;
-    await this.enterDistrictCityView(controlling.id, t.q, t.r);
+    if (!terrain) return;
+    // A hex that cannot host a district refuses in WORDS, on the map's own
+    // refusal toast -- the city grid's palette notice cannot carry it, because
+    // a refused hex never opens a grid for the notice to live in. The classes
+    // (out of control range, another seat's land, not touching the cluster,
+    // impassable ground) and their sentences come from the engine rule plus its
+    // one toast table, so the two cannot drift into different stories.
+    const decision = districtEntryDecision(this.state.getSettlements(), localId, cityMap, t.q, t.r);
+    if (!decision) return;
+    if (!decision.ok) {
+      const toast = districtEntryRefusalToast(decision.reason);
+      showToast(toast.message, toast.kind);
+      return;
+    }
+    await this.enterDistrictCityView(decision.settlementId, t.q, t.r);
   }
 
   /**
