@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { connect, createServer } from "node:net";
 import { mkdirSync, writeFileSync, existsSync, readFileSync, unlinkSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { nodeToolCommand, toolEntry } from "./resolve-tool-entry.mjs";
 
@@ -12,6 +13,19 @@ const REQUEST_PATH = resolve(LOCAL_DIR, ".test-request.json");
 // visible console window when it does not inherit one, and that window takes
 // the foreground with it.
 const TSX = nodeToolCommand("tsx");
+
+// The request file is written FOR ONE CHILD and read by that child at import
+// time. It used to be identified by mtime alone (test/_request.ts's 30s
+// window), which meant a DIRECT-run suite (`npm run test:cityview`,
+// test:settlements, test:resourcePickup) started within 30s of a wrapper entry
+// inherited the DEAD run's ports: measured 2026-11-03, `npm run test:settlements`
+// brought its API up on the previous run's 65020 while vite proxied .env's
+// 56776, so every page fetch died with ECONNREFUSED and the suite looked red
+// for an environmental reason. The token below is handed to this run's child
+// through the environment, so a file that was not written for THIS process is
+// ignored no matter how fresh it is.
+const REQUEST_TOKEN_ENV = "HEROES_TEST_REQUEST_TOKEN";
+const REQUEST_TOKEN = randomBytes(12).toString("hex");
 
 const ENTRIES = {
   smoke: "test/smoke.ts",
@@ -86,6 +100,7 @@ function writeRequest(entry, ports, opts) {
     autoClose: !!opts.autoClose,
     shutdownAfterMs: opts.shutdownAfterMs ?? null,
     extra: opts.extra ?? {},
+    token: REQUEST_TOKEN,
   };
   writeFileSync(REQUEST_PATH, JSON.stringify(payload, null, 2));
   return payload;
@@ -102,6 +117,22 @@ function readRequest() {
 
 function clearRequest() {
   try { if (existsSync(REQUEST_PATH)) unlinkSync(REQUEST_PATH); } catch {}
+}
+
+// The request file must not outlive the run that wrote it. Every exit path is
+// covered: `exit` fires for a normal return, an unhandled throw and an explicit
+// process.exit (which is why the exit code below is applied with
+// process.exitCode + an explicit exit AFTER the try/finally, and never with
+// process.exit inside it -- process.exit inside the try used to skip the
+// finally, and the file was left behind with the dead run's ports on it).
+function installRequestCleanup() {
+  process.on("exit", clearRequest);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.on(signal, () => {
+      clearRequest();
+      process.exit(130);
+    });
+  }
 }
 
 // A chained `all` run reuses the same api/client ports for every entry
@@ -160,12 +191,16 @@ async function runOne(entry, opts) {
     // environment (loadEnv gives process.env precedence over .env), so the
     // dev-server proxy must target THIS entry's ephemeral API port, not the
     // .env value some other environment may hold.
+    // REQUEST_TOKEN_ENV is what makes the request file above belong to THIS
+    // child: test/_request.ts honours the file only when it carries the token
+    // this process was handed, so a leftover from a dead run is ignored.
     const child = spawn(TSX.cmd, [...TSX.args, tsFile], {
       cwd: ROOT,
       stdio: "inherit",
       env: {
         ...process.env,
         ...req,
+        [REQUEST_TOKEN_ENV]: REQUEST_TOKEN,
         API_PORT: String(req.apiPort),
         CLIENT_PORT: String(req.clientPort),
         NODE_NO_WARNINGS: "1",
@@ -193,7 +228,7 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.length === 0) {
     console.error("usage: node tools/run-test.mjs <smoke|multiplayer|cityview|settlements|districts|logpanel|logisticsCaravan|uncharted|heroVariants|heroTrade|settlers|towncenter|visual|aiCharter|all> [--auto-close] [--shutdown-after-ms=N] [--update-baselines]");
-    process.exit(2);
+    return 2;
   }
 
   const cmd = args[0];
@@ -208,6 +243,10 @@ async function main() {
     },
   };
 
+  installRequestCleanup();
+  // Start clean: whatever wrote the file before this process is not this run's.
+  clearRequest();
+
   // Best-effort: allocate ports via the existing script so .env is fresh.
   try {
     spawnSync(process.execPath, [toolEntry("tsx"), "scripts/allocate-ports.ts"], {
@@ -217,6 +256,7 @@ async function main() {
     });
   } catch {}
 
+  let code = 0;
   try {
     if (cmd === "all") {
       for (const e of ALL_ORDER) {
@@ -226,14 +266,26 @@ async function main() {
     } else {
       await runOne(cmd, opts);
     }
-    console.log(">> run-test OK");
-    process.exit(0);
   } catch (e) {
     console.error(">> run-test FAILED:", e?.message ?? e);
-    process.exit(1);
+    code = 1;
   } finally {
     clearRequest();
   }
+
+  console.log(code === 0 ? ">> run-test OK" : ">> run-test FAILED");
+  return code;
 }
 
-main();
+main().then(
+  (code) => {
+    // Deliberately outside the try/finally above: process.exit() inside it
+    // would skip the finally and leave the request file behind.
+    process.exit(code);
+  },
+  (err) => {
+    console.error(">> run-test FAILED:", err?.message ?? err);
+    clearRequest();
+    process.exit(1);
+  },
+);

@@ -11,22 +11,31 @@ const PID_REGISTRY_PATH = resolve(ROOT, "test", ".last-test-pids.json");
 const IS_WINDOWS = process.platform === "win32";
 
 /**
- * A request file is only trustworthy if the current process could be the one
- * a wrapper just spawned: tools/run-test.mjs writes it BEFORE spawning the
- * entry, so a wrapper-written file is always newer than the entry that reads
- * it. A file older than this process start is leftover from a DEAD run -- a
- * crashed or killed wrapper never unlinks it in its `finally`. Direct-run
- * suites (test:cityview, test:settlements, test:aiDefender, dragDrop,
- * proposedPath) then honour an orphan's ports over the fresh .env their npm
- * script just allocated, and every spawned server binds/points at the wrong
- * port (observed 2026-10-10: a 12:19 "settlements" orphan pinned cityview to
- * API=51231/WEB=51232 while .env said 54232/54233, so the browser probed a
- * port nothing listened on). The grace window absorbs clock skew and slow
- * process startup between the wrapper's write and our read, and must exceed
- * tools/run-test.mjs's own pre-spawn wait (waitForPortReleased, up to 20s) so
- * a wrapper-driven entry never mistakes its own fresh request for an orphan.
+ * A request file belongs to ONE spawned child, and the only honest way to know
+ * a file is ours is that the wrapper that wrote it handed us its token:
+ * tools/run-test.mjs writes local/.test-request.json BEFORE spawning the entry
+ * and passes the same token through HEROES_TEST_REQUEST_TOKEN, so a file that
+ * does not carry this process's token was written for somebody else and is
+ * ignored -- no matter how fresh it is. The old rule was mtime alone
+ * (a 30-second window), which is exactly what made a DIRECT-run suite
+ * (`npm run test:cityview`, test:settlements, test:resourcePickup) inherit a
+ * DEAD wrapper run's ports: measured 2026-11-03, a wrapper entry that exited
+ * after 15s left its file behind, a direct run started 13.7s later reported
+ * `loadRequest -> HONOURED` and resolved api=57305/client=57306 while the
+ * environment said 56776/56777, and `npm run test:settlements` then brought its
+ * API up on 65020 while vite proxied .env's 56776 -- every page fetch died with
+ * ECONNREFUSED and the suite read red for an environmental reason.
+ *
+ * A wrapper-driven entry ALWAYS has the token (it is set on the child's own
+ * env), so nothing legitimate is lost. The mtime window stays as a backstop
+ * against clock skew and slow startup, and must exceed tools/run-test.mjs's own
+ * pre-spawn wait (waitForPortsReleased, up to 20s) so a wrapper-driven entry
+ * never mistakes its own fresh request for an orphan.
  */
 const REQUEST_MAX_AGE_MS = 30_000;
+
+/** Set by tools/run-test.mjs on the child it wrote the request file for. */
+export const REQUEST_TOKEN_ENV = "HEROES_TEST_REQUEST_TOKEN";
 
 export interface TestRequest {
   runId: string;
@@ -36,12 +45,21 @@ export interface TestRequest {
   autoClose: boolean;
   shutdownAfterMs: number | null;
   extra?: Record<string, unknown>;
+  /** The writing wrapper's token; see loadRequest's own note. */
+  token?: string;
+}
+
+/** True only when `req` is the request THIS process was written for. */
+export function requestIsOurs(req: TestRequest | null, env: Record<string, string | undefined> = process.env): boolean {
+  const mine = env[REQUEST_TOKEN_ENV];
+  return typeof mine === "string" && mine.length > 0 && req?.token === mine;
 }
 
 export function loadRequest(): TestRequest | null {
   if (!existsSync(REQUEST_PATH)) return null;
   try {
     const req = JSON.parse(readFileSync(REQUEST_PATH, "utf8")) as TestRequest;
+    if (!requestIsOurs(req)) return null;
     if (Date.now() - statSync(REQUEST_PATH).mtimeMs > REQUEST_MAX_AGE_MS) return null;
     return req;
   } catch {
