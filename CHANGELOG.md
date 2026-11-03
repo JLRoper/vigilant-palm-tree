@@ -10,7 +10,7 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.39.1] - 2026-11-03
+## [0.39.2] - 2026-11-03
 
 F3 (the camera could lose the map): there was no pan clamp, so repeated drags walked it arbitrarily far off the map and the renderer -- which clamps the tiles it asks about to the map's bounds -- painted nothing. Measured on a 40x30 map at zoom 1 in a 1280x800 viewport: forty `pan(-400,-400)` drags took `mapTilesOnScreen` from 369 to 0 with the camera parked at (-16000,-16000), a black viewport whose only exit was a minimap click. `Camera.clampToMap` now keeps the map's world-pixel extent (measured from the four corner hexes) overlapping the viewport, compared against `viewport/zoom` so it holds at every zoom level, and centres a map that fits entirely. Every surface that moves the camera routes through `AdventureView.clampCamera`: the drag pan, the minimap frame drag, the wheel zoom, `centerOn` (minimap click, load centring, resize, focus-hero/settlement) and the zoom-out setting callback.
 
@@ -19,6 +19,16 @@ F2 (the tile panel lied about what you can see): outside every vision ring the p
 F4 (cosmetic, same family): the minimap painted every explored-but-unwatched hex as flat slate, so uncovered ground lost its biome the moment the hero walked away. `minimapCellKind` / `minimapCellFill` give the cell its tier -- visible and explored share the terrain colour (explored under a veil), uncharted stays opaque black, classic fog stays the slate.
 
 `patch`: three presentation/view-layer fixes, no schema or wire-contract change. New tests `test/render/camera.test.ts`, the F2 cases in `test/screens/adventure/tileInfoPanel.test.ts`, the F4 cases in `test/render/minimap.test.ts`; docs/map.md updated.
+
+## [0.39.1] - 2026-11-03
+
+settings panel: slider labels and the new-game default mode
+
+- **fix(settings): seven sliders showed a player a bare number.** Each of these rows already built its label row and its value (`Hero movement speed`, `220ms · Normal`) and then appended only the slider and its hint, so the Game, Population and Visual sections rendered anonymous sliders with no name and no value anywhere in the document (playthrough round 4, F1). The label row is now appended with its slider, the value follows the drag, and every control carries a `data-setting="<key>"` hook so the panel's contents are enumerable from a test.
+- **fix(settings): the stored new-game default mode had no writer in any UI.** `heroesJs.settings.gameMode` was persisted, migrated and read by both New Game surfaces, but only `__gameDebug.settings.update` could set it, so no player could make Settlers the default for a new game (F2). Settings has a **New game** section whose select writes that key, lists the store's own options, and says when it applies (the New Game form starts on it; it never changes an existing game's mode).
+- **fix(settings): `Reset to default` reset 16 of the 18 persisted keys**, so `gameMode` and `buildingUpgradeConfirm` stayed at the player's value while the button claimed the defaults had been restored. It now resets the whole store from the one exported `DEFAULT_SETTINGS` object.
+- **test(settings): the panel's contents are pinned.** Every persisted key must have a control in the panel that writes it, every slider row must name itself and show its current value, Reset must land every key on its default, and the store's reload round-trip covers all 18 keys.
+- docs: the player guide no longer says the New Game form opens on "the mode you last created a game with" — it opens on the stored preference, which is now settable at Settings → New game.
 
 ## [0.39.0] - 2026-11-03
 
