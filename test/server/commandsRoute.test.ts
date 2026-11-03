@@ -1002,3 +1002,52 @@ test("D10: a human actor on a server-driven game is accepted", async () => {
     await cleanupGame(name);
   }
 });
+
+// F2 at the HTTP boundary: the handler's refusal must reach a real POST as a
+// clear error rather than a 200 that silently changed the world. Driven through
+// the same Express + Postgres harness as the verdicts pin above, on the exact
+// shape a Save -> reload -> Load -> Open leaves behind: a server-driven game
+// whose battle is already settled, so lobby.pendingBattle is absent.
+test("a defender-seat ResolveBattle over HTTP for a battle the lobby no longer marks pending is refused", async () => {
+  const name = uniqueName();
+  const { heroId, settlementId } = ids(name);
+  const attackerId: HeroId = `${name}-h1`;
+  // The human (seat 0) owns the DEFENDER; the AI seat owns the attacker that is
+  // still standing next to them -- the collision the settled battle left behind.
+  const token = await seedGame(name, makeSettlement(settlementId, 0, 2, 2), {
+    players: [
+      makePlayer(0, "player", [heroId], [settlementId]),
+      makePlayer(1, "ai", [attackerId], []),
+    ],
+    heroes: {
+      [heroId]: makeHero(heroId, 0, 2, 2, {
+        stacks: [{ entries: [{ unitTypeId: "swordsman", count: 1 }] }],
+      }),
+      [attackerId]: makeHero(attackerId, 1, 2, 3, {
+        stacks: [{ entries: [{ unitTypeId: "swordsman", count: 10 }] }],
+      }),
+    },
+  });
+  try {
+    // A server-driven game (aiDriver owns the AI seats) with no marker: the
+    // human is back on their own turn and the battle is already adjudicated.
+    await pool.query(`UPDATE games SET lobby = '{"aiDriver":"server"}'::jsonb WHERE name = $1`, [name]);
+    const before = await pool.query(`SELECT heroes FROM games WHERE name = $1`, [name]);
+
+    const res = await postCommand(name, {
+      kind: "ResolveBattle",
+      actor: 0,
+      attackerId,
+      defenderId: heroId,
+    }, token);
+
+    assert.equal(res.status, 409, await res.clone().text());
+    assert.deepEqual(await res.json(), { error: "battle_not_pending" });
+
+    const after = await pool.query(`SELECT heroes FROM games WHERE name = $1`, [name]);
+    assert.deepEqual(after.rows[0].heroes, before.rows[0].heroes, "the refusal left the world byte-identical");
+    assert.ok(after.rows[0].heroes[heroId], "the refused resolve did not delete the defender");
+  } finally {
+    await cleanupGame(name);
+  }
+});
