@@ -592,7 +592,12 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       name.style.cssText = "font-weight:600;min-width:0;overflow-wrap:anywhere;";
       heading.appendChild(name);
       row.appendChild(heading);
-      const production = settlementProductionRates(s, state.castleSeed, state.heroes);
+      const production = settlementProductionRates(
+        s,
+        state.castleSeed,
+        state.heroes,
+        s.ownerId === null ? undefined : state.players?.[s.ownerId],
+      );
       const stock = document.createElement("div");
       stock.className = "logistics-stockpile";
       stock.style.cssText =
