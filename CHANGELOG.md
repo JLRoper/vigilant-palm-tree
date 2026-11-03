@@ -10,6 +10,14 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.38.8] - 2026-11-03
+
+The Load Game surfaces: three fixes, from playthrough round 2b.
+
+- **fix(home): the landing Load list reads the round, not the frozen `games.turn`.** The `games.turn` column is written once at creation (its DEFAULT 1 is the only writer) and never advances, so the landing page's Load list called a round-4 save "turn 1" while the in-game Load modal showed the real round. Both surfaces now render one shared progress line, and the column's legacy role is documented at both type sites.
+- **fix(load-modal): the in-game Load modal closes after a successful Open.** Its teardown swept a `z-index: 100` layer no dialog sits on (`openDialog` mounts its wrapper at 300), so a successful load left the modal over the game with its row stuck on "Loading…", its fullscreen backdrop eating every later click, and the panel still registered with the panel manager. The row now closes the dialog it was opened with.
+- **fix(load): loading an unfounded settlers game centres the camera on the seat's own unit.** The load path keyed off the literal hero id `p0-hero` with the classic castle-less spawn hex (6,5) as its fallback, so a settlers game with nothing founded opened fully fogged with the player's wagon off screen. The camera now resolves the local seat's wagon / commander / settlement, and the genuine nothing-to-centre-on case falls back to the map centre — documented, not a classic-game constant.
+
 ## [0.38.7] - 2026-11-03
 
 District-road round-2 feedback and fidelity: each refused district entry now states its reason, a shipyard harbour gets its pier, and the workforce width reading is measured and decided (not faked).
