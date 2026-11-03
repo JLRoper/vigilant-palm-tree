@@ -130,7 +130,58 @@ async function run() {
     });
     assert.equal(badMove.status(), 403, "non-active-player move should be 403");
 
-    // 8. Network Map telemetry round-trip (issue #51). The registry is
+    // 8. The seat chip row's promise (the LAN lobby's "Number of seats"
+    //    chips). A lobby created with an EXPLICIT seat count larger than its
+    //    human count keeps those seats: the ones no human fills are AI
+    //    combatant seats -- a real player each, not an empty lobby seat -- and
+    //    the lobby starts on its human claims alone. Before the fix the create
+    //    path sent no seat count at all, so `lobby.seats` fell back to the
+    //    human count (a 4-seat pick with 2 human players read 2 seats), and
+    //    this start returned 409 seats_unclaimed with missing [2, 3].
+    const seatGameName = `mp-smoke-seats-${Date.now().toString(36)}`;
+    await ctx.delete(`${API_URL}/api/games/${seatGameName}`).catch(() => {});
+    const seatCreateRes = await ctx.post(`${API_URL}/api/games`, {
+      data: {
+        name: seatGameName,
+        seed: 777,
+        hero_q: 4,
+        hero_r: 4,
+        enemy_positions: [],
+        mapSize: "small",
+        humanSlots: 2,
+        enemySlots: 2,
+        lobby: { seats: 4 },
+      },
+    });
+    assert.equal(seatCreateRes.status(), 201, "the 4-seat create should return 201");
+    const seatLobby = (await seatCreateRes.json()) as {
+      players: Array<{ faction: string }>;
+      lobby: { seats: number; humanSlots: number; claimed: Record<string, unknown> };
+    };
+    assert.equal(seatLobby.lobby.seats, 4, "the chosen seat count is the lobby's seat count");
+    assert.equal(seatLobby.lobby.humanSlots, 2, "the human count is the one the host picked, untouched by the AI seats");
+    assert.deepEqual(
+      seatLobby.players.map((p) => p.faction),
+      ["player", "player", "ai", "ai"],
+      "the seats no human fills are AI combatant seats, not empty lobby seats",
+    );
+    for (const seat of [0, 1]) {
+      const claim = await ctx.post(`${API_URL}/api/games/${seatGameName}/lobby/claim`, {
+        data: { seat, handle: `Human ${seat}` },
+      });
+      assert.equal(claim.status(), 200, `seat ${seat} should claim`);
+    }
+    const seatStart = await ctx.post(`${API_URL}/api/games/${seatGameName}/lobby/start`, {
+      data: {},
+    });
+    assert.equal(
+      seatStart.status(),
+      200,
+      `AI combatant seats hold nobody's place, so the lobby's human claims start it: ${await seatStart.text()}`,
+    );
+    await ctx.delete(`${API_URL}/api/games/${seatGameName}`).catch(() => {});
+
+    // 9. Network Map telemetry round-trip (issue #51). The registry is
     //    in-memory and per-process, so this exercises the real server the
     //    test just spawned: an empty game reports only the dedicated-server
     //    node, a reported sample shows up as a client node with a link

@@ -412,7 +412,13 @@ router.post("/games/:name/lobby/start", async (req, res) => {
       const claimed = row.lobby?.claimed ?? {};
       const missing: number[] = [];
       for (let i = 0; i < seats; i++) {
-        if (!claimed[String(i)]) missing.push(i);
+        // An AI combatant seat holds nobody's place: it is a real player in the
+        // game but not a lobby seat (docs/multiplayer.md), so a lobby whose
+        // explicit seat count exceeds its human count -- the LAN host's 4 seats
+        // with 2 human players -- starts on its human claims alone. A seat with
+        // a human player (or, on a hand-written row, no player at all) still
+        // has to be claimed.
+        if (!claimed[String(i)] && row.players[i]?.faction !== "ai") missing.push(i);
       }
       if (missing.length > 0) {
         return { status: 409 as const, error: "seats_unclaimed", missing };
