@@ -36,16 +36,23 @@ import {
 // 20 tracks 1.50px on a 55.4px hex (HEX_SIZE 32 x sqrt 3) -- a 0.90px delta,
 // 1.6% of the pitch, under one screen pixel at every gameplay zoom. The count
 // is NOT a fake reading: it follows the district's actual staffing (15% -> 3
-// tracks -> 0.70px, 100% -> 20 -> 1.50px). What pins the common case flat is
+// tracks -> 0.70px, 100% -> 20 -> 1.50px). What pinned the common case flat was
 // the staffing convention upstream -- a new building in a never-staffed
-// settlement is placed with `workers: undefined` (placeBuildings' hasExplicit
-// Staffing ? 0 : undefined) and `undefined` is the legacy auto-staffed (max)
-// crew this module reads as `max`, exactly as effortFraction does -- so every
-// district of an untouched game IS fully staffed and the honest reading is a
-// wide band on all of them. Decided (not faked): the width mapping stays the
-// carrier rather than inventing variation the data does not carry; the legible
-// carrier and the auto-100% legacy default are an open round-3 finding -- the
-// measurement is in docs/settlements.md "Map visualisation".
+// settlement was placed with `workers: undefined` (placeBuildings'
+// hasExplicitStaffing ? 0 : undefined) and `undefined` is the legacy
+// auto-staffed (max) crew this module reads as `max`, exactly as effortFraction
+// does -- so every district of an untouched game WAS fully staffed. Decided (not
+// faked): the width mapping stays the carrier rather than inventing variation
+// the data does not carry.
+//
+// RESOLVED 2026-11-03 (the workforce rebalance): the auto crew is now a
+// BOOTSTRAP only -- a new placement into a settlement that has any district (or
+// any explicit count) starts at `workers: 0`, and WORKFORCE_PER_POPULATION
+// moved 100 -> 300 so the pool binds in a built-out city -- so the band is a
+// live reading for any district the player grows and reads flat 100% only on a
+// seeded district of a game nobody has staffed (the auto crew doing its job on
+// the town the game handed the player). See docs/settlements.md "Map
+// visualisation" for the measurement and the resolution.
 //
 // Roads follow real terrain (A* over the same passability the game uses), so a
 // route bends off mountains, dense forest and water. A WATER district -- a
