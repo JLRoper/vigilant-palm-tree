@@ -43,6 +43,11 @@ import {
  *                       is deliberately NOT the classic spawn constant: that
  *                       constant is a claim about a classic game's castle
  *                       placement, which a mode without castles does not make.
+ *
+ * A `null` seat skips the ladder and centres the map: the seat could not be
+ * resolved (src/players/localSeat.ts), so there is nothing of "ours" to centre
+ * on, and centring another seat's wagon is exactly the mistake the load path
+ * made -- one browser's camera sitting on seat 0 because seat 0 was claimed.
  */
 export type LoadCameraSource = "wagon" | "seat-hero" | "settlement" | "map-centre";
 
@@ -80,11 +85,18 @@ function firstOwnedSettlement(
   return undefined;
 }
 
+function mapCentre(map: LoadCameraMapSize): LoadCameraCenter {
+  return { q: (map.width - 1) / 2, r: (map.height - 1) / 2, source: "map-centre" };
+}
+
 export function resolveLoadCameraCenter(
   state: Pick<GameState, "heroes" | "settlements">,
-  seat: number,
+  seat: number | null,
   map: LoadCameraMapSize,
 ): LoadCameraCenter {
+  // No seat resolved: centre the map rather than another seat's wagon.
+  if (seat === null) return mapCentre(map);
+
   if (Number.isInteger(seat) && seat >= 0) {
     const wagon = state.heroes[coveredWagonIdFor(seat)];
     if (wagon) return { q: wagon.q, r: wagon.r, source: "wagon" };
@@ -101,5 +113,5 @@ export function resolveLoadCameraCenter(
 
   // Nothing of this seat's is on the board: centre the map (the same formula
   // AdventureView.centerOnMap uses) rather than a mode-specific spawn guess.
-  return { q: (map.width - 1) / 2, r: (map.height - 1) / 2, source: "map-centre" };
+  return mapCentre(map);
 }
