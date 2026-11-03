@@ -19,7 +19,7 @@ import { warehouseCapMessage, warehouseResourceCapped } from "./warehouseCap";
 import { dailyRateTitle, foodBalanceTitle, formatDailyRate, populationCapTitle, resourceLabel, settlementDailyRates } from "./panelRates";
 import type { HorseVariant } from "../../state/settings";
 import { WAREHOUSE_RESOURCES, type WarehouseResource } from "@heroes/contracts";
-import { districtPopulationBonus, POP_BY_LEVEL, settlementPopulationCap, UPGRADE_POPULATION_GATE, effectiveSettlementIncome, settlementTreasuryCap, workforcePool, assignedWorkersExplicit, hasLegacyStaffing } from "@heroes/engine";
+import { districtPopulationBonus, POP_BY_LEVEL, settlementPopulationCap, UPGRADE_POPULATION_GATE, effectiveSettlementIncome, settlementTreasuryCap, workforcePool, assignedWorkersExplicit, hasLegacyStaffing, autoStaffedCount, autoStaffedSlots } from "@heroes/engine";
 import { pickHeroName } from "../../data/heroNames";
 import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
 
@@ -547,7 +547,7 @@ export class SettlementInfoMenu {
     const pool = workforcePool(settlement);
     const assigned = assignedWorkersExplicit(settlement);
     this.workforceEl.textContent = hasLegacyStaffing(settlement)
-      ? `auto · pool ${pool}`
+      ? `auto crew · ${autoStaffedCount(settlement)} bldgs (${autoStaffedSlots(settlement)} slots), pool ${pool}`
       : `${assigned}/${pool} assigned · ${Math.max(0, pool - assigned)} idle${assigned > pool ? " · over pool" : ""}`;
     this.incomeEl.textContent = `${effectiveSettlementIncome(settlement, state.heroes).toLocaleString()}g`;
     this.updateTreasuryRow(settlement, state);
