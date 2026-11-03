@@ -161,7 +161,7 @@ function buildHeroPanelDom(
     marginTop: "6px",
   });
   const withdrawBtn = document.createElement("button");
-  withdrawBtn.textContent = "Withdraw all";
+  withdrawBtn.textContent = "Withdraw gold";
   withdrawBtn.style.flex = "1";
   withdrawBtn.style.padding = "5px 6px";
   withdrawBtn.style.fontSize = "11px";
@@ -169,7 +169,7 @@ function buildHeroPanelDom(
   withdrawBtn.addEventListener("click", () => onTransferClick("withdraw"));
   transferRow.appendChild(withdrawBtn);
   const depositBtn = document.createElement("button");
-  depositBtn.textContent = "Deposit all";
+  depositBtn.textContent = "Deposit gold";
   depositBtn.style.flex = "1";
   depositBtn.style.padding = "5px 6px";
   depositBtn.style.fontSize = "11px";

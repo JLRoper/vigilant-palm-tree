@@ -10,6 +10,17 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.0] - 2026-11-03
+
+Cargo a hero picks up on the map can now be delivered: the settlement panel's Warehouse
+section carries a hero-cargo row (**Deposit cargo** / **Take cargo**) whenever a hero of
+yours stands on the settlement's tile, wired to the engine's existing `TransferResources`
+verb -- which until now only the Logistics modal's declared action named, and no control
+ever invoked. The Logistics window's hero block offers the same two buttons, both surfaces
+read one shared direction/amount model (`src/screens/shared/cargoTransfer.ts`), and the hero
+panel's own buttons are renamed **Deposit gold** / **Withdraw gold** because they were always
+gold-only despite the generic label (playthrough finding F-2).
+
 ## [0.38.3] - 2026-11-03
 
 The town hall's level 2 and 3 art is re-generated onto the iso grid, so `test:towncenter` goes green (25/25, was 15/25). The old L2/L3 sprites still carried a 30° lot, a 107-row / 70-row transparent bottom pad and an 81px / 74px soil plinth, so upgrading a settlement brought the raised platform and the floating base straight back; both levels now measure the level-1 art's own convention — edge slope 0.523 / 0.521, bottom pad 0 rows, ground diamond 100% of the canvas, ≤12px of silhouette below the ground plane, one alpha component each. The regenerated anchor table follows the art (`pixel.townHall.2` 9→0, `pixel.townHall.3` 6→0): a grid-exact lot needs no bottom-pad compensation, exactly as `townHall.1` already measured 0. Eight candidates from four image-generation models, with the measured critique and the pick, are recorded in `design/building-pixel-townhall-l2-l3-wave/`; no game code changed, so patch.

@@ -4,7 +4,7 @@ import { hexDistance } from "../map/pathfinding";
 import { CHARTER_GOLD_COST, CHARTER_WAREHOUSE_COST } from "./start";
 
 export const CHARTER_PURSE_HINT =
-  "Withdraw gold from a friendly settlement's treasury — your hero must stand on it (hero panel → Withdraw all)";
+  "Withdraw gold from a friendly settlement's treasury — your hero must stand on it (hero panel → Withdraw gold)";
 
 export const CHARTER_MIN_SETTLEMENT_DISTANCE = 4;
 
