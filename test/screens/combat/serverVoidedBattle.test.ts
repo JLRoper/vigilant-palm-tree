@@ -113,7 +113,10 @@ test("the watch latches once and resolves whenVoided with the server's payload",
   assert.equal(watch.payload()?.obstacleSeed, 7);
 
   // A second matching row (a re-delivery) does not replace the first.
-  emit(resolvedEvent({ id: "43", payload: { ...resolvedEvent().payload!, obstacleSeed: 9 } }));
+  const duplicate = resolvedEvent();
+  duplicate.id = "43";
+  duplicate.payload = { ...duplicate.payload!, obstacleSeed: 9 } as typeof duplicate.payload;
+  emit(duplicate);
   assert.equal(watch.payload()?.obstacleSeed, 7);
 });
 
