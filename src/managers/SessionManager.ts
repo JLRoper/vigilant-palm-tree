@@ -1,5 +1,5 @@
 import { api, type Game, type TileRow } from "../io/api";
-import { rememberGame, listUserGames } from "../io/userGames";
+import { rememberGame } from "../io/userGames";
 import { getLastPersistedAt } from "../io/commands";
 import type { TurnController } from "../state/turnController";
 import type { MapSize } from "../map/gameMap";
@@ -106,7 +106,12 @@ export class SessionManager {
     }
   }
 
-  getLatestGames() {
-    return listUserGames();
+  /**
+   * The games the server holds. The Load surfaces and boot both read the list
+   * through here: it is the authority, and the localStorage cache is only a
+   * memory of when the player last saw each one (see src/io/userGames.ts).
+   */
+  listGames(): Promise<Game[]> {
+    return api.listGames();
   }
 }
