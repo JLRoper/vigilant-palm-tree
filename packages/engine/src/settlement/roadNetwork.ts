@@ -31,19 +31,32 @@ import { staffingCeiling } from "./workforce";
 // map as how worn the road is.
 //
 // F2 (round 2 district-road card): that reading is real but sub-pixel, and the
-// reason is measured, not guessed. The drawn band is ROAD_WIDTH_BASE 0.55px +
-// 0.05px per track capped at ROAD_WIDTH_MAX 1.5px, so 1 track draws 0.60px and
-// 20 tracks 1.50px on a 55.4px hex (HEX_SIZE 32 x sqrt 3) -- a 0.90px delta,
-// 1.6% of the pitch, under one screen pixel at every gameplay zoom. The count
-// is NOT a fake reading: it follows the district's actual staffing (15% -> 3
-// tracks -> 0.70px, 100% -> 20 -> 1.50px). What pinned the common case flat was
-// the staffing convention upstream -- a new building in a never-staffed
-// settlement was placed with `workers: undefined` (placeBuildings'
-// hasExplicitStaffing ? 0 : undefined) and `undefined` is the legacy
-// auto-staffed (max) crew this module reads as `max`, exactly as effortFraction
-// does -- so every district of an untouched game WAS fully staffed. Decided (not
-// faked): the width mapping stays the carrier rather than inventing variation
-// the data does not carry.
+// reason is measured, not guessed. When this was written the drawn band was
+// ROAD_WIDTH_BASE 0.55px + 0.05px per track capped at ROAD_WIDTH_MAX 1.5px, so
+// 1 track drew 0.60px and 20 tracks 1.50px on a 55.4px hex (HEX_SIZE 32 x
+// sqrt 3) -- a 0.90px delta, 1.6% of the pitch, under one screen pixel at every
+// gameplay zoom. The count is NOT a fake reading: it follows the district's
+// actual staffing (15% -> 3 tracks -> 0.70px, 100% -> 20 -> 1.50px). What pinned
+// the common case flat was the staffing convention upstream -- a new building in
+// a never-staffed settlement was placed with `workers: undefined`
+// (placeBuildings' hasExplicitStaffing ? 0 : undefined) and `undefined` is the
+// legacy auto-staffed (max) crew this module reads as `max`, exactly as
+// effortFraction does -- so every district of an untouched game WAS fully
+// staffed. Decided (not faked): the width mapping stays the carrier rather than
+// inventing variation the data does not carry.
+//
+// RESOLVED 2026-11-03 (the road study, stage B+C): the mapping itself was the
+// other half of the problem and it moved. Two independent studies measured the
+// same conclusion -- at 0.60-1.50px the band is a scratch on real terrain, so
+// neither a busy trunk nor a light lane could be SEEN, whatever the junction
+// geometry did. The renderer now draws ROAD_WIDTH_BASE 1.5px + 0.05px per track
+// capped at ROAD_WIDTH_MAX 2.5px with a 1.0px casing each side, i.e. a 1.55px
+// body under a 3.55px band at 1 track and 2.50/4.50 at the 20-track cap: the
+// same per-track delta on a base the eye can see. The measurement, and the
+// stream widths it was checked against (14.0px small / 18.0px wide at the
+// alpha-64 contour), are in `.agentboard/road-reports/synthesis/index.html`;
+// the constants are in src/render/scene/roadGraph.ts. Nothing in THIS file
+// changed for it -- the track count is still the one carrier.
 //
 // RESOLVED 2026-11-03 (the workforce rebalance): the auto crew is now a
 // BOOTSTRAP only -- a new placement into a settlement that has any district (or

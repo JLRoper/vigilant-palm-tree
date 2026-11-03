@@ -30,6 +30,18 @@ test("roster parity seeds full first-boot metadata and tier upkeep, and reruns s
   await initSchema();
   const sql = await readFile(new URL("../../server/migrations/033_roster_parity.sql", import.meta.url), "utf8");
   await withRollback(async (client) => {
+    // 033 is re-applied below against its FIRST-BOOT precondition -- its 15
+    // rows absent -- so they must be deleted first. Two tables hold a NO ACTION
+    // FK onto unit_types: hero_platoons (009) and settlement_platoons (016),
+    // both keyed by unit_type_id. A database used by an earlier aggregate leg
+    // (or by real play) holds games whose units reference these ids -- measured
+    // on a used DB, hero_platoons referencing 'sproutling' -- and deleting the
+    // unit_types rows then fails with 23503 (hero_platoons_unit_type_id_fkey),
+    // which is why this test was green on a fresh database and red on a used
+    // one. Clear the referencing rows first, in the order the schema requires;
+    // the whole body runs inside withRollback, so nothing here persists.
+    await client.query("DELETE FROM hero_platoons WHERE unit_type_id = ANY($1::text[])", [newIds]);
+    await client.query("DELETE FROM settlement_platoons WHERE unit_type_id = ANY($1::text[])", [newIds]);
     await client.query("DELETE FROM unit_types WHERE id = ANY($1::text[])", [newIds]);
     await client.query(sql);
     const first = await client.query("SELECT * FROM unit_types WHERE id = ANY($1::text[]) ORDER BY id", [newIds]);

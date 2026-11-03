@@ -9,8 +9,14 @@
 // (`turn:ended` / `state:committed` -> syncAffordability -> refreshAffordability
 // -> placer.setAffordability, which re-renders the rows). Drop that
 // subscription and every unit spec still passes while a player watching the
-// palette sees every row stay dimmed at "Not enough gold (need 100, have 0)"
+// palette sees every row stay dimmed at "Not enough gold (need 300, have 0)"
 // until they leave the city and re-enter it.
+//
+// Update 2026-11-03 (CITY P6, #344): the House's placementCost.gold moved
+// 100 -> 300 (packages/engine/src/buildingRegistry.ts), so the figure this
+// fixture pins is the registry's, not a constant of the day. The assertion
+// below is unchanged in shape -- it still demands the row state the shortfall
+// in the palette's own words -- and the expected number follows the registry.
 //
 // So this spec asserts against the browser, on a fresh settlers town whose
 // treasury really is 0 (settlers founds with `gold: 0`):
@@ -207,7 +213,15 @@ async function armRow(page: Page, label: string): Promise<void> {
     const row = rows.find((b) => (b.textContent ?? "").includes(wanted));
     if (!row) return null;
     const scroller = row.parentElement as HTMLElement | null;
-    if (scroller) scroller.scrollTop = Math.max(0, (row as HTMLElement).offsetTop - 60);
+    if (scroller) {
+      // Scroll in the SCROLLER's own space, from the live rects: the rows'
+      // offsetTop is measured against the palette root (the scroller is not
+      // positioned), so `offsetTop - 60` aimed at a row that only stayed
+      // clickable while the write clamped at the list's end. A row near the
+      // top (the 80g Farmhouse, step 3) was scrolled clean out of view and the
+      // click then armed nothing.
+      scroller.scrollTop += row.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 60;
+    }
     const r = row.getBoundingClientRect();
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   }, label);
@@ -440,7 +454,7 @@ async function run() {
 
     const brokeRow = await houseRow(page);
     assert.ok(brokeRow, "the House row must be listed");
-    assert.match(brokeRow!.title, /Not enough gold \(need 100, have 0\)/, `House row should state the shortfall, got "${brokeRow!.title}"`);
+    assert.match(brokeRow!.title, /Not enough gold \(need 300, have 0\)/, `House row should state the shortfall, got "${brokeRow!.title}"`);
     assert.equal(brokeRow!.opacity, "0.5", "an unaffordable row is dimmed");
     console.log(`>> House row broke: "${brokeRow!.title.split("\n")[0]}" (opacity ${brokeRow!.opacity}) ✓`);
 
@@ -485,8 +499,19 @@ async function run() {
     console.log(`>> Day ${dayBefore} -> ${dayAfter}, gold ${goldBeforeTurn} -> ${goldAfterTurn}; House row now "${recovered!.title.split("\n")[0]}" (opacity ${recovered!.opacity}) ✓`);
 
     // ── 3. a BARE canvas click places from its own coordinates ──────────
-    console.log(">> Arming House, then a bare canvas click with no mousemove");
-    await armRow(page, "House");
+    // A Farmhouse, not the House this fixture armed before 2026-11-03: CITY P6
+    // (#344) tripled the House's placementCost.gold to 300, and the End Turn
+    // above brings 500 gold. A House would leave 200 in the treasury, and step 4
+    // places a Tower (300) before asserting an unaffordable click stages
+    // nothing -- so the Tower could never be placed and step 4's
+    // `before.length + 2` count failed (measured on github/main 17fd1ca:
+    // "an unaffordable click stages nothing", 1 !== 2). The Farmhouse (80g, 1x1,
+    // the building the district fixtures place) leaves 420, which keeps the
+    // Tower's placement affordable and step 4's refusal arithmetic unchanged.
+    // This case pins the BARE CLICK, not the House; the House row's own
+    // shortfall and in-place recovery stay covered by steps 1-2 above.
+    console.log(">> Arming Farmhouse, then a bare canvas click with no mousemove");
+    await armRow(page, "Farmhouse");
     const before = await buildings(page, settlementId);
     const target = await freeCell(page, settlementId);
     const cmdsBefore = (await commandKinds(page)).length;
@@ -503,12 +528,12 @@ async function run() {
     assert.equal(after.length, before.length + 1, "a bare click must place exactly one building");
     const placed = after.find((b) => b.gx === target.gx && b.gy === target.gy);
     assert.ok(placed, `the bare click must land on the cell it was dispatched at (${target.gx},${target.gy}), got ${JSON.stringify(after)}`);
-    assert.equal(placed!.kind, "house");
+    assert.equal(placed!.kind, "farmhouse");
 
     const cmds = await commandKinds(page);
     assert.ok(cmds.length > cmdsBefore, "the placement must POST a command");
     assert.equal(cmds[cmds.length - 1], "PlaceBuildings", `the placement's own command must reach the server, got ${cmds.slice(-3).join(" -> ")}`);
-    console.log(`>> House placed at (${target.gx},${target.gy}) from a bare click; ${cmds[cmds.length - 1]} sent ✓`);
+    console.log(`>> Farmhouse placed at (${target.gx},${target.gy}) from a bare click; ${cmds[cmds.length - 1]} sent ✓`);
 
     // ── 4. a placement the treasury cannot cover ───────────────────────
     console.log(">> Driving the treasury below a Tower's price, then clicking again");

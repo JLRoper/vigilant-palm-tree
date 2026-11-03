@@ -92,3 +92,30 @@ export function cargoTransferRequest(
   }
   return { amounts, total, source, direction: CARGO_TRANSFER_COMMAND_DIRECTION[verb] };
 }
+
+/**
+ * ONE sentence per cargo button, for every state of it -- what the button will
+ * move when it can move anything, and WHICH SIDE IS FULL when it cannot.
+ *
+ * The `source` field of the request exists for exactly this ("how the surfaces
+ * tell 'nothing to move' from 'no room for it'"), and a surface that skips it
+ * tells the player the wrong story: the Logistics modal used one dead-button
+ * sentence per verb ("the hero's wagons are empty"), so a hero CARRYING cargo
+ * into a warehouse at its storage cap was told its wagons were empty -- while
+ * the settlement panel's row, mounting the same verb off the same shared model,
+ * said "The warehouse is full". Both surfaces read this function now, so the
+ * two cannot drift into two different stories about one click.
+ */
+export function cargoTransferTitle(verb: CargoTransferVerb, request: CargoTransferRequest): string {
+  if (request.total > 0) {
+    return verb === "deposit"
+      ? `Move ${request.total} of the hero's cargo into the warehouse`
+      : `Take ${request.total} out of the warehouse into the hero's cargo`;
+  }
+  // Nothing can move: `source > 0` means the SOURCE has goods and the
+  // DESTINATION has no room, which is a different sentence from an empty source.
+  if (verb === "deposit") {
+    return request.source > 0 ? "The warehouse is full" : "The hero's wagons are empty";
+  }
+  return request.source > 0 ? "The hero's wagons are full" : "The warehouse is empty";
+}

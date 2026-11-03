@@ -278,19 +278,28 @@ async function run(): Promise<void> {
     assert.equal(before!.districts?.[key], undefined, "a fresh district must not be persisted");
 
     // ── 4. build on the CENTER cell (2,2): every one of the 25 cells is open ─
-    await clickPalette(page, "House", "Farmhouse");
+    // A Farmhouse, not the House this fixture used before 2026-11-03: CITY P6
+    // (#344) tripled the House's placementCost.gold to 300, and a classic
+    // settlement founds with exactly 300 gold (packages/engine/src/init.ts),
+    // so a House now eats the whole treasury and the 2x2 farm producer this
+    // spec exists to place (step 5) would be refused -- measured on
+    // github/main 17fd1ca: the Farm Field row is disabled "need 120, have 0".
+    // The Farmhouse (80g, 1x1, also a food-chain producer) is the cheap
+    // district building the visual suite's district-map scene already uses, so
+    // the grid still gets a real 1x1 placement next to the 2x2 farm field.
+    await clickPalette(page, "Farmhouse");
     const centre = await cellScreen(page, 2, 2);
     await page.mouse.move(centre.x, centre.y);
     await wait(200);
     await page.mouse.click(centre.x, centre.y);
     await wait(1000);
 
-    const afterHouse = await settleSnapshot(page, home.id);
-    const district = afterHouse!.districts?.[key] as DistrictRow | undefined;
+    const afterCentre = await settleSnapshot(page, home.id);
+    const district = afterCentre!.districts?.[key] as DistrictRow | undefined;
     assert(district, `no district persisted at ${key} after placing on the centre cell`);
-    assert(district!.buildings.some((b) => b.gx === 2 && b.gy === 2), "house was not placed on (2,2)");
-    assert(afterHouse!.gold < before!.gold,
-      `district placement must charge full cost (gold ${before!.gold} -> ${afterHouse!.gold})`);
+    assert(district!.buildings.some((b) => b.gx === 2 && b.gy === 2), "the centre building was not placed on (2,2)");
+    assert(afterCentre!.gold < before!.gold,
+      `district placement must charge full cost (gold ${before!.gold} -> ${afterCentre!.gold})`);
 
     // ── 5. a farm producer -> the district renders the 'farm' sprite variant ─
     await clickPalette(page, "Farm Field (2×2)");

@@ -8,7 +8,7 @@ import { DockedPanel } from "@screens/shared/dockedPanel";
 import { loadPanelGeometry, savePanelGeometry } from "@screens/shared/panelLayout";
 import type { PanelRect } from "@screens/shared/panelPlacement";
 import { AccordionSection, makeRow } from "@screens/shared/panelWidgets";
-import { cargoTransferRefusalMessage, cargoTransferRequest, type CargoTransferVerb } from "@screens/shared/cargoTransfer";
+import { cargoTransferRefusalMessage, cargoTransferRequest, cargoTransferTitle, type CargoTransferVerb } from "@screens/shared/cargoTransfer";
 import { showToast } from "@screens/shared/toast";
 import { DESERTION_AFTER_WEEKS } from "@screens/shared/upkeepWarnings";
 import { liveSettlementUpkeepUnfed } from "@screens/shared/heroUpkeepCost";
@@ -722,19 +722,9 @@ export class SettlementInfoMenu {
     const depositBtn = this.cargoTransferButtons.deposit;
     const withdrawBtn = this.cargoTransferButtons.withdraw;
     depositBtn.disabled = deposit.total <= 0;
-    depositBtn.title =
-      deposit.total > 0
-        ? "Move " + deposit.total + " of the hero's cargo into the warehouse"
-        : deposit.source > 0
-          ? "The warehouse is full"
-          : "The hero's wagons are empty";
+    depositBtn.title = cargoTransferTitle("deposit", deposit);
     withdrawBtn.disabled = withdraw.total <= 0;
-    withdrawBtn.title =
-      withdraw.total > 0
-        ? "Take " + withdraw.total + " out of the warehouse into the hero's cargo"
-        : withdraw.source > 0
-          ? "The hero's wagons are full"
-          : "The warehouse is empty";
+    withdrawBtn.title = cargoTransferTitle("withdraw", withdraw);
     for (const btn of [depositBtn, withdrawBtn]) {
       btn.style.opacity = btn.disabled ? "0.4" : "1";
       btn.style.cursor = btn.disabled ? "default" : "pointer";

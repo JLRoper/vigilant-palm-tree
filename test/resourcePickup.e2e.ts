@@ -13,7 +13,11 @@ import type { GameDebugApi } from "../src/io/debugCommands";
 
 // Heroes picking resources off the adventure map, IN A REAL BROWSER against the
 // real API and the real database -- the reader's own acceptance run ("Playwright
-// test as much as you want").
+// test as much as you want"). EVERY step is a player gesture: the hero is
+// selected and moved by REAL MOUSE CLICKS on the map canvas, the pickup and the
+// deposit are clicks on the panels' own buttons. `__gameDebug` is READ (to see
+// what the client did) but never INVOKED as an action, so nothing on this path
+// is reachable only through the debug controller.
 //
 //  (1) the hero WALKS onto a resource tile (a real move command, persisted);
 //  (2) the tile panel shows the deposit's remaining amount and offers the
@@ -104,6 +108,22 @@ async function gameRow(name: string): Promise<{ heroes: Record<string, HeroRow>;
   return r.rows[0];
 }
 
+/**
+ * The API's own payload for the game -- the middle of the three readings. It is
+ * `GET /api/games/:name` (server/routes.ts), whose row carries the same
+ * `resource_deposits` JSONB and `heroes` the DB does and the client hydrates
+ * from, so DOM / API / DB can be quoted side by side for the same number.
+ */
+async function apiGame(name: string): Promise<{
+  heroes: Record<string, HeroRow>;
+  settlements: Record<string, SettlementRow>;
+  resource_deposits: Record<string, number> | null;
+}> {
+  const r = await api("GET", `/api/games/${name}`);
+  assert.equal(r.status, 200, `GET /api/games/${name} -> ${r.status}`);
+  return r.json;
+}
+
 function axialDistance(a: Axial, b: Axial): number {
   const dq = a.q - b.q;
   const dr = a.r - b.r;
@@ -143,10 +163,12 @@ async function seedPickupGame(name: string): Promise<PickupFixture> {
     .sort((a, b) => a.distance - b.distance)[0];
   assert(candidate, "no warehouse-resource tile with a big enough pile 1-4 hexes from the start");
 
-  // Enough movement to walk there in this turn, so the move is a real command
-  // rather than a teleport, and two wagons so the hold is a real constraint.
+  // Enough movement for the WHOLE round trip (out to the deposit and back to the
+  // settlement) in one turn -- so every leg is a real click-driven move command
+  // rather than a teleport or a mid-run DB poke -- and two wagons so the hold is
+  // a real constraint on what one pickup can take.
   await db.query(
-    `UPDATE games SET heroes = jsonb_set(jsonb_set(heroes, '{${HERO_ID},wagons}', '${CARGO_WAGONS}'), '{${HERO_ID},movementRemaining}', '30') WHERE name = $1`,
+    `UPDATE games SET heroes = jsonb_set(jsonb_set(heroes, '{${HERO_ID},wagons}', '${CARGO_WAGONS}'), '{${HERO_ID},movementRemaining}', '300') WHERE name = $1`,
     [name],
   );
   console.log(
@@ -208,6 +230,60 @@ async function clickHex(page: Page, tile: Axial): Promise<void> {
   await page.mouse.move(pt.x, pt.y, { steps: 4 });
   await wait(80);
   await page.mouse.click(pt.x, pt.y);
+  await wait(400);
+}
+
+/**
+ * Select a hero the way a PLAYER does: click the hex it stands on. The click is
+ * a real mouse click on the canvas, never `__gameDebug.setSelectedHero` -- the
+ * debug API is only ever READ here (to see what the gesture did), so a broken
+ * click path cannot be papered over by a helper.
+ *
+ * A click on a hero is a toggle, so this clicks until the hero is selected
+ * rather than assuming which side of the toggle it landed on.
+ */
+async function selectHeroByClick(page: Page, at: Axial): Promise<void> {
+  const isSelected = () =>
+    page.evaluate((id) => {
+      const s = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getState() as {
+        selectedHeroId?: string | null;
+      };
+      return s?.selectedHeroId === id;
+    }, HERO_ID);
+  await clickHex(page, at);
+  for (let i = 0; i < 2 && !(await isSelected()); i++) {
+    await clickHex(page, at);
+  }
+  assert.equal(await isSelected(), true, `clicking (${at.q},${at.r}) never left ${HERO_ID} selected`);
+}
+
+/**
+ * Move a hero by clicking its destination -- the map's own gesture, the one
+ * `src/screens/adventure/adventureView.ts`'s click handler turns into
+ * `requestMove`. `__gameDebug.requestMove` is NOT used: the move is the click's
+ * own effect, and the client's own `lastClick.moved` (read, never invoked) is
+ * the record that the CLICK produced it.
+ */
+async function moveByClick(page: Page, dest: Axial): Promise<void> {
+  await clickHex(page, dest);
+  const clicked = await page.evaluate(() =>
+    (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.lastClick,
+  );
+  assert.equal(
+    (clicked as { moved?: boolean } | null)?.moved,
+    true,
+    `the click on (${dest.q},${dest.r}) must move the hero; lastClick=${JSON.stringify(clicked)}`,
+  );
+  await page.waitForFunction(
+    ({ id, q, r }) => {
+      const s = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getState() as {
+        heroes?: Record<string, { q: number; r: number }>;
+      };
+      return s?.heroes?.[id]?.q === q && s?.heroes?.[id]?.r === r;
+    },
+    { id: HERO_ID, q: dest.q, r: dest.r },
+    { timeout: 20000 },
+  );
   await wait(400);
 }
 
@@ -289,37 +365,15 @@ async function main(): Promise<void> {
       const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
       await openGame(page, name, fixture.gameId);
 
-      // (1) Walk the hero onto the resource tile, through the game's own move
-      // path (the same requestMove the click path uses), then confirm BOTH
-      // sides agree on where the hero stands.
+      // (1) Walk the hero onto the resource tile WITH THE MOUSE: select it by
+      // clicking the hex it stands on, then click the deposit's hex. Both are
+      // the real player gestures (adventureView's own click handler); no debug
+      // action drives this leg, so a broken click-to-move path fails HERE.
       const before = await clientHero(page);
       assert(before, "no starting hero on the client");
       console.log(`>> hero starts at (${before!.q},${before!.r}), ${before!.movementRemaining} move`);
-      // Select the hero first: the move reducer's own gate is "is this the hero
-      // the player has clicked on".
-      await page.evaluate((id) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.setSelectedHero(id), HERO_ID);
-      await wait(300);
-      const moved = await page.evaluate(
-        ({ id, q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.requestMove(id, q, r),
-        { id: HERO_ID, q: fixture.tile.q, r: fixture.tile.r },
-      );
-      if (!moved) {
-        const why = await page.evaluate((id) => {
-          const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
-          const s = dbg.getState() as { heroes?: Record<string, { q: number; r: number; movementRemaining: number }>; selectedHeroId?: string | null };
-          return { hero: s?.heroes?.[id], selected: s?.selectedHeroId, passable: dbg.isPassable(7, 6) };
-        }, HERO_ID);
-        console.error("move refused:", JSON.stringify(why));
-      }
-      assert.equal(moved, true, "the move onto the resource tile was refused");
-      await page.waitForFunction(
-        ({ id, q, r }) => {
-          const s = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getState() as { heroes?: Record<string, { q: number; r: number }> };
-          return s?.heroes?.[id]?.q === q && s?.heroes?.[id]?.r === r;
-        },
-        { id: HERO_ID, q: fixture.tile.q, r: fixture.tile.r },
-        { timeout: 15000 },
-      );
+      await selectHeroByClick(page, { q: before!.q, r: before!.r });
+      await moveByClick(page, fixture.tile);
       await wait(700);
       const serverHero = (await gameRow(name)).heroes[HERO_ID];
       assert.equal(
@@ -330,11 +384,10 @@ async function main(): Promise<void> {
       console.log(`>> hero walked onto (${fixture.tile.q},${fixture.tile.r}) -- client and server agree`);
 
       // (2) Inspect the hex: the tile panel shows the deposit AND its remaining
-      // amount. (The first click on the hero's own hex puts the hero down; the
-      // second picks it back up, which is what leaves the cargo readout on
-      // screen next to the tile panel.)
-      await clickHex(page, fixture.tile);
-      await clickHex(page, fixture.tile);
+      // amount. One click on the hex inspects it; a click on a hero's own hex is
+      // a toggle, so the selection is re-established explicitly (and left on for
+      // the walk home below).
+      await selectHeroByClick(page, fixture.tile);
       await page.locator('[data-tile-body] [data-tile-line="deposit"]').first().waitFor({ state: "visible", timeout: 10000 });
       const lineBefore = await depositLine(page);
       assert.equal(
@@ -391,6 +444,19 @@ async function main(): Promise<void> {
         expectedTake,
         "the persisted hero carries the take",
       );
+      // The API's own payload carries the same two numbers, so DOM / API / DB
+      // can be read side by side for one pickup.
+      const afterApi = await apiGame(name);
+      assert.equal(
+        afterApi.resource_deposits?.[`${fixture.tile.q},${fixture.tile.r}`],
+        fixture.pristine - expectedTake,
+        "the API payload must carry the same remaining amount",
+      );
+      assert.equal(
+        afterApi.heroes[HERO_ID].resources?.[fixture.resource] ?? 0,
+        expectedTake,
+        "the API payload must carry the same cargo",
+      );
       const clientAfter = await clientHero(page);
       assert.equal(clientAfter?.resources?.[fixture.resource] ?? 0, expectedTake, "the client's hero agrees");
       assert.equal(
@@ -441,31 +507,19 @@ async function main(): Promise<void> {
       );
 
       // (5) THE OTHER HALF (F-2): carry the cargo home and deliver it through
-      // the settlement panel's Warehouse row. Walking home is a real move
-      // command and the delivery is the panel's own button.
+      // the settlement panel's Warehouse row. The walk home is the SAME mouse
+      // gesture as the walk out -- the reload dropped the selection, so the hero
+      // is re-selected by clicking its hex, then the settlement's hex is
+      // clicked. No debug action and no mid-run DB poke: the fixture's movement
+      // budget covers the whole round trip.
       const homeEntries = Object.entries((await gameRow(name)).settlements);
       const homePick = homeEntries.find(([, s]) => s.ownerId === 0) ?? homeEntries[0];
       assert(homePick, "the fixture game must own a settlement to deliver into");
       const [homeId, home] = homePick;
-      await db.query(
-        `UPDATE games SET heroes = jsonb_set(heroes, '{${HERO_ID},movementRemaining}', '80') WHERE name = $1`,
-        [name],
-      );
-      await page.evaluate((id) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.setSelectedHero(id), HERO_ID);
-      await wait(250);
-      const homeward = await page.evaluate(
-        ({ id, q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.requestMove(id, q, r),
-        { id: HERO_ID, q: home.q, r: home.r },
-      );
-      assert.equal(homeward, true, "the walk home was refused");
-      await page.waitForFunction(
-        ({ id, q, r }) => {
-          const s = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getState() as { heroes?: Record<string, HeroRow> };
-          return s?.heroes?.[id]?.q === q && s?.heroes?.[id]?.r === r;
-        },
-        { id: HERO_ID, q: home.q, r: home.r },
-        { timeout: 20000 },
-      );
+      const heroNow = await clientHero(page);
+      assert(heroNow, "the hero must still be on the client after the reload");
+      await selectHeroByClick(page, { q: heroNow!.q, r: heroNow!.r });
+      await moveByClick(page, { q: home.q, r: home.r });
       await wait(700);
       const atHome = (await gameRow(name)).heroes[HERO_ID];
       assert.equal(
@@ -510,6 +564,19 @@ async function main(): Promise<void> {
         persisted = (await gameRow(name)).settlements[homeId]?.warehouse?.[fixture.resource] ?? -1;
       }
       assert.equal(persisted, expectedStock, "the persisted warehouse must carry the delivery");
+      // Same delivery, read off the API's own payload: the warehouse stock and
+      // the emptied hold.
+      const deliveredApi = await apiGame(name);
+      assert.equal(
+        deliveredApi.settlements[homeId]?.warehouse?.[fixture.resource] ?? -1,
+        expectedStock,
+        "the API payload must carry the delivered warehouse stock",
+      );
+      assert.equal(
+        deliveredApi.heroes[HERO_ID].resources?.[fixture.resource] ?? 0,
+        0,
+        "the API payload must carry the emptied hold",
+      );
       const deliveredRow = await gameRow(name);
       assert.equal(
         deliveredRow.heroes[HERO_ID].resources?.[fixture.resource] ?? 0,
@@ -522,6 +589,75 @@ async function main(): Promise<void> {
         0,
         "the client's hero agrees the hold is empty",
       );
+
+      // (6) THE SAME DELIVERY, through the Logistics modal's OWN control -- the
+      // surface the card's headline is about (a declared transferResources
+      // action with no caller). The hold is loaded back out of the warehouse
+      // through the settlement panel, then put back with the modal's button, so
+      // the modal is measured doing real work against the real API rather than
+      // merely rendering.
+      const take = page.locator('[data-cargo-transfer="withdraw"]').first();
+      await take.waitFor({ state: "visible", timeout: 10000 });
+      const stockedBeforeModal = (await gameRow(name)).settlements[homeId]?.warehouse?.[fixture.resource] ?? -1;
+      const takeTitle = (await take.getAttribute("title")) ?? "";
+      assert.equal(await take.isDisabled(), false, "the warehouse has stock to take back out");
+      console.log(`>> panel: "${takeTitle}"`);
+      await take.click();
+      let held = 0;
+      for (let i = 0; i < 25 && held !== PER_RESOURCE_CAP; i++) {
+        await wait(300);
+        held = (await gameRow(name)).heroes[HERO_ID].resources?.[fixture.resource] ?? 0;
+      }
+      assert.equal(held, PER_RESOURCE_CAP, "the whole hold comes back out of the warehouse");
+      assert.equal(
+        (await gameRow(name)).settlements[homeId]?.warehouse?.[fixture.resource] ?? -1,
+        stockedBeforeModal - PER_RESOURCE_CAP,
+        "and the warehouse loses exactly that",
+      );
+      // The transfer buttons sum ACROSS the warehouse resources (one hold, five
+      // piles), so the sentence names the total the click would move.
+      const heldRow = (await gameRow(name)).heroes[HERO_ID].resources ?? {};
+      const heldTotal = WAREHOUSE_RESOURCES.reduce((n, r) => n + (heldRow[r] ?? 0), 0);
+
+      await page.keyboard.press("Escape").catch(() => {});
+      await wait(500);
+      const logisticsBtn = page.locator("button").filter({ hasText: /Logistics/ }).first();
+      assert.equal(await logisticsBtn.isDisabled(), false, "the Logistics modal is reachable mid-game");
+      await logisticsBtn.click();
+      await wait(900);
+      const modalDeposit = page.locator('[data-focus="hero-cargo-deposit"]').first();
+      await modalDeposit.waitFor({ state: "visible", timeout: 10000 });
+      assert.equal(
+        await modalDeposit.isDisabled(),
+        false,
+        "the modal offers the deposit for a hero carrying cargo onto its own settlement",
+      );
+      const modalTitle = (await modalDeposit.getAttribute("title")) ?? "";
+      assert.match(
+        modalTitle,
+        new RegExp(`Move ${heldTotal} of the hero's cargo into the warehouse`),
+        `the modal names what it will move, got "${modalTitle}"`,
+      );
+      console.log(`>> logistics modal: "${modalTitle}"`);
+      await modalDeposit.click();
+      let restored = -1;
+      for (let i = 0; i < 25 && restored !== stockedBeforeModal; i++) {
+        await wait(400);
+        restored = (await gameRow(name)).settlements[homeId]?.warehouse?.[fixture.resource] ?? -1;
+      }
+      assert.equal(restored, stockedBeforeModal, "the Logistics modal's own button must move the warehouse");
+      assert.equal(
+        (await gameRow(name)).heroes[HERO_ID].resources?.[fixture.resource] ?? 0,
+        0,
+        "and empty the hold again",
+      );
+      const modalApi = await apiGame(name);
+      assert.equal(
+        modalApi.settlements[homeId]?.warehouse?.[fixture.resource] ?? -1,
+        stockedBeforeModal,
+        "the API payload carries the modal's delivery",
+      );
+      console.log(`>> logistics modal deposit: warehouse ${fixture.resource} ${stockedBeforeModal - PER_RESOURCE_CAP} -> ${restored} (moved ${heldTotal} across the hold)`);
 
       await page.close();
     } finally {
