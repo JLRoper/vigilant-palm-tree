@@ -22,6 +22,9 @@ const API_PORT = getApiPort(4000);
 const WEB_PORT = getClientPort(5173);
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
+// Same seed the client's own starter game uses (adventureView's MAP_SEED), so
+// the castle layout these cases were written against is unchanged.
+const GAME_SEED = 42;
 
 const children: ChildProcess[] = [];
 let cleaned = false;
@@ -539,6 +542,48 @@ async function pageScreenshot(page: Page, name: string): Promise<string> {
 
 async function gameName(page: Page): Promise<string> {
   return page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.activeGameName as string);
+}
+
+// Open a saved game by NAME through home's Load Game list. The list is the
+// SERVER's games, so it also holds whatever other runs left in this database --
+// taking the first "Open" row handed the suite a game with someone else's
+// state, which is why the workforce cases below could only pass against a game
+// the client had started fresh for them. Match the row to the name instead.
+async function openGameFromHome(page: Page, name: string): Promise<void> {
+  await page.locator("button", { hasText: /^Load Game$/ }).last().click();
+  await wait(500);
+  const tagged = await page.evaluate((gameNameToOpen) => {
+    const rows = [...document.querySelectorAll("div")].filter((d) => {
+      const t = (d.textContent || "").trim();
+      return t.startsWith(gameNameToOpen) && d.querySelector("button");
+    });
+    const row = rows[rows.length - 1];
+    if (!row) return false;
+    const open = [...row.querySelectorAll("button")].find((b) => /Open/.test(b.textContent || ""));
+    if (!open) return false;
+    open.setAttribute("data-cityview-open", "1");
+    return true;
+  }, name);
+  assert(tagged, `no Load Game row for "${name}"`);
+  await page.locator('[data-cityview-open="1"]').click();
+  await wait(1500);
+}
+
+// This suite brings its own game, created before the client ever boots so the
+// account is never empty and the client has no reason to start one for us.
+async function createGameForRun(name: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/games`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, seed: GAME_SEED, mapSize: "small" }),
+  });
+  assert(res.ok, `POST /api/games ${name} -> ${res.status}`);
+  console.log(`>> created game ${name} for this run`);
+}
+
+async function deleteGameForRun(name: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/games/${encodeURIComponent(name)}`, { method: "DELETE" });
+  console.log(`>> DELETE game '${name}' -> ${res.status}`);
 }
 
 // After a reload the client lands on the home screen; re-enter the same game
@@ -1597,6 +1642,7 @@ async function run() {
 
   let browser: Browser | undefined;
   let failed = false;
+  let ownGame: string | null = null;
 
   try {
     await waitForUrl(`${API_URL}/api/health`);
@@ -1606,28 +1652,27 @@ async function run() {
 
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
-    await page.goto(WEB_URL);
+
+    // This suite brings its own game. It used to rely on the client: a boot on
+    // an empty localStorage cache silently started a `starter-*` game, and the
+    // suite drove whatever that left on screen. The load path no longer
+    // substitutes a game for a player who did not ask for one -- and it must
+    // not (test/loadSilentSubstitute.e2e.ts pins its absence), so a client with
+    // games on its account now boots to home with NOTHING loaded. The game is
+    // therefore created here, before the client boots, and opened by name from
+    // Load Game the way a player opens one. Creating it first also keeps the
+    // account non-empty at boot, so the client never starts one on its own.
+    ownGame = `cityview-e2e-${Date.now().toString(36)}`;
+    await createGameForRun(ownGame);
+
+    await page.goto(WEB_URL, { waitUntil: "load" });
     await wait(1500);
 
-    // Handle load/splash screen if present
-    const body = (await page.textContent("body")) ?? "";
-    if (body.includes("New Game") || body.includes("Load Game")) {
-      const loadBtn = page.locator("button").filter({ hasText: /^Load Game$/ });
-      if (await loadBtn.count() > 0) {
-        await loadBtn.first().click({ trial: false, force: false });
-        await wait(300);
-        const openBtn = page.locator("button:visible").filter({ hasText: "Open" });
-        if (await openBtn.count() > 0) {
-          await openBtn.first().click();
-          await wait(1000);
-        }
-      }
-    }
-
     await page.waitForFunction(() => !!(window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug, { timeout: 60000 });
+    await openGameFromHome(page, ownGame);
     await page.waitForFunction(
-      () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
-      null,
+      (expected) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === expected,
+      ownGame,
       { timeout: 60000 }
     );
     await wait(500);
@@ -1669,6 +1714,9 @@ async function run() {
     await testBgOffset(page);
 
     console.log("\n>> All city view tests passed ✓");
+    // The suite created this game itself, so it clears it up too -- otherwise
+    // every run leaves a fresh save behind for the next one's Load Game list.
+    if (ownGame) await deleteGameForRun(ownGame).catch((e) => console.warn(`>> DELETE ${ownGame} failed:`, e));
   } catch (err) {
     failed = true;
     console.error("\n>> TEST FAILED:", (err as Error).message);

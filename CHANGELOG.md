@@ -10,6 +10,15 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.40.2] - 2026-11-03
+
+- **`test:cityview` and `test:logpanel` stop depending on the load-path substitution #307 removed, and bring their own game instead.** Both suites were green on 0.39.8 only because the client started a `starter-*` game for them: a boot on an empty `localStorage` cache silently substituted one (`GameSessionManager.initBackend`), and the suite drove whatever that put on screen. #307 (`dfc6a64`, "never substitute a starter game for a failed or empty load") made that conditional on the SERVER's list being empty — correct for a player, fatal for a suite that never opened a game itself. Neither suite is in #307's file set; the runs are the evidence, all on one database that already held a game (which is every real worktree DB):
+  - `test:logpanel` on main `3f76d57` / 0.39.12: `TEST FAILED: page.waitForFunction: Timeout 30000ms exceeded.` before step 1 — step 1 waited for `__gameDebug.activeGameName != null` after `localStorage.clear()` + reload, and nothing was loaded any more. On an EMPTY account, same commit, same suite: green, with the API log showing the boot POSTing `starter-mw0b4psd` itself.
+  - `test:cityview` on the same commit: green on the first run against an empty account, then `TEST FAILED: server staffing never matched [{"gx":1,"workers":2},{"gx":3,"workers":2}]; last=[{"gx":1,"workers":2},{"gx":3,"workers":1}]` on the next run, because with no substitute the suite took the first row of Load Game and drove a save an earlier run had left half-played.
+  - The flip, on the commit on either side of `dfc6a64` with the same primed DB: `4d7293e` (parent, 0.39.8) `logpanel` PASS and `cityview` PASS twice — the client POSTed its own starter (`starter-mw0bxjsq`/`starter-mw0by5hp`) with the server's games sitting right there; `dfc6a64` (0.39.9) `logpanel` FAIL at the same 30s wait and `cityview` green-then-red.
+  - The fix is in the suites, and the substitute stays gone: each suite now creates its own game through `POST /api/games` BEFORE the client boots (so the account is never empty and the client has no reason to start one), opens it by name from home's Load Game — never "the first Open row", which is what handed cityview someone else's save — and matches the opened name in `__gameDebug.activeGameName`. `cityview` deletes its own game when it passes and `logpanel` keeps deleting its own at step 7, so neither leaves saves behind.
+  - Verified by the fix's own runs, against a database that held another run's played game (`prime-845e01`): both suites green repeatedly, together with `build`, `lint:deps`, `docs:check`, `tools/typecheck-gate.mjs`, `test:unit` and `test:settlements` as the neighbouring control.
+
 ## [0.40.1] - 2026-11-03
 
 fix(ui): the native prompt() freezes the renderer too — the asset-upload key comes from the app's own text-input dialog
