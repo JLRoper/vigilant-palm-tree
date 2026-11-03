@@ -1,6 +1,6 @@
 import { panelTheme, styleButton } from "@screens/shared/panel";
 import { openDialog } from "@screens/shared/dialog";
-import { openConfirmDialog } from "@screens/shared/confirmDialog";
+import { openConfirmDialog, openTextInputDialog } from "@screens/shared/confirmDialog";
 import {
   fetchAssetList,
   uploadAsset,
@@ -174,11 +174,49 @@ export function openAssetManager(): void {
 
   uploadBtn.addEventListener("click", () => fileInput.click());
 
-  fileInput.addEventListener("change", async () => {
+  fileInput.addEventListener("change", () => {
     const file = fileInput.files?.[0];
     if (!file) return;
-    const key = prompt("Asset key (e.g. castle.1):", file.name.replace(/\.png$/i, ""));
-    if (!key) { fileInput.value = ""; return; }
+    // NOT a native prompt(): it blocks the renderer thread outright -- measured
+    // in a real browser, tab foregrounded (document.hidden === false), the same
+    // way the alert() and confirm() cards measured their sites: the change
+    // dispatch never returned (`Runtime.evaluate timed out` at 5 s, because the
+    // box opens inside this handler), every `Runtime.evaluate` -- `1+1`,
+    // `location.href`, even a counter read -- timed out at 5 s, and
+    // `Page.handleJavaScriptDialog` answered `{}` (a dialog really was
+    // pending), which unwedged the tab instantly. Across that window the
+    // animation loop stood still for 15 555 ms between two frames 12 ms apart.
+    // The app's own dialog costs the player nothing.
+    //
+    // Everything the native call did is kept: the pre-filled value is still the
+    // file name minus .png, an empty or cancelled answer still aborts the
+    // upload, and the key is never logged. The manager is itself a dialog
+    // (300), so the prompt has to clear it.
+    openTextInputDialog({
+      title: "Asset key",
+      message: "Asset key (e.g. castle.1):",
+      initialValue: file.name.replace(/\.png$/i, ""),
+      confirmLabel: "Upload",
+      zIndex: 320,
+      onConfirm: (key) => {
+        void uploadWithKey(key, file);
+      },
+      onCancel: () => {
+        fileInput.value = "";
+      },
+    });
+  });
+
+  /**
+   * The resume path the native prompt() left behind, unchanged: an empty key
+   * aborts before anything is touched, otherwise the file goes up under `key`
+   * and the list reloads. The key is never logged.
+   */
+  async function uploadWithKey(key: string, file: File): Promise<void> {
+    if (!key) {
+      fileInput.value = "";
+      return;
+    }
     statusEl.textContent = "Uploading...";
     try {
       await uploadAsset(key, file);
@@ -188,7 +226,7 @@ export function openAssetManager(): void {
       statusEl.textContent = "Upload failed";
       console.error(err);
     }
-  });
+  }
 
   refreshBtn.addEventListener("click", refresh);
 
