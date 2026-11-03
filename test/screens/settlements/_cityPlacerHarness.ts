@@ -60,6 +60,7 @@ export class MockNode {
   private ownText: string | null = null;
   innerHTML = "";
   title = "";
+  alt = "";
   className = "";
   type = "";
   value = "";

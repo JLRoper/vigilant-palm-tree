@@ -117,6 +117,8 @@ Distance throttles naturally: round-trip time ≈ `2 × pathLength / 7` days, so
 
 Events: `ResourcesTransferred`, `WagonsBought`, `WagonsAssigned`, `TradeRouteCreated`, `TradeRouteUpdated`, `TradeRouteRemoved` (entityMirror no-ops; resync boundary covers remote seats).
 
+**Amended 2026-11-03 — the journey itself is evented.** The list above covered the *commands*; the daily tick in §5.2 emitted nothing, so a caravan's load, delivery and turn for home reached no client but the one driving the turn (playthrough round 4, F7). `CaravanAdvanced` now reports one wrap per route: the route's post-wrap caravan record verbatim (the applier assigns it — a leg's path is A* plus the wrap's leftover movement, so no replay can re-derive it), plus `loaded` and `delivered` in the payload's own units. It is derived in the EndTurn case by comparing each route's record before and after `advanceRound` (the `TradeRouteRemoved` set-difference pattern), so `advanceTradeRoutes` stays a pure reducer, and it is classified `apply` + bridged, so a remote map's cart walks its legs mid-turn. The endpoint *stores* the wrap moved are deliberately not carried — a lost origin reroutes a return load to the owner's nearest settlement, a target a route-level diff cannot name — and keep the `TurnEnded` boundary rule. See [event-system.md](./event-system.md) §5.1.
+
 ## 7. UI surface
 
 1. Settlement panel: per-resource stockpile-vs-cap bars + treasury bar; "full" warning at ≥95%.

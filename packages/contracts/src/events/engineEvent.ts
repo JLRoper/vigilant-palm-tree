@@ -1,7 +1,7 @@
 import type { Axial } from "../geometry";
 import type { CharterId, HeroId, HorseVariantId, PlayerSeat, SettlementId } from "../ids";
 import type { ResourceType } from "../resources";
-import type { TransferDirection, TradeRouteEndpoint, TradeRoutePayload } from "../gameState";
+import type { CaravanState, TransferDirection, TradeRouteEndpoint, TradeRoutePayload } from "../gameState";
 import type { HeroTradeOffer } from "../commands/tradeHeroes";
 
 // Per-hero battle verdict (hero-outcomes plan W1): how a hero finished a
@@ -197,6 +197,47 @@ export type EngineEvent =
         to: TradeRouteEndpoint;
         payload: TradeRoutePayload;
         wagons: number;
+      }
+    | {
+        // One wrap of a caravan's journey -- the only place a caravan ever
+        // moves is packages/engine/src/logistics.ts's advanceTradeRoutes, run
+        // by advanceRound inside the EndTurn command. Derived server-side in
+        // server/app/commandHandler.ts's EndTurn case by comparing each
+        // route's caravan record before and after the wrap (the same
+        // set-difference derivation TradeRouteRemoved uses), so the movement
+        // pass itself stays unaware of the event log. Classified "apply" in
+        // ENGINE_EVENT_SYNC_CLASS -- targeted construction, like its sibling
+        // TradeRouteCreated -- because the record cannot be re-derived: a
+        // leg's path is A* over the rebuilt map plus whatever of the wrap's
+        // movement budget the delivery left over. ONE row per route per wrap
+        // reports the three moments a playthrough found silent (the load, the
+        // delivery, the turn for home) as FIELDS rather than as three rows:
+        // they all describe one single-record mutation, and a second row for
+        // the same fact is a second source of truth.
+        type: "CaravanAdvanced";
+        actor: PlayerSeat;
+        routeId: string;
+        // The route's caravan AFTER the wrap, verbatim (the applier assigns
+        // it). null = the cart reached home and unloaded; it reloads on a
+        // later wrap. `cargo` holds the route payload's units (units of
+        // `payload.resource`, or gold).
+        caravan: CaravanState | null;
+        // What the wrap drew out of the FROM endpoint to start this leg (the
+        // load), in the payload's own units; 0 when the wrap did not load.
+        // Exactly the record's own cargo on a departure wrap: a caravan is
+        // created from null only by the load branch, which returns with
+        // `cargo: load, pathIndex: 0` and walks nothing that wrap.
+        loaded: number;
+        // What the wrap landed on the TO endpoint (the delivery), in the same
+        // units; 0 when the wrap delivered nothing -- a turnaround with its
+        // cargo intact (a dead or captured destination) and every homeward
+        // deposit both report 0, because neither is a delivery. The endpoint
+        // STORES are deliberately not carried: a lost origin reroutes a
+        // return load to the owner's nearest settlement
+        // (nearestSettlementOwnedBy), a target a route-level diff cannot
+        // name, so stock effects ride the same TurnEnded/poll resync boundary
+        // every other minimal-payload kind leaves them to.
+        delivered: number;
       }
     | {
         type: "TradeRouteUpdated";

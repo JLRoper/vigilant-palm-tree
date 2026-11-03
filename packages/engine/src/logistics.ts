@@ -471,6 +471,27 @@ export function caravanTile(caravan: CaravanState, from: { q: number; r: number 
   return caravan.pathIndex > 0 ? caravan.path[caravan.pathIndex - 1] : { q: from.q, r: from.r };
 }
 
+/**
+ * Structural equality of two caravan records, over every field a wrap can
+ * move. One rule, two consumers: the client applier's already-applied noop
+ * (packages/engine/src/events/applyEvent.ts) and the EndTurn case's
+ * before/after derivation of the wraps worth eventing
+ * (server/app/turnService.ts's caravanAdvances). Identity cannot be used for
+ * either -- advanceTradeRoutes re-allocates the record (and its path) for
+ * every route it walks past, changed or not.
+ */
+export function sameCaravanRecord(a: CaravanState | null, b: CaravanState | null): boolean {
+  if (a === null || b === null) return a === b;
+  return (
+    a.phase === b.phase &&
+    a.cargo === b.cargo &&
+    a.pathIndex === b.pathIndex &&
+    (a.anchored ?? false) === (b.anchored ?? false) &&
+    a.path.length === b.path.length &&
+    a.path.every((tile, i) => tile.q === b.path[i].q && tile.r === b.path[i].r)
+  );
+}
+
 /** Load capacity for the route's wagon count: wagons x the payload kind's per-wagon capacity (the 10x gold convention). */
 function caravanCapacity(payload: TradeRoutePayload, wagons: number): number {
   return payload.kind === "gold" ? wagons * WAGON_GOLD_CAPACITY : wagons * WAGON_RESOURCE_CAPACITY;

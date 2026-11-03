@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { TradeRouteState } from "@heroes/contracts";
 import { applyEngineEvent, ENGINE_EVENT_SYNC_CLASS } from "@heroes/engine";
 import { makeHero, makeSettlement, makeState } from "../charter/_helpers";
 
@@ -18,13 +19,18 @@ test("every declared EngineEvent variant is classified exactly once", () => {
   // 29 -> 30 (2026-10-26): ResourcePickedUp added -- a hero picks the resources
   // off the tile it stands on (apply class: the amount taken AND what is left
   // on the tile ride the payload, so no map is needed to replay it).
-  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 30);
+  // 30 -> 31 (2026-11-03): CaravanAdvanced added -- one wrap of a caravan's
+  // journey, the only three moments of which (load, delivery, turn for home)
+  // used to reach no client but the one driving the turn (apply class: the
+  // server's post-wrap record rides the payload verbatim, because a leg's path
+  // is A* plus the wrap's leftover movement and no replay can re-derive it).
+  assert.equal(Object.keys(ENGINE_EVENT_SYNC_CLASS).length, 31);
 });
 
-test("classification counts: 15 apply, 8 resync, 7 ignore", () => {
+test("classification counts: 16 apply, 8 resync, 7 ignore", () => {
   const counts = { apply: 0, resync: 0, ignore: 0 };
   for (const cls of Object.values(ENGINE_EVENT_SYNC_CLASS)) counts[cls] += 1;
-  assert.deepEqual(counts, { apply: 15, resync: 8, ignore: 7 });
+  assert.deepEqual(counts, { apply: 16, resync: 8, ignore: 7 });
 });
 
 test("class agrees with the reducer: ResourcePickedUp credits the cargo and reduces the tile", () => {
@@ -193,6 +199,64 @@ test("class agrees with the reducer: an apply kind replays through applyEngineEv
     to: { q: 6, r: 5 },
   });
   assert.equal(result.outcome, "applied");
+});
+
+test("class agrees with the reducer: CaravanAdvanced assigns the server's post-wrap caravan record", () => {
+  assert.equal(ENGINE_EVENT_SYNC_CLASS.CaravanAdvanced, "apply");
+  const route: TradeRouteState = {
+    id: "route0",
+    from: { kind: "settlement", id: "s0" } as const,
+    to: { kind: "hero", id: "h0" } as const,
+    payload: { kind: "resource", resource: "food" } as const,
+    wagons: 1,
+    caravan: { phase: "toDestination", cargo: 50, path: [{ q: 3, r: 2 }], pathIndex: 1 },
+    ownerId: 0,
+  };
+  const state = makeState({ heroes: [makeHero("h0", 0, 5, 5)], settlements: [makeSettlement("s0", 0, 2, 2)] });
+  const withRoute = { ...state, tradeRoutes: [route], nextTradeRouteId: 1 };
+
+  // The row the EndTurn case appends for the delivery wrap: the load lands on
+  // the hero, the cart turns for home, and the record -- path and all -- is the
+  // server's, because a replay cannot re-derive one.
+  const delivered = applyEngineEvent(withRoute, {
+    type: "CaravanAdvanced",
+    actor: 0,
+    routeId: "route0",
+    caravan: { phase: "toHome", cargo: 0, path: [{ q: 5, r: 5 }, { q: 4, r: 5 }], pathIndex: 2, anchored: true },
+    loaded: 0,
+    delivered: 50,
+  });
+  assert.equal(delivered.outcome, "applied");
+  assert.deepEqual(delivered.state.tradeRoutes?.[0].caravan, {
+    phase: "toHome",
+    cargo: 0,
+    path: [{ q: 5, r: 5 }, { q: 4, r: 5 }],
+    pathIndex: 2,
+    anchored: true,
+  });
+  assert.equal(delivered.state.tradeRoutes?.[0].wagons, 1, "and nothing else about the route moves");
+
+  // The same record again is what already-applied looks like from behind.
+  const replay = applyEngineEvent(delivered.state, {
+    type: "CaravanAdvanced",
+    actor: 0,
+    routeId: "route0",
+    caravan: { phase: "toHome", cargo: 0, path: [{ q: 5, r: 5 }, { q: 4, r: 5 }], pathIndex: 2, anchored: true },
+    loaded: 0,
+    delivered: 50,
+  });
+  assert.equal(replay.outcome, "noop");
+
+  // A route this client does not hold is drift, never a fabricated route.
+  const drifted = applyEngineEvent(withRoute, {
+    type: "CaravanAdvanced",
+    actor: 0,
+    routeId: "route7",
+    caravan: null,
+    loaded: 0,
+    delivered: 0,
+  });
+  assert.equal(drifted.outcome, "resync");
 });
 
 test("class agrees with the reducer: a resync kind is admitted and refetches", () => {

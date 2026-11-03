@@ -68,9 +68,12 @@ test("settlementProductionRates: building producers merge into the tile rates", 
   assert.ok(foodOutput && foodOutput.resource === "food" && foodOutput.amount > 0);
 
   const result = settlementProductionRates(s, SEED);
+  // E1: each producer's output is rounded the way the payment loop rounds it
+  // (`Math.round(addStockClamped(...))` per addition), so these are the numbers
+  // the turn actually adds to the store, not a sum of raw fractions.
   assert.deepEqual(result.rates, [
-    { resource: "wood", perTurn: Math.round((2 + woodOutput.amount) * 100) / 100 },
-    { resource: "food", perTurn: Math.round(foodOutput.amount * 100) / 100 },
+    { resource: "wood", perTurn: 2 + Math.round(woodOutput.amount) },
+    { resource: "food", perTurn: Math.round(foodOutput.amount) },
   ]);
   assert.equal(result.goldPerTurn, 0);
 });
@@ -92,7 +95,7 @@ test("settlementProductionRates: gold producers surface separately and the tile 
     ["wood"],
     "the unpaid tile gold entry must not appear as a warehouse rate",
   );
-  assert.equal(result.goldPerTurn, Math.round(goldOutput.amount * 100) / 100);
+  assert.equal(result.goldPerTurn, Math.round(goldOutput.amount), "gold is summed raw and rounded once, as the treasury write does");
 });
 
 test("settlementProductionRates: in-construction buildings contribute nothing", () => {

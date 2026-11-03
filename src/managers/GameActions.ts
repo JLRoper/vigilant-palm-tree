@@ -27,6 +27,13 @@ import {
   treasuryCapToastMessage,
   TREASURY_CAP_SUMMARY_OFFENDER_LIMIT,
 } from "@screens/settlements/treasuryCap";
+import {
+  applyWarehouseCapSessionDedupe,
+  newlyCappedWarehouseResources,
+  warehouseCapSummaryToastMessage,
+  warehouseCapToastMessage,
+  WAREHOUSE_CAP_SUMMARY_OFFENDER_LIMIT,
+} from "@screens/settlements/warehouseCap";
 import { evaluateTradeReminder } from "@screens/shared/tradeNeedsReminder";
 import type { AssaultConfirmChoice } from "@screens/combat/assaultConfirmModal";
 import { api } from "../io/api";
@@ -731,6 +738,7 @@ export class GameActions {
     this.state.replaceState(tc.getState());
     this.reportUnpaidUpkeep();
     this.reportTreasuryCaps(gs);
+    this.reportWarehouseCaps(gs);
     this.remindTradeRoutes();
     this.session.setSaveStatus("saved");
     this.maybeAutoResolveBattle();
@@ -768,6 +776,34 @@ export class GameActions {
     }
     for (const row of rows) {
       showToast(treasuryCapToastMessage(row), "info");
+    }
+  }
+
+  // E2, the warehouse half of exactly the comment above: `addStockClamped` drops
+  // every unit of production that does not fit under a store's cap, with no
+  // event, no log line and no HUD change, so a store pinned at 500 kept
+  // advertising the rate it produced at (measured: "+26.36/day", three turns of
+  // no movement). Same two layers as the treasury's notice -- the transition
+  // between two states, then one toast per store per session -- and the same
+  // module-level, in-memory-only bookkeeping, so a reload re-toasts once rather
+  // than carrying a stale "already warned" set.
+  private reportWarehouseCaps(previous: GameState): void {
+    const merged = this.state.getState();
+    const gameName = this.session.getActiveGameName();
+    const seat = getInMemoryLocalPlayerId(gameName ?? "") ?? 0;
+    const rows = applyWarehouseCapSessionDedupe(
+      gameName,
+      merged,
+      seat,
+      newlyCappedWarehouseResources(previous, merged, seat),
+    );
+    if (rows.length === 0) return;
+    if (rows.length > WAREHOUSE_CAP_SUMMARY_OFFENDER_LIMIT) {
+      showToast(warehouseCapSummaryToastMessage(rows), "info");
+      return;
+    }
+    for (const row of rows) {
+      showToast(warehouseCapToastMessage(row), "info");
     }
   }
 

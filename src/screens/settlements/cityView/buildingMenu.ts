@@ -26,6 +26,7 @@ import {
 } from "@heroes/engine";
 import type { Warehouse } from "@heroes/contracts";
 import { footprintLine } from "./footprint";
+import { townHallUpgradeScope, townHallUpgradeScopeLine } from "./upgradeScope";
 import { upgradeRefusalTitle } from "../upgradeRefusal";
 
 function formatEffectLine(kind: BuildingKind, level: number, effort = 1): string[] {
@@ -306,6 +307,13 @@ export class BuildingMenu {
     if (building.kind === "townHall" && building.level < 3 && this.onUpgradeTownHall) {
       const cost = TOWN_HALL_UPGRADE_COSTS[building.level];
       if (cost) {
+        // E3: the offer used to price only its own one-off cost and its 7 days,
+        // so the click that levels the WHOLE city (every building, districts
+        // included) and doubles its per-day upkeep read like a cheap upgrade.
+        // The engine's own rule, stated before the purchase.
+        const scopeLine = settlement
+          ? townHallUpgradeScopeLine(townHallUpgradeScope(settlement, building.level + 1), building.level + 1)
+          : "";
         const row = document.createElement("div");
         row.style.display = "flex";
         row.style.justifyContent = "space-between";
@@ -343,8 +351,8 @@ export class BuildingMenu {
         upgradeBtn.title = !settlement
           ? "Open this settlement to see what the upgrade needs"
           : canAfford
-            ? `Raise the town hall to L${building.level + 1} (${cost.gold}g ${cost.wood}w ${cost.stone}s, ${cost.days} days)`
-            : upgradeRefusalTitle({ settlement, cost, inProgress: !!settlement.upgrade });
+            ? `Raise the town hall to L${building.level + 1} (${cost.gold}g ${cost.wood}w ${cost.stone}s, ${cost.days} days). ${scopeLine}`
+            : [upgradeRefusalTitle({ settlement, cost, inProgress: !!settlement.upgrade }), scopeLine].filter(Boolean).join("\n");
         upgradeBtn.addEventListener("click", () => {
           if (canAfford) {
             this.onUpgradeTownHall?.();
@@ -354,6 +362,18 @@ export class BuildingMenu {
         row.appendChild(upgradeBtn);
 
         this.menu.appendContent(row);
+
+        if (scopeLine) {
+          const scopeEl = document.createElement("div");
+          scopeEl.textContent = scopeLine;
+          Object.assign(scopeEl.style, {
+            fontSize: "10px",
+            opacity: "0.75",
+            lineHeight: "1.4",
+            marginBottom: "4px",
+          });
+          this.menu.appendContent(scopeEl);
+        }
       }
     }
 
