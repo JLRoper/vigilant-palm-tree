@@ -816,6 +816,9 @@ test("D10: an AI-seat command on a server-driven game is 403 ai_seat_command_for
 // test below has something to preserve.
 function bankSettlement(name: string): SettlementState {
   return makeSettlement(ids(name).settlementId, 0, 2, 2, {
+    // Level 2: this fixture holds a bank (and the specs below commit NEW ones),
+    // and a bank is a level-2 kind -- the tier gate in applyPlaceBuildings.
+    level: 2,
     gold: 100000,
     warehouse: emptyWarehouse({ wood: 100, stone: 100 }),
     buildings: [

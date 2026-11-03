@@ -36,7 +36,7 @@ test("E4: the level-1 starter city offers no 2x2 row, and each one says why", ()
   const starter: BuildingDef[] = buildStarterLayout({ size: 5, style: "pixel", farms: 3 });
   assert.equal(starter.length, 10, "fixture premise: the starter set fills the grid bar three cells");
 
-  const { body } = openPlacer(starter);
+  const { body } = openPlacer(starter, undefined, 1);
   for (const label of ["Farm Field (2\u00D72)", "Apartment (2\u00D72)", "Warehouse (2\u00D72)", "Town Hall (built) (2\u00D72)"]) {
     const row = exactRow(body, label);
     assert.equal(row.disabled, true, `${label}: a row the grid cannot take is not an offer`);
@@ -53,7 +53,10 @@ test("E4: the level-1 starter city offers no 2x2 row, and each one says why", ()
 });
 
 test("E4: an empty grid still offers every row -- the rule is the grid, not a blanket ban", () => {
-  const { body } = openPlacer();
+  // Level 3: this spec is about the SPACE rule, so it declares a settlement
+  // level that admits every kind (the tier gate has its own spec,
+  // paletteLevelGateRow.test.ts).
+  const { body } = openPlacer([], undefined, 3);
   for (const label of ["Farm Field (2\u00D72)", "Warehouse (2\u00D72)", "House"]) {
     const row = exactRow(body, label);
     assert.equal(row.disabled, false, `${label} is placeable on an empty 5x5 grid`);
