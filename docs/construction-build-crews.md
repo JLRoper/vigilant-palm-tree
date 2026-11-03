@@ -134,6 +134,30 @@ only), so no new rejection path exists. The alternative — the crew walks off e
 is rejected in §9: it would silently unstaff every building the player rushed, turning a rush into two
 chores (build it, then staff it) and hiding work the player already paid pool slots for.
 
+**The trim is deterministic, and the doc states the order because an unstated trim becomes a defect.**
+`BuildingDef.workers` is an **anonymous integer count**, not a set of identified individuals — there is
+no builder #1 whose seniority could decide who stays. So "trim" means exactly: reduce the count to
+`buildingMaxWorkers(kind)`, and release the surplus as **idle workers in the settlement's pool** (the
+`assigned` total drops by the surplus; `assignedWorkersExplicit` recomputes; nothing is deleted). If the
+pool arithmetic cannot absorb the release — a settlement already sitting `over pool` — the released
+builders still become idle, the count still drops, and the panel prints its existing ` · over pool`
+marker; **no worker is ever deleted, and no site is ever auto-staffed by the trim.** The trim happens in
+the completion tick, before any other system reads the crew (§5.b rule 4), so production in that tick
+already reads the trimmed count.
+
+**The construction cap does not raise any building's operational capacity.** `CONSTRUCTION_MAX_BUILDERS`
+(4) is the ceiling *while `construction` is set*; the moment the timer clears, `buildingMaxWorkers(kind)`
+governs as it always has. A house still holds exactly 1 worker when it is finished; nothing in this
+feature may be read as raising it. The 4 is written **once**, as the named constant in
+`packages/engine/src/settlement/workforce.ts`, and every reader (§2 #5/#6/#15, §6, §7) reads the constant
+rather than a literal.
+
+**This ceiling was reasoned from the mechanic's premise, not from a written game rule**, and the doc
+records that so the reader can overturn it knowingly: the premise *is* the 1-to-4 builder curve, and a
+kind's-cap ceiling would leave the curve inert for every small-worker building — starting with the house,
+the most common thing a settlement raises. If the reader rejects it, the fallback is §9 row 2 (the kind's
+cap as the site ceiling), which costs the feature on exactly those buildings.
+
 ---
 
 ## 4. Balance — what the premise does to today's numbers
@@ -216,6 +240,15 @@ full crew**; the fifth (3-day builds) only matches it. Also, today's single buil
 ticks**, where a 2-day house today finishes in one. That doubling is the first thing a returning player
 will notice; it is a consequence of the premise, not of an implementation choice, and the reader should
 be told it plainly rather than discover it.
+
+**And an UNTOUCHED building gets slower.** The free auto crew (`workers === undefined`) is today's full
+effort = **2.00×**; under the premise it is 4 builders = **1.60×**. So a legacy building's own build time
+lengthens on the 2-, 4-, 5- and 6-day classes (1→2, 2→3, 3→4, 3→4 turns) without the player touching the
+feature at all. That is the same nerf the ceiling applies, landing on the population that never opted in
+— the single largest regression this premise buys, and the reason §11 keeps "exempt the auto crew from
+the nerf (keep 2.00×)" as an **open question the reader owns** rather than defaulting it. The doc's
+position: **an untouched site must never read as 1 builder** (that would be the 0-builder/slowest path);
+it reads as a full 4-builder crew, which is 1.60×, not today's 2.00×.
 
 **(b) The crew's value is lumpy in whole days — and one builder of the four is often worth nothing.**
 With one decrement per tick and the overshoot discarded at completion, the completion date is a step
@@ -348,6 +381,23 @@ which only ever adds, skips growth when food is short, and never subtracts. Noth
 
 ### (e) The AI — the premise quietly breaks the AI's building programme, and the card must fix it
 
+**The one rule for the auto crew and the stall, stated once so the AI's answer follows from it and does
+not sit beside it.** The auto crew is a **legacy/undefined-crew state**, not a placement default. It
+applies in exactly the places it applies today:
+
+| `workers` value | where it comes from | rate | spends pool? |
+|---|---|---|---|
+| `undefined` | a legacy settlement never touched; or a **bootstrap** settlement's new placement (`newPlacementsAutoCrew`, `workforce.ts:109` — no explicit count anywhere **and no districts**) | full crew = 4 builders = 1.60× | no |
+| `0` | every other new placement (`placeBuildings.ts:141`): a district placement, or a placement in a settlement that has any explicit count | **0.00× — stalled until staffed** | no |
+| `n ≥ 1` | an explicit assignment | `buildRate(n)` | yes |
+
+So "does a site stall for want of an assignment?" has exactly one answer: **only where the auto crew does
+not reach.** A brand-new town's own placements keep the free full crew; a placement in a city with any
+explicit crew or any district starts dark and stays dark until someone is assigned. Nothing about the AI
+is special in this table — and **an AI seat's settlement is never a bootstrap** (districts are seeded at
+tier 2 and 3, `districtSeed.ts`), so an AI placement is precisely the `0` row. That is why the AI must
+crew its sites: it is the same rule the human plays under, not an exemption.
+
 `server/app/aiDriver.ts:933` issues `PlaceBuildings` with buildings shaped `{kind, gx, gy, level: 1}` —
 **no `workers` field at all** — and the driver never issues `AssignWorkers` anywhere (grep at
 `0e356c4`). `placeBuildings.ts:141` therefore decides the new site's crew:
@@ -360,20 +410,39 @@ the premise lands starts at `workers: 0` and, under `buildRate(0) = 0`, **never 
 same placement crawls at 1× and completes. The AI's garrison-growth programme in particular places
 buildings to raise draft capacity (`aiDriver.ts:901`'s comment), and it would place them for nothing.
 
-The card must therefore include an AI rule. Recommended (smallest rule that keeps the AI correct):
+**Decision (taken; the reader's answer): the AI crews its own sites, and an AI building site must never
+stall by construction.** A stalled AI is a defanged AI — the seats exist to push the player, so freezing
+their growth would be a far bigger balance event than the mechanic itself, and it would land as a side
+effect nobody chose. The card must implement all five of the following, and each is a graded requirement:
 
-- **The AI crews its own sites, through the same command a player uses.** After (or with) each
-  placement, for each settlement it owns, assign builders to its unfinished sites by this priority:
-  (1) a site at 0 builders (a stalled site first — otherwise the placement is a wasted cost), then
-  (2) the site with the fewest `daysRemaining`, taking up to `CONSTRUCTION_MAX_BUILDERS` each, spending
-  only idle pool slots (`pool - assigned`), largest `buildDays` first when ties. Rejections
-  (`pool_exhausted`) are tolerated and logged, exactly as the driver's other passes do.
-- **And the AI does not place what it cannot staff**: `pickHeroArmyBuildings` and the other placement
-  planners gate on `pool - assigned >= 1` for that settlement. A settlement with no idle slot banks its
-  resources instead of adding a site it will never finish.
-- **Explicitly rejected**: exempting AI placements from the rule (an auto-crew for the AI). It would
-  give the AI a 2×-class advantage over the player on the exact axis the feature is about, and any
-  player-visible AI city would keep completing buildings while the player's own sites froze.
+1. **One rule, and the AI's answer follows from it.** The table above is the whole story: `undefined` is
+   the legacy/bootstrap auto crew (free, 4 builders), `0` is stalled, `n ≥ 1` is an explicit crew. An AI
+   seat's settlement is never a bootstrap, so its placements are `0` and must be staffed. There is **no
+   AI-specific carve-out** — the AI plays the human's rule and simply does the staffing the human would.
+2. **No invisible free labour for the AI.** The AI assigns **real population out of its own pool**,
+   through the same `AssignWorkers` command (`packages/contracts/src/commands/assignWorkers.ts`, reducer
+   `staffWorkers.ts:115`), obeying the same per-building construction cap and the same deterministic
+   trim-back on completion. No bypass, no second code path, no crew of a different size.
+3. **The AI must not start what it cannot staff.** Its placement planners (`pickHeroArmyBuildings` and the
+   others) gate on `pool - assigned >= 1` for that settlement; with no idle slot the seat banks its
+   resources instead of adding a site it will never finish. A permanently half-built site in an AI
+   settlement is worse than no site.
+4. **Measure it, do not assert it.** A same-seed before-and-after drive of an AI seat, reporting
+   settlements founded, buildings completed, hero power and treasury over N rounds — taking workers out
+   of the AI's production economy to crew sites is a real cost, and the design must show the AI is not
+   materially slower than it is today. Asserting "the AI still works" without those numbers is not
+   verification.
+5. **Specify it precisely enough for stage 3.** Where the assignment is decided (the AI's own
+   placement/building step), what it reads (`pool - assigned`, each site's `buildDays`/`daysRemaining`,
+   the construction cap), and what it does when its pool is empty (place nothing new; keep what it has).
+   The staffing order the card should carry: a stalled site first (it is already paid for and going
+   nowhere), then fewest `daysRemaining`, up to `CONSTRUCTION_MAX_BUILDERS` each, largest `buildDays`
+   first on ties. Rejections (`pool_exhausted`) are tolerated and logged, as the driver's other passes do.
+
+The human-side invariants in §4.3(a) and §5(g) stand unchanged: the auto crew stays free and at full
+effort for an untouched *legacy* building, so a player who ignores the mechanic is not punished either.
+Nothing in the AI rule reverses that; if it ever would, that is a deliberate reversal to be stated out
+loud, not a silent coexistence.
 
 Verification the card must carry (stage 4 will look for it): a server-side test that drives the AI
 driver over N rounds and asserts an AI-placed building is **completed** (its `construction` field gone)
@@ -412,6 +481,16 @@ The loudest line is row 2: **an existing save whose sites were left dark freezes
 wood pile unmoved. That is the premise working as asked, and it is the one change a player will read as
 a defect unless the UI says it (§6). No migration is needed and none should be written: the field's
 meaning is unchanged, only the curve reading it.
+
+**The invariant this design is held to, stated precisely — and what it honestly cannot mean.** An
+untouched *legacy* building (`workers === undefined`) keeps a **free crew at full effort: 4 builders**,
+so its crew value never falls to 1 builder and its build time never becomes the 0-builder time. It
+**cannot** be "exactly the same time as it builds today": today's auto crew is 2.00× and the premise's
+full crew is 1.60×, so an untouched legacy site takes longer on 2-, 4-, 5- and 6-day builds (1→2, 2→3,
+3→4, 3→4 turns). That is the premise's own nerf reaching the population that never opted in, not an
+extra penalty invented here — and the alternative ("keep the auto crew at 2.00×") is an **open fork in
+§11 that the reader owns**, not something this document defaults. Stage 3 must carry a test proving an
+untouched legacy site follows the **4-builder (1.60×) path, never the 0-builder path**.
 
 ### (h) Districts
 
@@ -616,6 +695,17 @@ One line per item; each is either a test the card must carry or an observable a 
     `docs:check` are green on the changed tree (`docs/settlements.md`'s marker refreshed).
 20. The premise is stated to the player, not hidden: the palette's build-time line (§6.5) says a site
     with no builders makes no progress before the player spends anything on it.
+21. **The untouched-legacy invariant**: a building whose `workers` is `undefined` (legacy settlement, or a
+    bootstrap settlement's placement) follows the **4-builder / 1.60× path**, never the 0-builder path —
+    a regression test on the existing workforce suite, and a unit test comparing its `daysRemaining`
+    against `buildRate(4)`. (It does *not* build in the same time as today; that arithmetic cannot hold —
+    §5.g, §11.2 #2.)
+22. **The trim is deterministic and lossless**: on completion, a site crewed above the kind's operational
+    cap is reduced to `buildingMaxWorkers(kind)`, the surplus appears as idle pool slots (the `assigned`
+    total drops by exactly the surplus), no worker is deleted, and an over-pool settlement's released
+    builders are idle rather than dropped — a unit test on the completion tick.
+23. **The construction cap is a named constant** (`CONSTRUCTION_MAX_BUILDERS` in `workforce.ts`): a source
+    test (or lint) that no other file writes a bare `4` as a construction crew limit.
 
 ### One worked example (the arithmetic the card is graded against)
 
@@ -656,7 +746,7 @@ stall is an absence of decrement, and nothing in the engine puts a worker back o
 | 7 | **Carry the completion overshoot into the player's next build** | Rewards micro-management of exactly when a site finishes with a hidden head start, and needs somewhere to store it (a new field). Today's "discard the overshoot" rule is kept (§5.b). |
 | 8 | **Auto-unstaff a site when the pool is over-subscribed** | Progress would start and stop without the player acting; nothing on screen would explain it; and population never falls anyway (§5.d). |
 | 9 | **Exempt the AI from the rule (auto-crew its placements)** | Hands the AI a straight advantage on the feature's own axis and leaves AI cities visibly finishing while the player's stall (§5.e). |
-| 10 | **Extending the rule to the upgrade timers in the same card** | A different system (`advanceSettlementUpgrades`, `WORKFORCE_UPGRADE_ACCEL_KINDS`) with its own accel curve; scope creep here would make this card unreviewable. Asked as an open fork instead (§11). |
+| 10 | **Extending the rule to the upgrade timers in the same card** | A different system (`advanceSettlementUpgrades`, `WORKFORCE_UPGRADE_ACCEL_KINDS`) with its own accel curve; widening a one-mechanic stage changes what two later cards are asked to do. Recorded as a deliberate scoping choice (§11.1 #6); the upgrade curve is an open question the reader owns (§11.2 #1). |
 | 11 | **A "hammer" icon or a new panel for builders** | The people on screen, the stepper and the stall count already carry it; a second surface for the same integer is where the game's own UI debt comes from. |
 
 ---
@@ -689,26 +779,57 @@ stall is an absence of decrement, and nothing in the engine puts a worker back o
 
 ---
 
-## 11. The genuinely new forks (asked AFTER this document was committed)
+## 11. Decisions taken after this document's first commit, and the questions still open
 
-These are new questions the measuring raised. They are **not** the resolved fork (the curve, the cap and
-the stall are settled), and none of them blocks an implementation that takes the recommendation each
-line carries:
+### 11.1 Taken — recorded so stages 2 and 3 do not re-open them
 
-1. **Do the upgrade timers follow the same curve?** `advanceSettlementUpgrades` (`advance.ts:29`) uses
-   the same `1 + accel` shape with `upgradeAccelEffort` (`workforce.ts:118`), and a town-hall upgrade is
-   capped at 2× today. *Recommendation: no — leave upgrades alone in this card; the reader's sentence is
-   about a building's progress, and one curve change per card is what keeps it reviewable.*
-2. **Is the site ceiling really 4 for a house?** *Recommendation: yes, with a trim to the kind's cap on
-   completion (§3) — otherwise a house can never have a second builder and the feature is invisible on
-   half the registry.*
-3. **Is a legacy/auto site a full crew of 4?** *Recommendation: yes — `undefined` already means "full
-   effort" everywhere, and the auto crew spends no pool, which is what keeps a brand-new town's own
-   placements moving.*
-4. **Does the AI crew its own sites (the §5.e rule), or is the AI's building programme allowed to
-   stall?** *Recommendation: crew them, and do not place what it cannot staff — a stalled AI is
-   indistinguishable from a broken AI.*
+1. **The curve is ADDITIVE** (`1 + 0.2 × (builders − 1)`): settled by the reader, and the design agrees.
+   Its only whole-day divergence from compounding is the 5-day/4-builder cell (4 turns against 3); do not
+   re-ask which curve.
+2. **The construction ceiling is 4 for EVERY kind while under construction**, trimmed back to the kind's
+   own operational cap in the completion tick, deterministically released to the settlement's idle pool,
+   never deleted (§3). The reason on the record: the mechanic *is* the 1-to-4 curve, so a kind's-cap
+   ceiling would leave it inert for every small-worker building, the house first. This was reasoned from
+   the mechanic's premise and **not from a written game rule** — the reader may overturn it, and the
+   fallback is §9 row 2.
+3. **The construction cap does not raise any building's operational capacity** — a house still holds 1
+   worker once finished; only the building's *construction labour* reaches 4.
+4. **An untouched legacy/auto building keeps a free crew at FULL effort = 4 builders = 1.60×**, never 1
+   builder. Stated as an invariant, with the honest arithmetic caveat in §5(g): because today's full
+   effort is 2.00× and the new full crew is 1.60×, "exactly the same build time as before" **cannot**
+   hold under this curve — an untouched site does get slower on 2-, 4-, 5- and 6-day builds. The test the
+   card must carry proves the 4-builder path, not the 0-builder path.
+5. **The AI crews its own sites** from its own pool, under the human's rule, and never starts what it
+   cannot staff; an AI site must never stall by construction, and there is no AI carve-out (§5.e).
+6. **Upgrades are OUT OF SCOPE for this card** — a deliberate scoping choice, with the reason on the
+   record: this is stage 1 of a four-stage chain whose subject is ONE mechanic (population working a
+   building sets its BUILD rate); stage 2 analyses exactly this design and stage 3 implements it, so
+   widening the mechanic now would change what two later cards are being asked to do. Upgrades are a
+   separate timer with their own balance question (levelling a town hall is not the same act as a crew
+   raising a building). The design does not imply otherwise, and the upgrade curve is an open question
+   the reader owns (§11.2 #1), not something this measurement settled.
 
-The report for this run records these four in the panel's own words; the branch to read them on is
-`wtgui/stage-1-of-4-re-issued-d-3a7e42`, and this file is the only artifact it carries.
+### 11.2 Still open — the reader owns these; the doc carries only recommendations
+
+1. **Should the builder curve reach the UPGRADE timers?** `advanceSettlementUpgrades` (`advance.ts:29`)
+   uses the same `1 + accel` shape with `upgradeAccelEffort` (`workforce.ts:118`); a town-hall upgrade is
+   capped at 2× today. *Recommendation: no in this card — if yes, it is its own card, its own row and its
+   own measurement.*
+2. **Should the free auto crew be exempted from the nerf (keep 2.00×)?** "An untouched building builds in
+   exactly the same time as before" cannot hold while the additive curve is in force (§5.g's arithmetic).
+   Accepting the slowdown keeps ONE curve and makes "assign workers" a genuine speed-up; exempting the
+   auto crew would make assigning workers a *downgrade* for an untouched building. *Recommendation:
+   accept the slowdown — it is the premise's own nerf, applied uniformly — but this is the reader's call,
+   because it is the largest regression the feature buys on population that never opted in.*
+3. **The AI's staffing priority shape** (which sites first, how many at once) — the §5.e rule is the
+   minimum the card must carry; a fuller prioritisation policy wants its own card and its own same-seed
+   measurement.
+4. **How many existing saves have dark sites** — needs a one-off query against the live database
+   (`workers = 0` on a building with a `construction` row), not a design call. The count decides how loud
+   the freeze needs to be announced in the release notes.
+
+The report for this run records these decisions and the open questions in the panel's own words; the
+branch to read them on is `wtgui/stage-1-of-4-re-issued-d-3a7e42`, and this file is the only artifact it
+carries. **PR #350 is open and must NOT be landed by this run** — the chain's landing is a separate
+decision.
 
