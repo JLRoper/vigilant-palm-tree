@@ -220,12 +220,19 @@ export const api = {
     // treats an absent field as classic, and an EXPLICIT classic keeps the
     // request honest about what the player picked in the form.
     gameMode?: GameMode,
+    // The lobby's own seat count, when the caller CHOSE one -- the LAN lobby's
+    // seat chip row. It rides the `lobby` jsonb the way uncharted/gameMode do,
+    // and the server prefers it over the human count when it builds the lobby's
+    // seats (server/routes.ts: `const seats = explicitSeats ?? (humanCount !==
+    // null ? humanCount : null);`, `explicitSeats` = `lobby.seats`). Absent
+    // keeps the legacy shape (seats = humanSlots).
+    seatCount?: number,
   ) => {
     console.log("[api] createGame mapSize:", mapSize, "gameMode:", gameMode);
     return fetchWithTimeout(`${BASE}/games`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, seed, hero_q, hero_r, enemy_positions, mapSize, humanSlots, enemySlots, seatFactions, uncharted, gameMode }),
+      body: JSON.stringify({ name, seed, hero_q, hero_r, enemy_positions, mapSize, humanSlots, enemySlots, seatFactions, uncharted, gameMode, ...(seatCount === undefined ? {} : { lobby: { seats: seatCount } }) }),
     }).then((r) => json<Game>(r));
   },
   claimLobbySeat: (name: string, seat: number, handle: string) =>
