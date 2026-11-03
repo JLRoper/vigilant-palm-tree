@@ -10,6 +10,16 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.2] - 2026-11-03
+
+the uncharted suite stops guessing the engine's terrain table
+
+`test:uncharted` part [D] was red on main (a895975 / 0.38.12) and inherited: it fails identically on 44e0f1d (0.38.9), f8686e1 (0.38.10) and 6a80df0 (0.38.11). The fixture picked its destination from a hand-rolled `IMPASSABLE = new Set(["water", "mountain"])` kept inside the test, while the engine's own cost table (`TERRAIN_COST` in `packages/engine/src/map/terrain.ts`) prices `denseForest` at `Infinity` as well. On seed 424242 with mapGenVersion 5 the hero starts at (5,7) and the first direction the fixture's set calls passable two hexes out resolves to (7,7) -- a `denseForest`; `/tiles` reports it as denseForest, `__gameDebug.isPassable(7,7)` is `false`, and `requestMove` correctly returns `false`, so [D] failed on its own fixture line (`requestMove to 7,7 rejected client-side`) before it ever reached the assertion it exists for.
+
+The fix removes the second copy of the terrain table outright: destination selection asks the LIVE game through `__gameDebug.isPassable` (the engine's own `GameMap.isPassable` / `TERRAIN_COST`, rivers included). Part [D] scans the six directions for a two-hex run the engine prices; part [B] walks `MIN_TRAIL_DISTANCE` (10) hexes along the most open direction the engine prices. The assertions are untouched -- [D] still proves a non-uncharted move never persists a `revealedTiles` key, and the destination stays a real, non-trivial two-hex move. No engine, terrain, persistence or wire change; `terrain.ts` is not modified.
+
+`patch`: the failure was in the test, not the game. Measured green on a895975 / 0.38.12 with a private database and kernel-assigned ports (never client port 5173): test:uncharted ([A]-[D]), test:settlements, test:districts, build, lint:deps, docs:check.
+
 ## [0.39.1] - 2026-11-03
 
 settings panel: slider labels and the new-game default mode
