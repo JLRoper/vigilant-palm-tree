@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.46.0] - 2026-11-03
+
+Faction economy: one optional FactionDef.economy table read by one seam (economy/factionEconomy.ts) at income and yield time -- Ironmark iron/stone/gold, Verdant food/wood, Ashen gold/arcane, each with a penalty, human neutral by default.
+
 ## [0.45.0] - 2026-11-03
 
 AI seats grow their hero armies, and with them take neutral capitals — the other half of the garrison change. Measured on a real `POST /games` board (seed 12 / 36x27 medium, the AI spawning four hexes from a capital), driven round after round: the seat's hero army went **132 -> 348 power** and the seat **took five neutral L3 capitals by assault over rounds 5-11**, where an untouched tree leaves the AI's force frozen at 132 and every 168-power capital neutral forever.
