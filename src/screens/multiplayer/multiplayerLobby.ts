@@ -5,6 +5,7 @@ import { PLAYER_COLORS } from "../../state/playerColors";
 import {
   setInMemoryLocalPlayerId,
   setLocalPlayerId,
+  setLocalClaimHandle,
 } from "../../players/localPlayer";
 
 interface LobbySeat {
@@ -260,6 +261,7 @@ export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): voi
         activeLocalPlayerId = 0;
         setInMemoryLocalPlayerId(updated.name, 0);
         setLocalPlayerId(updated.name, 0);
+        setLocalClaimHandle(updated.name, handle);
         await openLobby(updated);
       } catch (e) {
         showError(`Failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -342,6 +344,7 @@ export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): voi
         activeLocalPlayerId = seat;
         setInMemoryLocalPlayerId(updated.name, seat);
         setLocalPlayerId(updated.name, seat);
+        setLocalClaimHandle(updated.name, handle);
         await openLobby(updated);
       } catch (e) {
         showError(`Failed: ${e instanceof Error ? e.message : String(e)}`);

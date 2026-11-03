@@ -38,3 +38,25 @@ export function getInMemoryLocalPlayerId(gameName: string): PlayerId | null {
 export function setInMemoryLocalPlayerId(gameName: string, id: PlayerId): void {
   inMemory.set(gameName, id);
 }
+
+// The handle this browser claimed a seat with. The seat itself is remembered
+// above; the handle is what lets the load path recognise its own claim when the
+// remembered seat is gone (src/players/localSeat.ts).
+const HANDLE_PREFIX = "heroes.mp.claimHandle.";
+
+export function getLocalClaimHandle(gameName: string): string | null {
+  try {
+    const raw = window.localStorage.getItem(HANDLE_PREFIX + gameName);
+    return raw === null || raw.length === 0 ? null : raw;
+  } catch {
+    return null;
+  }
+}
+
+export function setLocalClaimHandle(gameName: string, handle: string): void {
+  try {
+    window.localStorage.setItem(HANDLE_PREFIX + gameName, handle);
+  } catch {
+    // localStorage may be disabled; the claim still stands server-side.
+  }
+}

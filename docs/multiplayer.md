@@ -25,7 +25,7 @@ This is the design doc the multiplayer system never had (former open question #5
 | Email binding | `attachPlayerSeat.ts` + `server/auth.ts` | If the claimer was signed in, the seat is bound to their auth email (server-derived, never client-supplied). Sign-in is optional — anonymous claims leave the seat unbound. |
 | Start gate | `lobby.startedAt` | Game is playable once the host starts it |
 | Rejoin reclaim | `server/routes.ts` lobby claim | A STARTED game's seat whose `claimed.email` matches the caller's auth email can be reclaimed by that identity (handle/claimedAt refresh; the game stays started). Anonymous (handle-only) claims cannot rebind, and brand-new seats stay unclaimable after start. |
-| Local seat identity | `src/players/localPlayer.ts` | Seat id kept in `localStorage` (`heroes.mp.localPlayerId.<game>`) plus an in-memory map; `MultiplayerSync.resync()` falls back to seat 0 for legacy starter games nobody claimed |
+| Local seat identity | `src/players/localPlayer.ts`, `src/players/localSeat.ts` | Seat id kept in `localStorage` (`heroes.mp.localPlayerId.<game>`), the handle it claimed with (`heroes.mp.claimHandle.<game>`), plus an in-memory map. The load path resolves WHICH claimed seat is this browser's — remembered seat, then its own handle, then the server-bound auth email — and asserts NO seat when none of the three identifies it (the local player id stays unset, the camera opens on the map centre rather than another seat's wagon). `MultiplayerSync.resync()` falls back to seat 0 for legacy starter games nobody claimed |
 
 ### Sync model (`src/io/multiplayerSync.ts`)
 
