@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.16] - 2026-11-03
+
+The multiplayer lobby's seat chip row and its human-player count input no longer share one label: the chips read "Maximum seats (2-4)" and the input "Number of human players (1 to the maximum seats)", each with its own accessible name.
+
 ## [0.39.15] - 2026-11-03
 
 the settings panel's eight slider rows are built by one labelled-slider-row helper that constructs each row's name line and its slider together, so a row can no longer be built without its name -- the round-4 F1 defect was one row doing exactly that while the others were fixed around it. No behaviour change: the rendered panel is byte-identical before and after, and the settings suite pins the shape (27 checks, was 26).

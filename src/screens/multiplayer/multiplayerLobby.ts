@@ -31,6 +31,9 @@ interface CreateMultiplayerLobbyOptions {
 
 const SEAT_COUNTS: Array<2 | 3 | 4> = [2, 3, 4];
 
+const SEAT_COUNT_LABEL = `Maximum seats (${SEAT_COUNTS[0]}-${SEAT_COUNTS[SEAT_COUNTS.length - 1]})`;
+const HUMAN_COUNT_LABEL = "Number of human players (1 to the maximum seats)";
+
 function defaultGameName(): string {
   const d = new Date();
   const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -130,7 +133,7 @@ export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): voi
     hostPanel.replaceChildren();
     const intro = document.createElement("div");
     intro.textContent =
-      "Pick a seat count and game name. Share the LAN URL with other players; they'll open this page and click Join.";
+      "Pick the maximum seats and game name. Share the LAN URL with other players; they'll open this page and click Join.";
     intro.style.opacity = "0.7";
     intro.style.fontSize = "11px";
     hostPanel.appendChild(intro);
@@ -147,12 +150,14 @@ export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): voi
     hostPanel.appendChild(nameInput);
 
     const seatsLabel = document.createElement("label");
-    seatsLabel.textContent = "Number of human players";
+    seatsLabel.textContent = SEAT_COUNT_LABEL;
     seatsLabel.style.opacity = "0.7";
     seatsLabel.style.fontSize = "11px";
     hostPanel.appendChild(seatsLabel);
     const seatWrap = document.createElement("div");
     Object.assign(seatWrap.style, { display: "flex", gap: "6px" });
+    seatWrap.setAttribute("role", "group");
+    seatWrap.setAttribute("aria-label", SEAT_COUNT_LABEL);
     let selectedSeats: 2 | 3 | 4 = 3;
     const seatBtns: Record<2 | 3 | 4, HTMLButtonElement> = {} as Record<2 | 3 | 4, HTMLButtonElement>;
     function refreshSeats(): void {
@@ -181,7 +186,7 @@ export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): voi
     refreshSeats();
 
     const humanLabel = document.createElement("label");
-    humanLabel.textContent = "Number of human players";
+    humanLabel.textContent = HUMAN_COUNT_LABEL;
     humanLabel.style.opacity = "0.7";
     humanLabel.style.fontSize = "11px";
     hostPanel.appendChild(humanLabel);
@@ -190,6 +195,7 @@ export function createMultiplayerLobby(opts: CreateMultiplayerLobbyOptions): voi
     humanInput.min = "1";
     humanInput.max = String(selectedSeats);
     humanInput.value = "2";
+    humanInput.setAttribute("aria-label", HUMAN_COUNT_LABEL);
     styleInput(humanInput);
     hostPanel.appendChild(humanInput);
     seatWrap.querySelectorAll("button").forEach((b) =>
