@@ -337,3 +337,46 @@ test("migration 035 gives an existing game's district buildings rows, and re-app
     await pool.query("DELETE FROM games WHERE name = $1", [name]);
   }
 });
+
+test("migration 036 drops games.turn on a database that still has it, and re-applies cleanly", async () => {
+  // `games.turn` had no writer but its own DEFAULT 1 and no reader anywhere in
+  // the repo, so every row claimed turn 1 while `round` advanced (measured over
+  // the shared database before the drop: 329 games, one distinct turn value,
+  // round 1..1996). The upgrade hazard is the opposite of the 035 backfill's:
+  // schema.sql no longer declares the column, so a FRESH database never creates
+  // it, and an EXISTING one still carries it -- this migration is what removes
+  // it there. So the test recreates the pre-036 column on a live row (exactly
+  // what the shared `game_poc` and every pod still have) and lets the boot pass
+  // remove it, then proves a second pass is still a clean no-op.
+  const name = uniqueName();
+  const turnColumnExists = async (): Promise<boolean> =>
+    (
+      await pool.query<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns
+          WHERE table_name = 'games' AND column_name = 'turn'`,
+      )
+    ).rowCount === 1;
+
+  try {
+    await pool.query(`ALTER TABLE games ADD COLUMN IF NOT EXISTS turn INTEGER NOT NULL DEFAULT 1`);
+    await seedLegacyGame(name, {}, {});
+    const preMigration = await pool.query<{ turn: number }>(`SELECT turn FROM games WHERE name = $1`, [name]);
+    assert.equal(preMigration.rows[0].turn, 1, "the pre-036 column is back, pinned at its DEFAULT 1");
+
+    await initSchema();
+
+    assert.equal(await turnColumnExists(), false, "the boot pass drops games.turn");
+    const survived = await pool.query<{ round: number; day: number }>(
+      `SELECT round, day FROM games WHERE name = $1`,
+      [name],
+    );
+    assert.equal(survived.rowCount, 1, "the game row the column sat on is untouched");
+    assert.equal(survived.rows[0].round, 1, "and its round -- the real progress field -- reads as it did");
+
+    await initSchema();
+
+    assert.equal(await turnColumnExists(), false, "a second initSchema() does not bring it back");
+  } finally {
+    await pool.query("DELETE FROM games WHERE name = $1", [name]);
+  }
+});

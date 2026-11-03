@@ -46,7 +46,6 @@ function installFetch(endTurnPost: () => Promise<Response>): void {
         seed: 1,
         hero_q: 2,
         hero_r: 2,
-        turn: 1,
         gold: 0,
         enemy_positions: [],
         created_at: "2026-10-01T00:00:00.000Z",

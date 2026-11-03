@@ -66,13 +66,12 @@ export type Game = {
   seed: number;
   hero_q: number;
   hero_r: number;
-  // LEGACY, FROZEN AT CREATION. `games.turn` is written once by the column's
-  // DEFAULT 1 (POST /games' INSERT never names it) and no code writes it again
-  // -- the End Turn cycle moves `round`/`day`/`active_player_id` instead.
-  // Measured on the shared database: every row reads turn = 1 while `round`
-  // runs from 1 to 1996. Read `round` for a save's progress (the Load surfaces
-  // both render loadGameModal's loadRowProgress); this field is payload-only.
-  turn: number;
+  // The games row carries NO turn counter: `games.turn` was a column nothing
+  // wrote (its DEFAULT 1 was the only writer) and nothing read, so it is gone
+  // (server/migrations/036_drop_games_turn.sql). A save's progress is `round`
+  // (with `day` and `active_player_id`) -- the fields the End Turn cycle
+  // actually moves; the Load surfaces both render loadGameModal's
+  // loadRowProgress off it.
   gold: number;
   enemy_positions: EnemyPos[];
   created_at: string;
