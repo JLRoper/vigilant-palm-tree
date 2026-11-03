@@ -30,7 +30,7 @@ const REQUEST_MAX_AGE_MS = 30_000;
 
 export interface TestRequest {
   runId: string;
-  entry: "smoke" | "multiplayer" | "cityview" | "settlements" | "districts" | "aiDefender" | "aiCharter" | "logisticsCaravan" | "uncharted" | "heroVariants" | "heroTrade" | "settlers" | "visual" | "logpanel";
+  entry: "smoke" | "multiplayer" | "cityview" | "cityGridTurnover" | "newGameForm" | "settlements" | "districts" | "aiDefender" | "aiCharter" | "logisticsCaravan" | "uncharted" | "heroVariants" | "heroTrade" | "settlers" | "visual" | "logpanel";
   apiPort: number;
   clientPort: number;
   autoClose: boolean;
@@ -49,12 +49,82 @@ export function loadRequest(): TestRequest | null {
   }
 }
 
+/**
+ * The ports this box's DEPLOYED Docker stack answers on (`game_api` publishes
+ * 3001, `game_web` publishes 5173). A suite that falls back to one of these is
+ * not "reaching the dev server" -- it is driving a built image from some
+ * earlier deploy, and for the web that means measuring an OLDER BUNDLE:
+ * `game_web` answers /src/*.ts with text/html (the SPA fallback), so a browser
+ * suite whose `vite --strictPort` lost the bind race silently asserts against
+ * whatever the deployed app does (playthrough finding 22; the same class of
+ * silent wrong-target run test/_envGuard.ts refuses for the by-hand entries).
+ */
+export const DEPLOYED_TEST_PORTS: Record<"API_PORT" | "CLIENT_PORT", number> = {
+  API_PORT: 3001,
+  CLIENT_PORT: 5173,
+};
+
+export interface PortSources {
+  /** The wrapper's fresh `local/.test-request.json`, when there is one. */
+  request: { apiPort: number; clientPort: number } | null;
+  env: Record<string, string | undefined>;
+}
+
+export interface PortResolution {
+  port: number;
+  source: "request" | "env" | "fallback";
+}
+
+/**
+ * Resolves ONE port, or refuses rather than guessing a shared target. Ports
+ * may come from the wrapper's request file (for the run it is about to spawn --
+ * the same precedence as before) or from the environment; the DEFAULT is
+ * honoured only when it is not this box's deployed stack. Explicitly asking for
+ * a deployed port (API_PORT=3001, CLIENT_PORT=5173) stays allowed: the problem
+ * is the guess, not the target.
+ */
+export function resolveTestPort(
+  variable: "API_PORT" | "CLIENT_PORT",
+  fallback: number,
+  sources: PortSources,
+): PortResolution {
+  if (sources.request) {
+    return {
+      port: variable === "API_PORT" ? sources.request.apiPort : sources.request.clientPort,
+      source: "request",
+    };
+  }
+  const raw = sources.env[variable];
+  if (raw != null && raw.trim() !== "") {
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 1 || value > 65535) {
+      throw new Error(
+        `${variable}="${raw}" is not a TCP port (1-65535). Refusing to run: a malformed port has no safe fallback.`,
+      );
+    }
+    return { port: value, source: "env" };
+  }
+  if (fallback === DEPLOYED_TEST_PORTS[variable]) {
+    throw new Error(
+      [
+        `${variable} is unset and this run would fall back to ${fallback} -- this box's DEPLOYED Docker stack.`,
+        "Refusing: the run would drive a built image (the deployed web serves /src/*.ts as text/html, so a",
+        "browser suite would measure an OLDER BUNDLE) instead of this worktree.",
+        "",
+        `Pass ${variable} explicitly (a free port; scripts/allocate-ports.ts writes .env for the npm scripts),`,
+        `or ask for the deployed stack out loud with ${variable}=${fallback}.`,
+      ].join("\n"),
+    );
+  }
+  return { port: fallback, source: "fallback" };
+}
+
 export function getApiPort(fallback = 4000): number {
-  return loadRequest()?.apiPort ?? Number(process.env.API_PORT ?? fallback);
+  return resolveTestPort("API_PORT", fallback, { request: loadRequest(), env: process.env }).port;
 }
 
 export function getClientPort(fallback = 5173): number {
-  return loadRequest()?.clientPort ?? Number(process.env.CLIENT_PORT ?? fallback);
+  return resolveTestPort("CLIENT_PORT", fallback, { request: loadRequest(), env: process.env }).port;
 }
 
 export function shouldAutoClose(): boolean {
