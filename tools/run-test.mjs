@@ -17,6 +17,7 @@ const ENTRIES = {
   smoke: "test/smoke.ts",
   multiplayer: "test/multiplayer.smoke.ts",
   cityview: "test/cityView.test.ts",
+  cityGridTurnover: "test/cityGridTurnover.e2e.ts",
   settlements: "test/settlements.e2e.ts",
   districts: "test/districts.e2e.ts",
   aiDefender: "test/aiDefender.e2e.ts",
@@ -32,7 +33,7 @@ const ENTRIES = {
 
 // "visual" runs last -- it's the slowest suite (several game setups, each
 // spinning up its own scene) and gains nothing from running earlier.
-const ALL_ORDER = ["smoke", "multiplayer", "cityview", "settlements", "districts", "aiDefender", "aiCharter", "logisticsCaravan", "logpanel", "uncharted", "heroVariants", "heroTrade", "settlers", "visual"];
+const ALL_ORDER = ["smoke", "multiplayer", "cityview", "cityGridTurnover", "settlements", "districts", "aiDefender", "aiCharter", "logisticsCaravan", "logpanel", "uncharted", "heroVariants", "heroTrade", "settlers", "visual"];
 
 function readEnvPort(name, fallback) {
   try {
