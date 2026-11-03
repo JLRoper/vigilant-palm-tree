@@ -259,7 +259,7 @@ test("applyPlaceBuildings in district mode: allows (2,2), forbids townHall, vali
   );
   assert.equal(placeCenter.ok, true);
   const afterPlace = placeCenter.state.settlements.s0;
-  assert.equal(afterPlace.gold, 2000 - 100, "house costs 100g (never freeInitialLayout in district)");
+  assert.equal(afterPlace.gold, 2000 - 300, "house costs 300g (never freeInitialLayout in district)");
   assert.equal(afterPlace.warehouse.wood, 50 - 5, "house costs 5 wood");
   const distState = afterPlace.districts?.["3,2"];
   assert.ok(distState, "district entry created");
@@ -1372,16 +1372,16 @@ test("applyPopulationGrowth and computePlayerBonuses: include completed district
   };
 
   const bonus = districtPopulationBonus(sWithHousing);
-  assert.equal(bonus, 300 + 100 + 40, "completed district housing adds 440 populationBonus (house L1 300 + apartment 100 + farmhouse L2 40)");
+  assert.equal(bonus, 300 + 150 + 40, "completed district housing adds 490 populationBonus (house L1 300 + apartment 150 + farmhouse L2 40)");
 
   const grown = applyPopulationGrowth({ s0: sWithHousing }, 0.1).s0;
-  // levelMax = 500 + 440 = 940; growth = ceil((500 + 440) * 0.1) = 94 -> 594
-  assert.equal(grown.population, 594);
+  // levelMax = 500 + 490 = 990; growth = ceil((500 + 490) * 0.1) = 99 -> 599
+  assert.equal(grown.population, 599);
 
-  // Clamps to levelMax (940): 900 + ceil((900 + 440) * 0.1) = 1034 -> 940
+  // Clamps to levelMax (990): 900 + ceil((900 + 490) * 0.1) = 1039 -> 990
   const nearCap: SettlementState = { ...sWithHousing, population: 900 };
   const clamped = applyPopulationGrowth({ s0: nearCap }, 0.1).s0;
-  assert.equal(clamped.population, 940);
+  assert.equal(clamped.population, 990);
 
   const playerBonuses = computePlayerBonuses([sWithHousing]);
   assert.equal(playerBonuses.visionRangeBonus, 4);

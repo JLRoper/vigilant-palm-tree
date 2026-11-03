@@ -38,13 +38,13 @@ test("the scope's bill is the engine's own upkeep, before and after the upgrade"
   // Hand-checked against buildingUpkeep at both levels (the fixture's premise).
   assert.deepEqual(buildingUpkeep("townHall", 1), { wood: 3, stone: 2 });
   assert.deepEqual(buildingUpkeep("townHall", 2), { wood: 6, stone: 4 });
-  assert.deepEqual(buildingUpkeep("house", 2), { wood: 2, stone: 0 });
-  // city: town hall 3 + 2 houses 1 + 2 huts 1 + stone mine 2 + farmhouse 1;
+  assert.deepEqual(buildingUpkeep("house", 2), { wood: 4, stone: 0 });
+  // city: town hall 3 + 2 houses 4 + 2 huts 2 + stone mine 2 + farmhouse 1;
   // district: 1 house. Stone: the town hall's 2.
-  assert.deepEqual(scope.upkeepNow, { wood: 11, stone: 2 });
-  // every building at L2: town hall 6/4, 3 houses 2, 2 huts 2, stone mine 4,
+  assert.deepEqual(scope.upkeepNow, { wood: 14, stone: 2 });
+  // every building at L2: town hall 6/4, 3 houses 4, 2 huts 2, stone mine 4,
   // farmhouse 2 (the 2 farm fields pay nothing at any level).
-  assert.deepEqual(scope.upkeepAfter, { wood: 22, stone: 4 }, "the card's own measured 10 -> 22 wood");
+  assert.deepEqual(scope.upkeepAfter, { wood: 28, stone: 4 }, "the card's own measured 14 -> 28 wood");
 });
 
 test("a building already past the target level is never billed DOWN by the statement", () => {
@@ -59,7 +59,7 @@ test("the line names the level, the count, and both bills", () => {
   const scope = townHallUpgradeScope({ buildings: CITY, districts: DISTRICT }, 2);
   assert.equal(
     townHallUpgradeScopeLine(scope, 2),
-    "Levels the WHOLE city to L2 \u2014 all 9 buildings, districts included \u2014 and the city's daily upkeep rises from 11 wood + 2 stone to 22 wood + 4 stone.",
+    "Levels the WHOLE city to L2 \u2014 all 9 buildings, districts included \u2014 and the city's daily upkeep rises from 14 wood + 2 stone to 28 wood + 4 stone.",
   );
 });
 

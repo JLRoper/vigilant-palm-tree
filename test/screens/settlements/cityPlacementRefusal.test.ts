@@ -93,14 +93,14 @@ test("refusal: every refusing cell has a sentence and every accepting one places
 test("refusal: a placement the cart cannot cover states the shortfall", () => {
   // The row was affordable when the building was picked; the treasury moved under it.
   const { placer, body } = openPlacer([], 50);
-  placer.selectBuilding("house"); // 100g
+  placer.selectBuilding("house"); // 300g
   assert.equal(placer.canPlaceAt(3, 3), true, "the geometry rule accepts the cell -- the ghost looks buildable");
 
   const p = pointFor(3, 3);
   assert.equal(placer.placeAt(p.x, p.y, VIEWPORT.w, VIEWPORT.h), null, "the cart cannot cover it");
   assert.equal(
     paletteNotice(body),
-    "Not enough gold (need 100, have 50)",
+    "Not enough gold (need 300, have 50)",
     "the refusal reuses the palette's own vocabulary, not a second wording of it",
   );
   assert.equal(placer.buildings.length, 0, "an unaffordable placement stages nothing");
@@ -115,7 +115,7 @@ test("refusal: the confirm path states the same shortfall, not silence", () => {
   assert.equal(placer.valid, true);
 
   assert.equal(placer.confirmPlacement(), false, "the cart cannot cover the placement");
-  assert.equal(paletteNotice(body), "Not enough gold (need 100, have 50)");
+  assert.equal(paletteNotice(body), "Not enough gold (need 300, have 50)");
   assert.equal(placer.buildings.length, 0);
 });
 
@@ -145,7 +145,7 @@ test("refusal: the cart's line retires with the snapshot, a geometry line does n
   placer.selectBuilding("house");
   const p = pointFor(3, 3);
   assert.equal(placer.placeAt(p.x, p.y, VIEWPORT.w, VIEWPORT.h), null);
-  assert.equal(paletteNotice(body), "Not enough gold (need 100, have 50)");
+  assert.equal(paletteNotice(body), "Not enough gold (need 300, have 50)");
 
   // A snapshot that still cannot cover the placement leaves a refusal line
   // standing: the retirement is owed to a covering reading, not to any reading

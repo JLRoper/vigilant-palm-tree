@@ -127,8 +127,8 @@ test("each source reserves its OWN requirement, and the next source covers the r
 });
 
 test("the reservation does not apply to wood or stone -- those export in full (legacy gate ON)", () => {
-  // house L1 + tower L2 cost 3 wood and 2 stone (test/state/economy.test.ts pins
-  // that), so a needy settlement with those buildings has a 3-wood deficit.
+  // house L1 + tower L2 cost 4 wood and 2 stone (test/state/economy.test.ts pins
+  // that), so a needy settlement with those buildings has a 4-wood deficit.
   const needy = makeSettlement("s1", 0, 4, 4, {
     population: 0,
     goldTax: 0,
@@ -147,8 +147,8 @@ test("the reservation does not apply to wood or stone -- those export in full (l
 
   const result = runAutoTrade(settlements(source, needy), 0, true);
 
-  assert.equal(result.settlements.s1.warehouse.wood, 3, "the full wood deficit is covered");
-  assert.equal(result.settlements.s0.warehouse.wood, 37, "no reservation applies to wood");
+  assert.equal(result.settlements.s1.warehouse.wood, 4, "the full wood deficit is covered");
+  assert.equal(result.settlements.s0.warehouse.wood, 36, "no reservation applies to wood");
   assert.equal(result.settlements.s0.warehouse.food, 5);
 });
 

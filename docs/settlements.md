@@ -71,7 +71,7 @@ Settlements grow naturally each week, provided they have enough food to sustain 
 - **Schedule:** Weekly during `applyWeeklyUpkeep` (day % 7 === 0)
 - **Condition:** `warehouse.food >= foodRequired(s)` — growth only occurs when food is met
 - **Formula:** `growth = max(1, ceil(population × growthRate))`
-- **Cap:** `settlementPopulationCap(s)` — the level's base cap (500 / 1,500 / 5,000) **plus** the population granted by housing standing in the settlement's districts (+300 per L1 House, +1,000 at L2, +1,500 at L3; farmhouses +20 × level, apartments +100 × level). Housing in the main city grid contributes nothing. The settlement panel prints exactly this number as `Population <now> / <cap>`, with the breakdown in its tooltip (`populationCapTitle`, `src/screens/settlements/panelRates.ts`), so a capped town says so on screen (C-MINOR-2).
+- **Cap:** `settlementPopulationCap(s)` — the level's base cap (500 / 1,500 / 5,000) **plus** the population granted by housing standing in the settlement's districts (+300 per L1 House, +1,000 at L2, +1,500 at L3; farmhouses +20 × level, apartments +150 × level). Housing in the main city grid contributes nothing. The settlement panel prints exactly this number as `Population <now> / <cap>`, with the breakdown in its tooltip (`populationCapTitle`, `src/screens/settlements/panelRates.ts`), so a capped town says so on screen (C-MINOR-2).
 - **No growth penalty:** When food is short, population simply doesn't grow (morale decay handles the penalty separately)
 
 The growth rate is configurable in Settings; the upgrade population gate is **not** player-configurable — it is the engine-owned constant `UPGRADE_POPULATION_GATE` (85%, `packages/engine/src/settlement/upgradeSettlement.ts`, issue #153):

@@ -28,8 +28,8 @@ const NONE: BuildEntryAffordability = {
 test("affordable entry is enabled with its own lines as its tooltip", () => {
   const status = buildEntryStatus({ kind: "house", affordability: FULL });
   assert.equal(status.disabled, false);
-  assert.deepEqual(status.reasons, [buildTime(2), "Upkeep: 1 wood per turn"]);
-  assert.equal(status.title, `${buildTime(2)}\nUpkeep: 1 wood per turn`);
+  assert.deepEqual(status.reasons, [buildTime(2), "Upkeep: 2 wood per turn"]);
+  assert.equal(status.title, `${buildTime(2)}\nUpkeep: 2 wood per turn`);
 });
 
 test("a zero-upkeep kind produces only its footprint and build-time lines as tooltip when affordable", () => {
@@ -42,7 +42,7 @@ test("a zero-upkeep kind produces only its footprint and build-time lines as too
 test("a 1x1 kind adds no footprint line to the tooltip", () => {
   const status = buildEntryStatus({ kind: "house", affordability: FULL });
   assert.equal(status.disabled, false);
-  assert.deepEqual(status.reasons, [buildTime(2), "Upkeep: 1 wood per turn"]);
+  assert.deepEqual(status.reasons, [buildTime(2), "Upkeep: 2 wood per turn"]);
   assert.equal(status.reasons.some((r) => r.includes("tiles")), false);
 });
 
@@ -59,9 +59,9 @@ test("gold shortfall names the needed and available amounts", () => {
   });
   assert.equal(status.disabled, true);
   assert.deepEqual(status.reasons, [
-    "Not enough gold (need 100, have 50)",
+    "Not enough gold (need 300, have 50)",
     buildTime(2),
-    "Upkeep: 1 wood per turn",
+    "Upkeep: 2 wood per turn",
   ]);
 });
 
@@ -74,7 +74,7 @@ test("wood shortfall blocks the entry", () => {
   assert.deepEqual(status.reasons, [
     "Not enough wood (need 5, have 4)",
     buildTime(2),
-    "Upkeep: 1 wood per turn",
+    "Upkeep: 2 wood per turn",
   ]);
 });
 
@@ -139,11 +139,11 @@ test("null affordability is affordable with no shortfall reasons", () => {
   assert.deepEqual(status.reasons, [
     "A town hall already exists in this settlement",
     buildTime(2),
-    "Upkeep: 1 wood per turn",
+    "Upkeep: 2 wood per turn",
   ]);
   const plain = buildEntryStatus({ kind: "house", affordability: null });
   assert.equal(plain.disabled, false);
-  assert.deepEqual(plain.reasons, [buildTime(2), "Upkeep: 1 wood per turn"]);
+  assert.deepEqual(plain.reasons, [buildTime(2), "Upkeep: 2 wood per turn"]);
 });
 
 test("confirm status is ok when the net cart is fully covered", () => {

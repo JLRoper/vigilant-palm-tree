@@ -102,7 +102,7 @@ test("buildingUpkeepRequired sums per-building registry upkeep (0 with no buildi
       { gx: 2, gy: 2, kind: "tower", level: 2, style: "classic" },
     ],
   });
-  assert.deepEqual(buildingUpkeepRequired(built), { wood: 3, stone: 2 });
+  assert.deepEqual(buildingUpkeepRequired(built), { wood: 4, stone: 2 });
 });
 
 test("foodDeficitRatio: 0 when warehouse has enough food", () => {
@@ -141,27 +141,27 @@ function stockedSettlement(wood: number, stone: number): SettlementState {
 }
 
 test("suppliesDeficitRatio: a wood surplus does not mask a stone shortfall (the pooled-ratio bug)", () => {
-  // house L1 + tower L2 cost 3 wood and 2 stone. Pooled, 300 wood against that
-  // 5-unit bill read as "have 300, need 5 -> ratio 0", so a settlement that could
+  // house L1 + tower L2 cost 4 wood and 2 stone. Pooled, 300 wood against that
+  // 6-unit bill read as "have 300, need 6 -> ratio 0", so a settlement that could
   // not pay a single stone owed nothing.
-  assert.deepEqual(buildingUpkeepRequired(stockedSettlement(300, 0)), { wood: 3, stone: 2 });
+  assert.deepEqual(buildingUpkeepRequired(stockedSettlement(300, 0)), { wood: 4, stone: 2 });
   assert.equal(suppliesDeficitRatio(stockedSettlement(300, 0)), 1, "2 of 2 stone missing is a total stone deficit");
-  assert.equal(suppliesDeficitRatio(stockedSettlement(0, 300)), 1, "3 of 3 wood missing is a total wood deficit");
+  assert.equal(suppliesDeficitRatio(stockedSettlement(0, 300)), 1, "4 of 4 wood missing is a total wood deficit");
   assert.equal(suppliesDeficitRatio(stockedSettlement(0, 0)), 1, "both missing stays a total deficit, as before");
 });
 
 test("suppliesDeficitRatio: 0 when both resources are covered", () => {
-  assert.equal(suppliesDeficitRatio(stockedSettlement(3, 2)), 0);
+  assert.equal(suppliesDeficitRatio(stockedSettlement(4, 2)), 0);
   assert.equal(suppliesDeficitRatio(stockedSettlement(300, 300)), 0, "a surplus in both is still 0");
 });
 
 test("suppliesDeficitRatio: the WORSE resource sets the ratio, so a partial shortfall is not averaged away", () => {
-  // Wood half covered (ratio 2/3), stone fully covered -> the wood shortfall decides.
-  assert.equal(Math.round(suppliesDeficitRatio(stockedSettlement(1, 2)) * 1000) / 1000, 0.667);
+  // Wood half covered (ratio 3/4), stone fully covered -> the wood shortfall decides.
+  assert.equal(Math.round(suppliesDeficitRatio(stockedSettlement(1, 2)) * 1000) / 1000, 0.75);
   // Stone untouched but wood empty -> the wood shortfall decides.
   assert.equal(suppliesDeficitRatio(stockedSettlement(0, 2)), 1);
   // Wood covered, stone empty -> the stone shortfall decides.
-  assert.equal(suppliesDeficitRatio(stockedSettlement(3, 0)), 1);
+  assert.equal(suppliesDeficitRatio(stockedSettlement(4, 0)), 1);
 });
 
 test("suppliesDeficitRatio: a resource with no upkeep owed contributes no ratio", () => {
@@ -169,7 +169,7 @@ test("suppliesDeficitRatio: a resource with no upkeep owed contributes no ratio"
     buildings: [{ gx: 0, gy: 0, kind: "house", level: 1, style: "classic" }],
     warehouse: { wood: 99, stone: 0, iron: 0, arcane: 0, food: 0 },
   });
-  assert.deepEqual(buildingUpkeepRequired(woodOnly), { wood: 1, stone: 0 });
+  assert.deepEqual(buildingUpkeepRequired(woodOnly), { wood: 2, stone: 0 });
   assert.equal(suppliesDeficitRatio(woodOnly), 0, "an empty stone store is irrelevant when no stone upkeep exists");
 });
 
@@ -240,7 +240,7 @@ test("applyMoraleDecay writes an integer, never the fractional ratio", () => {
   // shortfall produced 58.099999999999994 in the settlement panel. The rounding
   // lives at the write so persisted morale never carries a fraction.
   const partial = stockedSettlement(1, 2);
-  assert.equal(suppliesDeficitRatio(partial), (3 - 1) / 3, "the raw ratio is fractional");
+  assert.equal(suppliesDeficitRatio(partial), (4 - 1) / 4, "the raw ratio is fractional");
   assert.equal(Number.isInteger(moraleDecay(partial)), false, "and so is the decay built from it");
 
   const one = applyMoraleDecay(partial);

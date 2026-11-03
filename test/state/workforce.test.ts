@@ -533,7 +533,12 @@ function cMajor2City(): SettlementState {
   return makeSettlement("s0", 0, 10, 10, {
     level: 1,
     population: 500,
-    resourceRates: { wood: 10, stone: 2, food: 1 },
+    // The map wood rate is 12, not 10: the CITY P6 house rebalance doubles a
+    // House upkeep (1 -> 2 wood/turn), so this two-house fixture whole-set wood
+    // bill grew by 2. Raising the fixture own tile rate by the same 2 keeps the
+    // CLICK before/after wood nets exactly where they were pinned -- the subject
+    // here is the assignment cost, not the city absolute margin.
+    resourceRates: { wood: 12, stone: 2, food: 1 },
     warehouse: emptyWarehouse({ wood: 40, stone: 40, food: 400 }),
     buildings: [
       building("townHall", 2, 2),

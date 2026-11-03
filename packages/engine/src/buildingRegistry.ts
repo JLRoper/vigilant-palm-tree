@@ -65,14 +65,33 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     settlementEffects: {},
     playerEffects: { controlRangeBonus: 1 },
   },
+  // REBALANCED (CITY P6). The House is the game's strongest building by a wide
+  // margin: measured on github/main 9b4f17f (0.47.0), one L3 House pays 4,500
+  // gold/turn (1,500 pop x the L3 tax of 3) for a 100g + 5w placement and 3
+  // wood/turn of upkeep -- 112x the gold/turn per 100g of the strongest
+  // non-House gold building (the neutral gold mine: 120/turn from 300g) and 37x
+  // against a mine on a gold spot. The defect is its PRICE, not its grant. Its
+  // grant scales x5 with level while its placement price was flat (100g to
+  // place at any level, 550g to reach L3), and it is the only building in the
+  // registry shaped that way. The grant is deliberately LEFT ALONE: the late
+  // city's workforce calibration (P2, `workforce.ts`) is measured against the
+  // 80,000 population a house-filled L3 castle's housing grants, and flattening
+  // the grant halves that cap and takes the pool from 97% of demand to 48%.
+  // So the House pays a price that scales with level instead: 300g to place
+  // (was 100g), so its full path to L3 costs 300 + 450 + 900 = 1,650g -- the
+  // same total as a gold mine's -- and it pays for the gold in the resource
+  // that is actually scarce, wood at 2 per level (2 / 4 / 6 per turn, was 1).
+  // Measured effect: 112x -> 37x per 100g of placement cost off a gold spot
+  // (37x -> 12x on one), and the late House's exchange rate falls from 1,500
+  // gold per wood to 750.
   house: {
     kind: "house",
     label: "House",
     description: "A humble dwelling.",
     footprint: { w: 1, h: 1 },
     buildDays: 2,
-    placementCost: { gold: 100, wood: 5 },
-    upkeepPerLevel: { wood: 1, stone: 0 },
+    placementCost: { gold: 300, wood: 5 },
+    upkeepPerLevel: { wood: 2, stone: 0 },
     recruits: [],
     maxWorkers: 1,
     settlementEffects: { populationByLevel: { 1: 300, 2: 1000, 3: 1500 } },
@@ -205,7 +224,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     upkeepPerLevel: { wood: 2, stone: 0 },
     recruits: [],
     maxWorkers: 2,
-    settlementEffects: { populationBonus: 100 },
+    settlementEffects: { populationBonus: 150 },
     playerEffects: {},
   },
   farmField: {

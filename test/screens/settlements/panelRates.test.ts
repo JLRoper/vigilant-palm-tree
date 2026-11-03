@@ -170,19 +170,19 @@ test("a building under construction produces nothing, exactly as the turn loop p
 });
 
 test("wood and stone are charged the settlement's building upkeep, so a starter city reads as a drain", () => {
-  // The starter set's own bill: townHall 3 wood / 2 stone, house 1 wood each.
+  // The starter set's own bill: townHall 3 wood / 2 stone, house 2 wood each.
   const s = settlement({
     buildings: [building("townHall"), building("house"), building("house")],
   });
   const upkeep = buildingUpkeepRequired(s);
-  assert.deepEqual(upkeep, { wood: 5, stone: 2 }, "fixture premise");
+  assert.deepEqual(upkeep, { wood: 7, stone: 2 }, "fixture premise");
 
   const { rows } = settlementDailyRates(s, SEED);
   const wood = rows.find((r) => r.resource === "wood")!;
   const stone = rows.find((r) => r.resource === "stone")!;
-  assert.equal(wood.spent, 5);
+  assert.equal(wood.spent, 7);
   assert.equal(stone.spent, 2);
-  assert.equal(wood.net, Math.round((wood.produced - 5) * 100) / 100);
+  assert.equal(wood.net, Math.round((wood.produced - 7) * 100) / 100);
   assert.ok(wood.net < 0, "no producers: the wood stock is draining");
   assert.ok(stone.net < 0, "no producers: the stone stock is draining");
 });

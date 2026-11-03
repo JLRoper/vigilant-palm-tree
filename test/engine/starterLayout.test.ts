@@ -147,7 +147,7 @@ test("the starter set costs nothing and arrives already constructed", () => {
   }
 });
 
-test("the starter set's upkeep is 10 wood + 2 stone per turn -- 30 turns of runway from 300/300", () => {
+test("the starter set's upkeep is 12 wood + 2 stone per turn -- 25 turns of runway from 300/300", () => {
   const settlement = makeSettlement("s0", 0, 2, 2, {
     gold: 300,
     warehouse: { wood: 300, stone: 300, iron: 0, arcane: 0, food: 0 },
@@ -157,18 +157,20 @@ test("the starter set's upkeep is 10 wood + 2 stone per turn -- 30 turns of runw
   const result = applyPlaceBuildings(state, "s0", 0, buildStarterLayout({ size: 5, style: "classic" }), true);
 
   const upkeep = buildingUpkeepRequired(result.state.settlements.s0);
-  // townHall 3w+2s, house 1w x2, woodcutterHut 1w x2, stoneMine 2w, farmField 0+0, farmhouse 1w+0s.
-  assert.deepEqual(upkeep, { wood: 10, stone: 2 });
+  // townHall 3w+2s, house 2w x2, woodcutterHut 1w x2, stoneMine 2w, farmField 0+0, farmhouse 1w+0s.
+  assert.deepEqual(upkeep, { wood: 12, stone: 2 });
   // The old dense layout's ~24 wood + ~14 stone ran a 300/300 start dry by
   // roughly turn 12. The pre-producer set (5w) stretched that to 60 turns; the
   // three producers cost 4 wood of upkeep and buy 6 wood + 3 stone per turn
-  // back, so 30 turns of GUARANTEED runway is the price -- and the map is no
+  // back, so 25 turns of GUARANTEED runway is the price -- and the map is no
   // longer the only thing keeping a settlement solvent. The second hut (the
   // 2026-10-02 balance fix) spends that +1 wood of upkeep to roughly DOUBLE the
   // effective runway at the median cell: the set's net wood goes -5 -> -3, so
   // 300 wood lasts ~100 turns, not ~60. The farmhouse (2026-10-04) spends one
   // more wood of upkeep on its recruit entry -- 33 guaranteed turns became 30.
-  assert.equal(Math.floor(300 / upkeep.wood), 30, "wood covers 30 turns of upkeep even with zero map income");
+  // The CITY P6 house rebalance (2 wood per level, was 1) adds 2 more to the
+  // two houses and takes it to 25.
+  assert.equal(Math.floor(300 / upkeep.wood), 25, "wood covers 25 turns of upkeep even with zero map income");
   assert.equal(Math.floor(300 / upkeep.stone), 150);
 });
 
@@ -469,7 +471,7 @@ test("a multi-farm set is legal, deterministic, and costs no upkeep beyond the b
   }
   // farmField upkeep is 0 wood / 0 stone, so extra farmland is free to run.
   const upkeep = makeSettlement("s0", 0, 2, 2, { buildings: buildStarterLayout({ size: 10, style: "classic", farms: 5 }) });
-  assert.deepEqual(buildingUpkeepRequired(upkeep), { wood: 10, stone: 2 }, "5 farms cost the same upkeep as 1");
+  assert.deepEqual(buildingUpkeepRequired(upkeep), { wood: 12, stone: 2 }, "5 farms cost the same upkeep as 1");
 });
 
 test("every settlement the game can create gets ALL the farms its food requirement asks for", () => {
