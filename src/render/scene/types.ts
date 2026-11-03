@@ -185,7 +185,7 @@ export interface DistrictNode {
  * a drawn piece, it is what one tile's geometry does when three of its sides
  * are set -- and it is also what makes two tiles meet tangentially at the edge
  * they share, since both compute the same perpendicular exit there
- * (src/render/scene/paint2d/roadGraph.ts).
+ * (../scene/roadGraph.ts).
  */
 export interface SettlementRoadTile {
   q: number;
