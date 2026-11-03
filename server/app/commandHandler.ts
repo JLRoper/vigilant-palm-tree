@@ -6,6 +6,7 @@ transferGold,
   mulberry32,
   resolveBattle as resolveBattleEngine,
   normalizePlatoons,
+  withSurvivorStacks,
   detectAdjacentEnemy,
   cancelMove,
   recruitHero,
@@ -111,10 +112,12 @@ import { hydrateFromRepos } from "../persistence/hydrate";
 // auto-trade; POST /games writes false on new games.
 export interface GameLobbyFlags {
   legacyAutoTrade?: boolean;
-  // The lobby's own flag for the server-side AI actor (server/routes.ts's
-  // LobbyState; GAME_COLUMNS loads the whole jsonb, so it is on the row even
-  // though no command writes it). Read by endTurnSeatRefusal: the AI-seat
-  // exemption below is scoped to games this server does NOT drive.
+  // Server-side AI actor flag: "server" on any game created with enemySlots > 0
+  // (the API's aiDriver scanner owns those AI seats' turns end-to-end); absent
+  // on legacy/lobby games. Mirrors server/routes.ts LobbyState and the client's
+  // GameLobbyState. ResolveBattle/SubmitBattleResult read it to scope their
+  // marker authority, and EndTurn's AI-seat exemption (endTurnSeatRefusal) is
+  // scoped to games this server does not drive.
   aiDriver?: "server";
   // The pending battle offer (EnterBattle's marker): read via readPendingBattle
   // by the battle cases below and cleared when the battle resolves or the
@@ -392,19 +395,13 @@ async function dualWriteEntities(
       };
       const loot = transferCargoLoot(normalized, attackerHero.id, defenderHero.id);
       const heroes: Record<HeroId, HeroState> = { ...loot.heroes };
-      heroes[attackerHero.id] = { ...heroes[attackerHero.id], stacks: attackerStacks };
-      heroes[defenderHero.id] = { ...heroes[defenderHero.id], stacks: defenderStacks };
+      heroes[attackerHero.id] = withSurvivorStacks(heroes[attackerHero.id], attackerStacks);
+      heroes[defenderHero.id] = withSurvivorStacks(heroes[defenderHero.id], defenderStacks);
       return { heroes, lootedGold: loot.gold };
     }
     const heroes: Record<HeroId, HeroState> = { ...allHeroes };
-    heroes[attackerHero.id] = {
-      ...attackerHero,
-      stacks: attackerStacks,
-    };
-    heroes[defenderHero.id] = {
-      ...defenderHero,
-      stacks: defenderStacks,
-    };
+    heroes[attackerHero.id] = withSurvivorStacks(attackerHero, attackerStacks);
+    heroes[defenderHero.id] = withSurvivorStacks(defenderHero, defenderStacks);
     return { heroes, lootedGold: 0 };
   }
 
@@ -1133,6 +1130,27 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       if (attackerHero.ownerId !== command.actor && defenderHero.ownerId !== command.actor) {
         return { ok: false, reason: "forbidden_not_your_hero", events: [] };
       }
+      // Marker authority (F2), scoped to server-driven games. Where the API's
+      // aiDriver owns the AI seats (lobby.aiDriver === "server"), a battle
+      // between a human and an AI is offered through EnterBattle, which
+      // stamps lobby.pendingBattle for exactly this pair -- so the marker is
+      // the authority for a DEFENDER-seat resolve: a pair the lobby no longer
+      // marks pending is a client that re-hydrated a settled battle (a
+      // replayed event log, a stale tab) and must be refused BEFORE any
+      // adjudication, not re-resolved (which deleted a hero). Two legitimate
+      // shapes are deliberately not gated: an ATTACKER-seat resolve (the
+      // driver's own AI-vs-AI auto-resolve, or a human attacking an adjacent
+      // AI hero) has the actor's own move as its authority, and on a
+      // BROWSER-driven game the AI tick is client-local, so a defender's
+      // resolve has no server-side offer to match against at all.
+      const serverDrivenGame = row.lobby?.aiDriver === "server";
+      if (
+        serverDrivenGame &&
+        attackerHero.ownerId !== command.actor &&
+        !pendingMatchesBattle(pending, command.attackerId, command.defenderId)
+      ) {
+        return { ok: false, reason: "battle_not_pending", events: [] };
+      }
       // Neither the old route nor @heroes/engine's resolveBattle() itself
       // ever checked that defenderId is actually adjacent to attackerId --
       // that guarantee existed purely because the client's own
@@ -1640,6 +1658,18 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // same-owner pair could never have collided in the first place.)
       if (attackerHero.ownerId !== command.actor && defenderHero.ownerId !== command.actor) {
         return { ok: false, reason: "forbidden_not_your_hero", events: [] };
+      }
+      // Same marker authority as the ResolveBattle case above (F2), same
+      // server-driven scope: the arena's defender-side submission is the
+      // only shape a re-hydrated BATTLE can drive (a replayed BattleOffered
+      // names a human defender on an aiDriver game), so it must still be
+      // marked pending. Checked before any world mutation.
+      if (
+        row.lobby?.aiDriver === "server" &&
+        attackerHero.ownerId !== command.actor &&
+        !pendingMatchesBattle(pending, command.attackerId, command.defenderId)
+      ) {
+        return { ok: false, reason: "battle_not_pending", events: [] };
       }
       // "Phase is BATTLE for this hero pair" (plan's server-validation list),
       // expressed server-side: the server never persists a BATTLE phase --

@@ -1,6 +1,6 @@
 import type { GameState, HeroBattleVerdict, HeroId, Platoon, SettlementId } from "@heroes/contracts";
 import { cleanupDefeatedHeroCharters } from "../charter/cleanup";
-import { applyHeroConcession } from "../combat/battleOutcome";
+import { applyHeroConcession, withSurvivorStacks } from "../combat/battleOutcome";
 import { cancelMove } from "../hero/move";
 import { endBattlePhase } from "../turn/phases";
 import { normalizePlatoons, platoonsHaveTroops, settlementStacks } from "../units";
@@ -99,7 +99,7 @@ export function applySettlementBattleResult(
     dirty: true,
     heroes: {
       ...state.heroes,
-      [opts.attackerId]: { ...hero, stacks: attackerStacks },
+      [opts.attackerId]: withSurvivorStacks(hero, attackerStacks),
     },
   };
   let captured = false;

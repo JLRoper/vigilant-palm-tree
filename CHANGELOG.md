@@ -10,12 +10,26 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.38.6] - 2026-11-03
-
+## [0.38.8] - 2026-11-03
 seat truth: a seat's own turn
 - End Turn is seat-scoped on both sides (playthrough round 2b, F1): the toolbar offers the control only on the local seat's own turn (`canEndTurnFromSeat`), the command declares the seat that is asking (`EndTurn.clientSeat`, required over HTTP by `parseCommand`), and `endTurnSeatRefusal` refuses a declaration that is not the seat being ended. A browser-driven AI seat's turn, ended by seat 0's client, and the drop policy's own skip keep working.
 - `GET /games/:name`'s `availableSeats` now means what it says (F3): the seats a client could still claim, instead of the falsy keys of `lobby.claimed` (structurally always `[]`). `seatTotal` is the game's seat count, AI seats included (F7).
 - A browser plays the seat it claimed (F2): `loadGame` no longer resets a client that claimed seat 1 back to seat 0. The single-browser hotseat is out of scope, with the drop-policy change it would need named in docs/multiplayer.md (Decision 4).
+
+## [0.38.7] - 2026-11-03
+
+District-road round-2 feedback and fidelity: each refused district entry now states its reason, a shipyard harbour gets its pier, and the workforce width reading is measured and decided (not faked).
+
+- **F3 (friction) -- a refused district SPEAKS.** A double-click on a hex that cannot host a district used to refuse in silence, leaving the unrelated "Select a hero first" as the only words on screen. It now says WHY on the adventure map's refusal toast: out of the settlement's control range, another seat's land, not touching the settlement's cluster, or impassable ground -- through the engine's new `districtEntryDecision()` and its one `districtEntryRefusalToast()` table, so the rule and the sentence cannot drift.
+- **F4 (cosmetic) -- a shipyard harbour gets its pier.** A water district holding a `shipyard` is not walkable, so it used to get no road and no explanation. It now joins the road network by a single pier/bridge edge to the adjacent node it was founded against -- and a district whose only way out is that harbour gets the same landing edge -- drawn in the same two-tone hairline as every land road. A district with no walkable route AND no harbour adjacent (or no adjacent node at all) still gets no road.
+- **F2 (cosmetic, decided) -- the workforce reading, measured.** The road's width is the reading and it follows the district's actual staffing (15% -> 3 tracks -> 0.70px; 100% -> 20 -> 1.50px), but the 1-vs-20-track delta is 0.90px on a 55.4px hex and every district of a game nobody has staffed is *genuinely* at 100% (`applyPlaceBuildings` places `workers: undefined`, the legacy auto-staffed max), so a busy trunk and a light lane render identically. The mapping is left as the carrier rather than varied by anything the data does not carry; the measurement and the legible-carrier / auto-100% question are recorded in `docs/settlements.md` and filed as a round-3 finding.
+
+The road behaviour the round-2 card proved correct is unchanged: per-terrain drawing, opposite bowing, sprite scaling, one paint per segment, surviving an End Turn and a reload, zero movement cost, and neither blocked nor overwritten by building placement.
+
+## [0.38.6] - 2026-11-03
+
+Playthrough round 2's battle-persistence cluster, both findings re-measured on 0.38.2 and fixed, with both surfaces of F2 closed. A load whose payload carried no `last_event_id` (the Load list's row is the only source, and only `GET /games/:name` returns that field) left the multiplayer sync's cursor unseeded, and the sync opened the event stream at `after=0` -- the poll route's contract makes that "replay the whole game_events log" -- so every historical event was re-delivered as a live delta and a replayed `BattleOffered` re-opened a battle the server had already settled (its closing `BattleResolved` answers "resync", and that snapshot was dropped outright while the phase was blocked, so the modal stayed up and Quick Resolve POSTed a second time). The stream is now deferred until the initial resync seeds the cursor, and a row at or below the cursor is never applied -- the phase cannot be re-opened by a settled battle. The server side is closed too: a defender-seat `ResolveBattle` / `SubmitBattleResult` for a pair the lobby no longer marks pending is refused with `battle_not_pending` on server-driven games (checked before any world mutation, so a refusal leaves nothing half-written), which retires the second persisted resolution that deleted a hero, while an attacker-seat resolve and a browser-driven game's client-local defender path stay ungated. The stale `heroes.troops` scalar is gone as well: one new `withSurvivorStacks` helper now writes the scalar everywhere survivor stacks are written -- both sides of a hero battle, the conceding side, and the settlement battle's attacker -- so the persisted column, the API and `hydrate`'s re-seed all agree with `hero_platoons` instead of the winner keeping its pre-battle headcount. `patch`: both findings are defects on shipped paths, no new command kind, no schema change and no wire-contract change (the new refusal reason is one more value on the existing command error field).
+
 
 ## [0.38.5] - 2026-11-03
 
