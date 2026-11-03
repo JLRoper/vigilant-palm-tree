@@ -9,7 +9,7 @@
 // pre-commit gate, not CI. A check that is red for 300+ reasons is not a
 // check -- a genuine error introduced by a landing disappears into the wall.
 //
-// WHAT IT ASSERTS (both must hold)
+// WHAT IT ASSERTS (all three must hold)
 //   1. The application -- src/, server/, packages/*/src, i.e. everything the
 //      production build compiles (tsconfig.json) -- has ZERO type errors.
 //      There is no baseline for this half. Zero tolerance.
@@ -18,6 +18,12 @@
 //      one entry per file with its dominant diagnostic codes and that file's
 //      diagnosis. A file outside the baseline, or a file whose count grows,
 //      fails the run.
+//   3. The baseline is EXACT, not a ceiling. An entry that records more errors
+//      than the file has is a phantom: it hands the next landing that many
+//      free errors in that file, silently. So a file that improved (or
+//      vanished) also fails the run, and `--write-baseline` refuses to raise a
+//      count or add an entry unless `--force` is passed. The ratchet only
+//      turns one way, in both directions.
 //
 // WHAT IT DOES NOT DO
 // It does not exclude a directory, add ts-nocheck, or cast anything away. Every
@@ -26,7 +32,8 @@
 // down, and `npm run test:types:baseline` is how you record progress.
 //
 //   node tools/typecheck-gate.mjs                  # the gate
-//   node tools/typecheck-gate.mjs --write-baseline # re-record the debt
+//   node tools/typecheck-gate.mjs --write-baseline # re-record the debt (prune-only)
+//   node tools/typecheck-gate.mjs --write-baseline --force  # re-record even if it grows
 //   node tools/typecheck-gate.mjs --list           # print the debt, exit 0 always
 
 import { spawnSync } from "node:child_process";
@@ -124,8 +131,9 @@ function buildBaseline(byFile) {
   return {
     _note:
       "Known type-check debt of test/**. Produced by `node tools/typecheck-gate.mjs --write-baseline`. " +
-      "The gate fails if any file here grows, or if a file outside this list has an error. " +
-      "Fix a file and re-record to shrink the debt; never add an entry to silence a regression.",
+      "The gate fails if any file here grows, if a file outside this list has an error, or if a file " +
+      "here has FEWER errors than recorded (a stale entry is a phantom that hands the next landing " +
+      "free errors). Fix a file and re-record to shrink the debt; never add an entry to silence a regression.",
     generatedFromProject: "tsconfig.test.json",
     totalErrors: Object.values(files).reduce((n, f) => n + f.count, 0),
     filesWithErrors: Object.keys(files).length,
@@ -168,8 +176,41 @@ function main() {
   const byFile = groupByFile(suiteErrors);
 
   if (args.has("--write-baseline")) {
-    const baseline = buildBaseline(byFile);
-    writeFileSync(BASELINE_PATH, `${JSON.stringify(baseline, null, 2)}\n`);
+    const next = buildBaseline(byFile);
+    const previous = existsSync(BASELINE_PATH)
+      ? JSON.parse(readFileSync(BASELINE_PATH, "utf8"))
+      : null;
+
+    // The ratchet only turns one way. Re-recording is how progress is banked;
+    // it is never how a regression is blessed. `--force` is the deliberate,
+    // visible exception (say why in the PR).
+    if (previous && !args.has("--force")) {
+      const raised = [];
+      const added = [];
+      for (const [file, info] of Object.entries(next.files)) {
+        const known = previous.files[file];
+        if (!known) added.push({ file, now: info.count });
+        else if (info.count > known.count) raised.push({ file, was: known.count, now: info.count });
+      }
+      if (raised.length > 0 || added.length > 0) {
+        process.stdout.write(
+          "\nREFUSED: this run would loosen the baseline, and the baseline is a ratchet.\n",
+        );
+        for (const r of raised) {
+          process.stdout.write(`  ${r.was} -> ${r.now}  ${r.file}  (would raise the limit)\n`);
+        }
+        for (const a of added) {
+          process.stdout.write(`  ${a.now}  ${a.file}  (would add an entry)\n`);
+        }
+        process.stdout.write(
+          "\nFix those errors instead. `--write-baseline` only records progress; pass `--force` " +
+            "only when you have deliberately accepted new debt and said so in the PR.\n",
+        );
+        process.exit(1);
+      }
+    }
+
+    writeFileSync(BASELINE_PATH, `${JSON.stringify(next, null, 2)}\n`);
     process.stdout.write(
       `Recorded test-tree debt: ${suiteErrors.length} errors across ${byFile.size} files -> ` +
         `test/typecheck-baseline.json\n`,
@@ -205,12 +246,13 @@ function main() {
   }
 
   if (improvements.length > 0) {
-    process.stdout.write("\nImproved since the baseline was recorded:\n");
+    process.stdout.write("\nSTALE BASELINE: it records more debt than the tree has.\n");
     for (const i of improvements) {
       process.stdout.write(`  ${i.was} -> ${i.now}  ${i.file}\n`);
     }
     process.stdout.write(
-      "  (run `npm run test:types:baseline` to record the smaller debt)\n",
+      "  A stale entry is a phantom: it hands the next landing that many free errors in that file.\n" +
+        "  Run `npm run test:types:baseline` to record the smaller debt (it can only shrink).\n",
     );
   }
 
@@ -229,6 +271,14 @@ function main() {
     process.stdout.write(
       `\nTest-tree debt: ${suiteErrors.length} errors across ${byFile.size} files ` +
         `(baseline ${baseline.totalErrors} across ${baseline.filesWithErrors}).\n`,
+    );
+    process.exit(1);
+  }
+
+  if (improvements.length > 0) {
+    process.stdout.write(
+      `\nTEST TREE TYPES: stale baseline (${suiteErrors.length} errors across ${byFile.size} files, ` +
+        `baseline ${baseline.totalErrors} across ${baseline.filesWithErrors}).\n`,
     );
     process.exit(1);
   }
