@@ -1,6 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import type { HeroId, HeroState, SettlementId, SettlementState } from "@heroes/contracts";
+import { GameMap, makeInitialStatePayload, mulberry32 } from "@heroes/engine";
 import { pool } from "../../server/persistence/db";
 import { initSchema } from "../../server/db";
 import { createHeroRepo } from "../../server/persistence/repositories/heroRepo";
@@ -242,6 +243,95 @@ test("migration 023 keeps a pre-split hero's treasury carts ABSENT (NULL, never 
     assert.ok(loaded, "the pre-split hero backfilled");
     assert.equal("treasuryWagons" in loaded, false, "absent stays absent across the 023 column -- the soft default keeps serving 5");
     assert.equal(loaded.wagons, 3, "the neighboring cargo fields are untouched");
+  } finally {
+    await pool.query("DELETE FROM games WHERE name = $1", [name]);
+  }
+});
+
+test("migration 035 gives an existing game's district buildings rows, and re-applies cleanly (E8)", async () => {
+  // What a pre-035 server left in the database: the districts (and every
+  // building in them) in settlements.districts JSONB, and a settlement_buildings
+  // ledger holding the MAIN CITY's buildings alone -- because the old unique key
+  // (game_id, settlement_id, gx, gy) rejected a district building at its own
+  // local (0,0) with a duplicate-key violation. initSchema() is the pass the API
+  // runs at every boot, so re-running it here against this already-populated
+  // database is exactly the upgrade an existing save gets.
+  const payload = makeInitialStatePayload(new GameMap(424242, "small"), mulberry32(424242), {
+    castleSeed: 424242,
+    enemyCount: 0,
+    humanSeatCount: 1,
+  });
+  const town = Object.values(payload.settlements).find(
+    (s) => Object.keys(s.districts ?? {}).length > 0,
+  );
+  assert.ok(town, "the payload has a settlement with a seeded district");
+  const districtBuildings = Object.values(town.districts ?? {}).reduce(
+    (n, d) => n + d.buildings.length,
+    0,
+  );
+  assert.ok(districtBuildings > 0, "the seeded districts hold buildings");
+
+  const name = uniqueName();
+  try {
+    await seedLegacyGame(name, payload.heroes, payload.settlements);
+    await createHeroRepo(pool).upsertMany(name, payload.heroes);
+    await createSettlementRepo(pool).upsertMany(name, payload.settlements);
+
+    const gameId = (await pool.query<{ id: number }>("SELECT id FROM games WHERE name = $1", [name]))
+      .rows[0].id;
+    const districtRowCount = async (): Promise<number> =>
+      Number(
+        (
+          await pool.query<{ n: string }>(
+            `SELECT count(*) AS n FROM settlement_buildings
+              WHERE game_id = $1 AND settlement_id = $2 AND district_q IS NOT NULL`,
+            [gameId, town.id],
+          )
+        ).rows[0].n,
+      );
+
+    // Simulate the pre-035 ledger: the district rows the old writer could not
+    // have produced are not there.
+    await pool.query(`DELETE FROM settlement_buildings WHERE game_id = $1 AND district_q IS NOT NULL`, [
+      gameId,
+    ]);
+    assert.equal(await districtRowCount(), 0, "the fixture starts with no district rows, as a pre-035 ledger");
+
+    await initSchema();
+
+    assert.equal(
+      await districtRowCount(),
+      districtBuildings,
+      "the backfill writes one row per district building",
+    );
+    const [reloaded] = await createSettlementRepo(pool).loadAllForGame(name);
+    assert.deepEqual(
+      reloaded.districts,
+      payload.settlements[town.id].districts,
+      "and the game reads its districts back exactly as the JSONB column described them",
+    );
+
+    // Re-run safety: migrations re-run at every boot, so a second pass must not
+    // duplicate rows or change anything.
+    const before = await pool.query(`SELECT * FROM settlement_buildings WHERE game_id = $1 ORDER BY id`, [gameId]);
+    await initSchema();
+    const after = await pool.query(`SELECT * FROM settlement_buildings WHERE game_id = $1 ORDER BY id`, [gameId]);
+    assert.deepEqual(after.rows, before.rows, "a second initSchema() is a no-op");
+
+    // Boot safety: a districts value that is not the expected shape must not
+    // make the backfill raise -- initSchema() has no error handling, so a throw
+    // here would block every subsequent boot, not just this one.
+    await pool.query(`UPDATE settlements SET districts = '[]'::jsonb WHERE game_id = $1`, [gameId]);
+    await initSchema();
+    await pool.query(`UPDATE settlements SET districts = $1::jsonb WHERE game_id = $2`, [
+      JSON.stringify({
+        "9,9": 7,
+        "10,10": { q: 10, r: 10, buildings: [{ gx: 0, gy: 0 }] },
+        "11,11": { q: 11, r: 11, buildings: "nope" },
+      }),
+      gameId,
+    ]);
+    await initSchema();
   } finally {
     await pool.query("DELETE FROM games WHERE name = $1", [name]);
   }

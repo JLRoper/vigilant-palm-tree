@@ -67,6 +67,9 @@ interface ResourceRow {
 
 interface BuildingRow {
   settlement_id: string;
+  /** District hex this building stands in; NULL means the main city (migration 035). */
+  district_q: number | null;
+  district_r: number | null;
   gx: number;
   gy: number;
   kind: string;
@@ -90,21 +93,9 @@ interface PlatoonRow {
 const SETTLEMENT_COLUMNS =
   "id, name, owner_id, q, r, level, population, gold_tax, founded_on_resource, gold, gold_rate, morale, garrison_unpaid_since_day, garrison_unpaid_troops, garrison_unpaid_gold, auto_trade, castle_variant, city_spots, city_mines, upgrade, districts";
 
-function toSettlementState(
-  row: SettlementRow,
-  resourceRows: ResourceRow[],
-  buildingRows: BuildingRow[],
-  platoonRows: PlatoonRow[],
-): SettlementState {
-  const warehouse: SettlementState["warehouse"] = { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
-  const resourceRates: Partial<Record<ResourceType, number>> = {};
-  for (const r of resourceRows) {
-    warehouse[r.resource] = r.amount;
-    if (r.rate !== null) resourceRates[r.resource] = Number(r.rate);
-  }
-  if (row.gold_rate !== null) resourceRates.gold = Number(row.gold_rate);
-
-  const buildings: BuildingDef[] = buildingRows.map((b) => ({
+/** One settlement_buildings row as the BuildingDef the engine reads. */
+function toBuildingDef(b: BuildingRow): BuildingDef {
+  return {
     gx: b.gx,
     gy: b.gy,
     kind: b.kind as BuildingDef["kind"],
@@ -122,12 +113,106 @@ function toSettlementState(
     // explicit undefined.
     ...(b.workers != null ? { workers: b.workers } : {}),
     ...(b.draft != null ? { draft: b.draft } : {}),
-  }));
+  };
+}
+
+/**
+ * A settlement's districts, assembled from the ledger's own rows plus the
+ * per-district metadata the `districts` column carries (q, r, citySpots).
+ *
+ * Building rows are attributed to a district through district_q/district_r
+ * (migration 035): the main city's rows are the ones with both NULL, and every
+ * other row belongs to the district whose hex those columns name -- the same
+ * "q,r" key districtKey() gives a district. Before 035 a district building had
+ * no row at all (finding E8), so any reader of this table saw a settlement
+ * missing every district building and a production sum short by exactly the
+ * districts' output.
+ *
+ * A district with NO rows at all keeps the buildings the JSONB column carries.
+ * That is the same granular-first / JSONB-fallback rule hydrate.ts applies one
+ * level up, and it is what keeps a game whose rows were written before 035 (or
+ * whose district the 035 backfill's own guards skipped as malformed) producing
+ * what it produced before this cutover, rather than losing every district
+ * building to an empty ledger.
+ */
+function assembleDistricts(
+  raw: SettlementRow["districts"],
+  rowsByDistrict: Map<string, BuildingRow[]>,
+): Record<string, DistrictState> | undefined {
+  const out: Record<string, DistrictState> = {};
+  for (const [key, d] of Object.entries(normalizeDistricts(raw) ?? {})) {
+    const rows = rowsByDistrict.get(key);
+    out[key] = {
+      q: d.q,
+      r: d.r,
+      citySpots: d.citySpots,
+      buildings: rows ? rows.map(toBuildingDef) : d.buildings,
+    };
+    rowsByDistrict.delete(key);
+  }
+  // Rows for a district the settlement row no longer lists: the ledger says
+  // those buildings exist, so they are kept rather than dropped. Only reachable
+  // on hand-edited data -- the writer writes both representations from one
+  // settlement object -- which is why the metadata is empty rather than guessed.
+  for (const [key, rows] of rowsByDistrict) {
+    const [q, r] = key.split(",").map(Number);
+    out[key] = { q, r, citySpots: [], buildings: rows.map(toBuildingDef) };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Every building a settlement owns, each tagged with the district it stands in
+ * (null = the main city). The one list the ledger's writer walks, so a district
+ * building can never be written without its district attribution -- or, as E8
+ * found, not written at all.
+ */
+function settlementBuildingRows(
+  settlement: Pick<SettlementState, "buildings" | "districts">,
+): Array<{ district: { q: number; r: number } | null; building: BuildingDef }> {
+  const out: Array<{ district: { q: number; r: number } | null; building: BuildingDef }> =
+    settlement.buildings.map((building) => ({ district: null, building }));
+  for (const d of Object.values(settlement.districts ?? {})) {
+    for (const building of d.buildings) out.push({ district: { q: d.q, r: d.r }, building });
+  }
+  return out;
+}
+
+function toSettlementState(
+  row: SettlementRow,
+  resourceRows: ResourceRow[],
+  buildingRows: BuildingRow[],
+  platoonRows: PlatoonRow[],
+): SettlementState {
+  const warehouse: SettlementState["warehouse"] = { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
+  const resourceRates: Partial<Record<ResourceType, number>> = {};
+  for (const r of resourceRows) {
+    warehouse[r.resource] = r.amount;
+    if (r.rate !== null) resourceRates[r.resource] = Number(r.rate);
+  }
+  if (row.gold_rate !== null) resourceRates.gold = Number(row.gold_rate);
+
+  // Main city (district_q IS NULL) into `buildings`, everything else grouped by
+  // its district hex for assembleDistricts below. Grouping preserves the row
+  // order the query returned (ORDER BY id), so the district's building array
+  // comes back in the order it was persisted, same as the city's.
+  const buildings: BuildingDef[] = [];
+  const rowsByDistrict = new Map<string, BuildingRow[]>();
+  for (const b of buildingRows) {
+    if (b.district_q === null) {
+      buildings.push(toBuildingDef(b));
+      continue;
+    }
+    const key = `${b.district_q},${b.district_r}`;
+    const rows = rowsByDistrict.get(key) ?? [];
+    rows.push(b);
+    rowsByDistrict.set(key, rows);
+  }
 
   // Shape-guarded through the same helper the JSONB fallback uses: a partial
   // districts row (missing `buildings`) must not reach the End Turn loop, which
   // iterates district.buildings unconditionally and would 500 every turn.
-  const districts = normalizeDistricts(row.districts);
+  const districts = assembleDistricts(row.districts, rowsByDistrict);
 
   return {
     id: row.id,
@@ -205,15 +290,15 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
         ),
         db.query<BuildingRow>(
           // ORDER BY id, not left to the planner: the UNIQUE
-          // (game_id, settlement_id, gx, gy) index is what this predicate
-          // actually scans, so without it Postgres returns buildings in (gx, gy)
-          // order while the JSONB read path returns them in the order they were
-          // persisted. Two read paths disagreeing on the same row is exactly
-          // what hydrate.test.ts's read-path parity case exists to catch, and a
-          // starter set's 6-10 buildings is enough to make the divergence
-          // visible. upsertMany re-inserts in array order, so the BIGSERIAL id
-          // IS the persisted order.
-          `SELECT settlement_id, gx, gy, kind, level, style, w, h, construction, bank, workers, draft FROM settlement_buildings
+          // (game_id, settlement_id, district_q, district_r, gx, gy) index is
+          // what this predicate actually scans, so without it Postgres returns
+          // buildings in (gx, gy) order while the JSONB read path returns them
+          // in the order they were persisted. Two read paths disagreeing on the
+          // same row is exactly what hydrate.test.ts's read-path parity case
+          // exists to catch, and a starter set's 6-10 buildings is enough to
+          // make the divergence visible. upsertMany re-inserts in array order,
+          // so the BIGSERIAL id IS the persisted order.
+          `SELECT settlement_id, district_q, district_r, gx, gy, kind, level, style, w, h, construction, bank, workers, draft FROM settlement_buildings
              WHERE game_id = $1 AND settlement_id = ANY($2::text[])
              ORDER BY settlement_id, id`,
           [gameId, settlementIds],
@@ -352,13 +437,23 @@ export function createSettlementRepo(db: Queryable): SettlementRepo {
           gameId,
           settlement.id,
         ]);
-        for (const building of settlement.buildings) {
+        // Every building the settlement owns -- main city AND every district --
+        // as one row each. A district's buildings are attributed to their own
+        // hex through district_q/district_r (migration 035), which is what keeps
+        // a district's local (gx, gy) from colliding with the city's: both grids
+        // start at (0, 0). Before 035 a district building had no row at all, so
+        // the ledger's own sum was short by the districts' whole output (E8).
+        // The DELETE above is the full sync: a district that lost a building
+        // loses its row here, with no separate delete path to keep in sync.
+        for (const { district, building } of settlementBuildingRows(settlement)) {
           await db.query(
-            `INSERT INTO settlement_buildings (game_id, settlement_id, gx, gy, kind, level, style, w, h, construction, bank, workers, draft)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+            `INSERT INTO settlement_buildings (game_id, settlement_id, district_q, district_r, gx, gy, kind, level, style, w, h, construction, bank, workers, draft)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
             [
               gameId,
               settlement.id,
+              district ? district.q : null,
+              district ? district.r : null,
               building.gx,
               building.gy,
               building.kind,
