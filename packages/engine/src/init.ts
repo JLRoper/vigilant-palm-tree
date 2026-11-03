@@ -4,7 +4,6 @@ import type {
   FactionId,
   GameMode,
   GameState,
-  GenerationStyle,
   HeroId,
   HeroState,
   InitialStateOptions,
@@ -662,7 +661,7 @@ function seedStarterBuildings(
       ...s,
       buildings: buildStarterLayout({
         size: cityViewSizeFor(s.level),
-        style: "pixel" as GenerationStyle,
+        style: "pixel",
         farms: starterFarmsNeeded(bill),
         factionId: s.ownerId === null ? undefined : seatFactions?.[s.ownerId],
       }),
