@@ -31,6 +31,8 @@ const API_PORT = getApiPort(4000);
 const WEB_PORT = getClientPort(5173);
 const API_URL = `http://127.0.0.1:${API_PORT}`;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
+// Same seed the client's own starter game uses (adventureView's MAP_SEED).
+const MAP_SEED = 42;
 
 const children: ChildProcess[] = [];
 let cleaned = false;
@@ -148,22 +150,41 @@ async function bulkInsertEvents(gameName: string, count: number): Promise<number
 // Home's own "Load Game" button, not the toolbar's hidden copy behind the
 // overlay: home's root is appended to <body> after the toolbar, so it's the
 // last match in document order (same reasoning as visualRegression's
-// New Game click). Home's Load Game modal lists the localStorage game cache
-// merged with the server list; the fresh browser context caches exactly one
-// game (the starter auto-created in step 1), so the top "Open" is ours.
-async function loadGameFromHome(page: Page): Promise<void> {
+// New Game click). The modal lists the localStorage cache merged with the
+// server's games, and this database is shared with every other run, so the row
+// is matched by NAME -- taking the first "Open" row opened whatever save
+// happened to be on top.
+async function loadGameFromHome(page: Page, name: string): Promise<void> {
   await page.locator("button", { hasText: /^Load Game$/ }).last().click();
-  await page.locator("button:visible", { hasText: /^Open$/ }).first().click({ timeout: 10_000 });
+  await wait(500);
+  const tagged = await page.evaluate((gameNameToOpen) => {
+    const rows = [...document.querySelectorAll("div")].filter((d) => {
+      const t = (d.textContent || "").trim();
+      return t.startsWith(gameNameToOpen) && d.querySelector("button");
+    });
+    const row = rows[rows.length - 1];
+    if (!row) return false;
+    const open = [...row.querySelectorAll("button")].find((b) => /Open/.test(b.textContent || ""));
+    if (!open) return false;
+    open.setAttribute("data-logpanel-open", "1");
+    return true;
+  }, name);
+  assert(tagged, `no Load Game row for "${name}"`);
+  await page.locator('[data-logpanel-open="1"]').click();
+  await wait(1500);
 }
 
-// Returns just the name: page.evaluate results are structured-cloned, so a
-// DebugApi handle (with its function properties) can't cross the boundary.
-function activeGameName(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const d = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug;
-    if (!d || d.activeGameName == null) throw new Error("__gameDebug.activeGameName is null");
-    return d.activeGameName;
+// This suite brings its own game: it is created before the client ever boots,
+// so the account is never empty and the client has no reason to start one for
+// us.
+async function createGameForRun(name: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/games`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, seed: MAP_SEED, mapSize: "small" }),
   });
+  assert(res.ok, `POST /api/games ${name} -> ${res.status}`);
+  console.log(`>> created game ${name} for this run`);
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────
@@ -190,20 +211,32 @@ async function run() {
     });
     page.on("pageerror", (e) => console.log(`[browser pageerror] ${e.message}`));
 
-    // Step 1: fresh boot. localStorage.clear() + reload makes the game cache
-    // empty, so initBackend auto-creates a starter game (that's what turns
-    // __gameDebug.activeGameName non-null -- there is no cached-game
-    // auto-resume).
+    // Step 1: fresh boot. This suite brings its own game. It used to rely on the
+    // client: localStorage.clear() + reload left the game cache empty, and
+    // initBackend silently started a `starter-*` game, which is what turned
+    // __gameDebug.activeGameName non-null. The load path no longer substitutes
+    // a game for a player who did not ask for one (test/loadSilentSubstitute.e2e.ts
+    // pins its absence), so the game is created here -- before the client boots,
+    // so the account is never empty -- and opened by name from home's Load Game
+    // the way a player opens one. The clear + reload below keeps the
+    // "lost profile" state the panel has to survive.
     // waitUntil "load", not "networkidle": once a session boots, its SSE event stream (/events/stream) holds a pending request forever, so networkidle can never fire.
+    gameName = `logpanel-e2e-${Date.now().toString(36)}`;
+    await createGameForRun(gameName);
     await page.goto(WEB_URL, { waitUntil: "load" });
     await page.evaluate(() => localStorage.clear());
     await page.reload({ waitUntil: "load" });
     await page.waitForFunction(
-      () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
+      () => !!(window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug,
       null,
       { timeout: 30_000 },
     );
-    gameName = await activeGameName(page);
+    await loadGameFromHome(page, gameName);
+    await page.waitForFunction(
+      (expected) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === expected,
+      gameName,
+      { timeout: 30_000 },
+    );
     console.log(`>> Step 1: session booted, active game '${gameName}' ✓`);
 
     // Step 2: enable the panel via the debug settings API (routes through
@@ -224,14 +257,14 @@ async function run() {
     const s3 = await waitForPanel(page, (s) => s.panelTestRows >= 3, "render the 3 seeded live rows");
     console.log(`>> Step 3: ${s3.panelTestRows} panel_test row(s) rendered live ✓`);
 
-    // Step 4: settings persistence + backlog hydrate across a reload. A
-    // reload with localStorage intact does NOT auto-load a game (initBackend
-    // only auto-creates when the cache is empty), so re-enter through home's
-    // Load Game flow; the panel must already be visible BEFORE that, purely
-    // from the persisted setting.
+    // Step 4: settings persistence + backlog hydrate across a reload. A reload
+    // never auto-loads a game (the client restores its list from the server but
+    // loads nothing on the player's behalf), so re-enter through home's Load
+    // Game flow; the panel must already be visible BEFORE that, purely from the
+    // persisted setting.
     await page.reload({ waitUntil: "load" });
     await page.waitForFunction(
-      () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug != null,
+      () => !!(window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug,
       null,
       { timeout: 30_000 },
     );
@@ -239,7 +272,7 @@ async function run() {
     assert.ok(persisted.inDom && persisted.visible, "panel must be visible right after reload without touching settings");
     console.log(">> Step 4a: panel visible after reload, setting persisted via localStorage ✓");
 
-    await loadGameFromHome(page);
+    await loadGameFromHome(page, gameName);
     await page.waitForFunction(
       (expected) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === expected,
       gameName,
