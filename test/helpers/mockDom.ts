@@ -37,13 +37,38 @@ export class MockElement {
   value = "";
   checked = false;
   disabled = false;
-  dataset: Record<string, string> = {};
+  /**
+   * A live view of the `data-*` attributes, the way the real `dataset` is:
+   * `el.dataset.modal = "true"` is readable as `getAttribute("data-modal")`,
+   * so a `[data-modal]` query sees it.
+   */
+  readonly dataset: Record<string, string>;
   isConnected = false;
   private readonly attributes = new Map<string, string>();
   private readonly listeners = new Map<string, MockListener[]>();
 
   constructor(tagName: string) {
     this.tagName = tagName.toUpperCase();
+    this.dataset = new Proxy({} as Record<string, string>, {
+      get: (_t, prop) => {
+        if (typeof prop !== "string") return undefined;
+        return this.attributes.get(`data-${camelToKebab(prop)}`);
+      },
+      set: (_t, prop, value) => {
+        this.attributes.set(`data-${camelToKebab(String(prop))}`, String(value));
+        return true;
+      },
+      has: (_t, prop) => typeof prop === "string" && this.attributes.has(`data-${camelToKebab(prop)}`),
+      deleteProperty: (_t, prop) => {
+        if (typeof prop === "string") this.attributes.delete(`data-${camelToKebab(prop)}`);
+        return true;
+      },
+      ownKeys: () =>
+        [...this.attributes.keys()]
+          .filter((k) => k.startsWith("data-"))
+          .map((k) => k.slice(5).replace(/-([a-z])/g, (_, ch: string) => ch.toUpperCase())),
+      getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+    });
     const map = new Map<string, string>();
     this.style = new Proxy({} as Record<string, string>, {
       get(_t, prop) {
