@@ -5,7 +5,7 @@ import { GameMap, type TileRow } from "../../src/map/gameMap";
 import type { Terrain } from "../../src/map/terrain";
 import { hexDistance } from "../../src/core/hex";
 import { CHARTER_GOLD_COST, canFoundSettlement, mulberry32, normalizePlatoons, platoonTroopTotal, settlementStacks, type UnitType } from "@heroes/engine";
-import type { BuildingKind } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, SettlementState } from "@heroes/contracts";
 import { coveredWagonIdFor, gameModeSettings } from "@heroes/contracts";
 import { makeHero, makeSettlement, makeState, emptyWarehouse } from "../charter/_helpers";
 
@@ -1012,7 +1012,7 @@ test("on an epic (120x90) grass map with no targets in reach, pickAiMove returns
   assert.equal(move!.cost, 1);
   assert.equal(rng.draws(), 2);
 });
-import { pickHeroArmyBuildings, pickHeroArmyRecruitment, pickHeroRefitStep, HERO_ARMY_TARGET_POWER } from "../../src/ai/aiBrain";
+import { pickHeroArmyBuildings, pickHeroArmyRecruitment, pickHeroRefitStep, HERO_ARMY_TARGET_POWER, pickAiConstructionStaffing } from "../../src/ai/aiBrain";
 import { platoonPower } from "@heroes/engine";
 
 // The hero-army planners (packages/engine/src/ai/aiBrain.ts): the AI seat's own
@@ -1179,4 +1179,92 @@ test("refit: an enemy-held city is never a destination (only the seat's own garr
   const hero = makeHero("h1", 1, 2, 2, { stacks: [] });
 
   assert.equal(pickHeroRefitStep(stateWith([hero], [foreign]), "h1", map, ARMY_UNITS), null);
+});
+
+// ── the build-crew rule's two AI obligations (2026-11-03 a site needs builders) ──
+
+function site(kind: BuildingKind, gx: number, gy: number, over: Partial<BuildingDef>): BuildingDef {
+  return { gx, gy, kind, level: 1, style: "classic", ...over };
+}
+
+/** A GROWN seat city -- one district ends the bootstrap, so every new placement
+ * lands at `workers: 0` and the seat must crew it out of its own pool. */
+function grownHome(population: number): SettlementState {
+  return {
+    ...makeSettlement("s-home", 1, 20, 14, {
+      level: 2,
+      population,
+      gold: 5000,
+      warehouse: emptyWarehouse({ wood: 500, stone: 500 }),
+      buildings: [armyBuilding("barracks", 2, 2)],
+    }),
+    districts: {
+      "21,14": { q: 21, r: 14, citySpots: [], buildings: [armyBuilding("house", 0, 0)] },
+    },
+  } as SettlementState;
+}
+
+test("the AI does not start what it cannot staff: a grown city with no idle slot places nothing", () => {
+  const dry = grownHome(0); // pool floor(0/300) = 0, nothing idle
+  const dryState = stateWith([makeHero("h1", 1, 20, 14, { stacks: [] })], [dry]);
+  assert.deepEqual(
+    pickHeroArmyBuildings(dryState, 1, ARMY_UNITS),
+    [],
+    "a site the seat could never finish is worse than no site: it banks its resources instead",
+  );
+
+  // The gate is the POOL, not the deficit: one idle slot buys exactly one site.
+  const fundedState = stateWith([makeHero("h1", 1, 20, 14, { stacks: [] })], [grownHome(300)]);
+  const plan = pickHeroArmyBuildings(fundedState, 1, ARMY_UNITS);
+  assert.equal(plan.length, 1, "one idle worker, one site");
+});
+
+test("the AI crews its own sites out of its own pool: stalled first, then fewest days left, up to 4 each", () => {
+  const home = (population: number): SettlementState =>
+    ({
+      ...makeSettlement("s-home", 1, 20, 14, { level: 2, population }),
+      buildings: [
+        site("barracks", 0, 0, { workers: 0, construction: { daysRemaining: 1 } }), // stalled, closest to done
+        site("barracks", 3, 0, { workers: 0, construction: { daysRemaining: 4 } }), // stalled, further out
+        site("barracks", 6, 0, { workers: 2, construction: { daysRemaining: 2 } }), // already working, lowest priority
+        site("barracks", 8, 0, {}), // finished: never a candidate
+        site("barracks", 10, 0, { construction: { daysRemaining: 3 } }), // the auto crew is already full
+      ],
+      districts: {
+        "21,14": {
+          q: 21,
+          r: 14,
+          citySpots: [],
+          buildings: [site("barracks", 0, 0, { workers: 0, construction: { daysRemaining: 6 } })],
+        },
+      },
+    }) as SettlementState;
+
+  // pool 3, of which 2 are already explicit -> 1 idle builder: it goes to the
+  // stalled site closest to finishing, and the rest wait.
+  const tight = pickAiConstructionStaffing(stateWith([], [home(900)]), 1);
+  assert.deepEqual(tight, [{ settlementId: "s-home", gx: 0, gy: 0, workers: 1 }], "one idle slot, one builder, stalled site first");
+
+  // pool 5 -> 3 idle: the worse stalled site still gets nothing, and neither the
+  // district site nor the already-working one is touched.
+  const wider = pickAiConstructionStaffing(stateWith([], [home(1500)]), 1);
+  assert.deepEqual(wider, [{ settlementId: "s-home", gx: 0, gy: 0, workers: 3 }], "3 idle builders all go to the first stalled site");
+
+  // pool 10 -> 8 idle: two stalled sites take a full crew each, and the pool is
+  // spent again before the district site or the already-working one is reached.
+  const ample = pickAiConstructionStaffing(stateWith([], [home(3000)]), 1);
+  assert.deepEqual(ample, [
+    { settlementId: "s-home", gx: 0, gy: 0, workers: 4 },
+    { settlementId: "s-home", gx: 3, gy: 0, workers: 4 },
+  ], "a stalled site takes up to the 4-builder ceiling");
+
+  // pool 20 -> enough for the district site and the already-working one too, and
+  // never more than the ceiling anywhere.
+  const plenty = pickAiConstructionStaffing(stateWith([], [home(6000)]), 1);
+  assert.deepEqual(plenty, [
+    { settlementId: "s-home", gx: 0, gy: 0, workers: 4 },
+    { settlementId: "s-home", gx: 3, gy: 0, workers: 4 },
+    { settlementId: "s-home", gx: 0, gy: 0, workers: 4, district: { q: 21, r: 14 } },
+    { settlementId: "s-home", gx: 6, gy: 0, workers: 4 },
+  ], "districts are covered, the 4th builder is the ceiling, and the finished and auto buildings are never staffed");
 });

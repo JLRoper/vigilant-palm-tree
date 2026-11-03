@@ -657,3 +657,73 @@ test("advanceSettlementUpgrades: 1/day by default, accel adds more, staffed town
   const legacy = advanceSettlementUpgrades(withUpgrade([building("townHall", 0, 0)]), { accel: upgradeAccelEffort });
   assert.equal(legacy.settlements.s0.upgrade?.daysRemaining, 9, "legacy unstaffed townHall adds no accel");
 });
+
+// ── the BUILD CREW ceiling (2026-11-03): 4 on any site, the kind's cap once finished ──
+
+test("assignWorkers: a site takes up to 4 builders whatever its kind, and still refuses 5", () => {
+  // A house's own cap is 1. While it is being BUILT the ceiling is the
+  // construction cap for every kind, so the reducer must accept 2..4 on it and
+  // refuse 5 with the SAME `invalid_workers` it always used.
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 3000 }),
+    buildings: [building("house", 0, 0, { construction: { daysRemaining: 4 } })],
+  });
+  for (const workers of [1, 2, 3, 4]) {
+    const r = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers });
+    assert.equal(r.ok, true, `a house SITE accepts ${workers} builders`);
+    assert.equal(r.state.settlements.s0.buildings[0].workers, workers);
+  }
+  const five = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 5 });
+  assert.equal(five.ok, false, "the 5th builder is still refused: the ceiling is 4");
+  assert.equal(five.reason, "invalid_workers", "and rejected for the same reason as before -- no new one");
+});
+
+test("assignWorkers: the ceiling is the KIND's cap once the site is finished", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 3000 }),
+    buildings: [building("house", 0, 0)],
+  });
+  const two = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 2 });
+  assert.equal(two.ok, false, "a finished house still holds exactly 1 worker");
+  assert.equal(two.reason, "invalid_workers");
+});
+
+test("assignWorkers: a site's 4 builders are 4 pool slots, and the increment is pool-gated", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 900 }), // pool floor(900/300) = 3
+    buildings: [building("house", 0, 0, { construction: { daysRemaining: 4 } })],
+  });
+  const three = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 3 });
+  assert.equal(three.ok, true);
+  assert.equal(assignedWorkersExplicit(three.state.settlements.s0), 3, "a site under construction spends its crew from the pool");
+  const four = assignWorkers(three.state, { settlementId: "s0", gx: 0, gy: 0, workers: 4 });
+  assert.equal(four.ok, false, "the 4th builder needs a 4th slot and the pool only has 3");
+  assert.equal(four.reason, "pool_exhausted");
+});
+
+test("the source transfer reads the ceiling on both ends: a builder can be dragged ONTO a site", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 900 }),
+    buildings: [
+      building("farmField", 0, 0, { workers: 2 }),
+      building("house", 3, 0, { workers: 1, construction: { daysRemaining: 4 } }),
+    ],
+  });
+  // Farm Field at 2 -> 1, the house SITE at 1 -> 2: a kind-cap destination would
+  // have refused the second builder here (a house's cap is 1).
+  const r = assignWorkers(state, {
+    settlementId: "s0",
+    gx: 3,
+    gy: 0,
+    workers: 2,
+    source: { gx: 0, gy: 0 },
+  });
+  assert.equal(r.ok, true, "the 2nd builder lands on the site");
+  const after = r.state.settlements.s0;
+  assert.deepEqual(after.buildings.map((b) => b.workers), [1, 2]);
+  const third = assignWorkers(r.state, { settlementId: "s0", gx: 3, gy: 0, workers: 3, source: { gx: 0, gy: 0 } });
+  assert.equal(third.ok, true, "and so can the 3rd");
+  const fourth = assignWorkers(third.state, { settlementId: "s0", gx: 3, gy: 0, workers: 4, source: { gx: 0, gy: 0 } });
+  assert.equal(fourth.ok, false, "but the source is empty at that point: a worker must come from somewhere");
+});
+

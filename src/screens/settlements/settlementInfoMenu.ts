@@ -19,7 +19,8 @@ import { warehouseCapMessage, warehouseResourceCapped } from "./warehouseCap";
 import { dailyRateTitle, foodBalanceTitle, formatDailyRate, populationCapTitle, resourceLabel, settlementDailyRates } from "./panelRates";
 import type { HorseVariant } from "../../state/settings";
 import { WAREHOUSE_RESOURCES, type WarehouseResource } from "@heroes/contracts";
-import { districtPopulationBonus, POP_BY_LEVEL, settlementPopulationCap, UPGRADE_POPULATION_GATE, effectiveSettlementIncome, settlementTreasuryCap, workforcePool, assignedWorkersExplicit, hasLegacyStaffing, autoStaffedCount, autoStaffedSlots } from "@heroes/engine";
+import { districtPopulationBonus, POP_BY_LEVEL, settlementPopulationCap, UPGRADE_POPULATION_GATE, effectiveSettlementIncome, settlementTreasuryCap } from "@heroes/engine";
+import { workforceRowText } from "./workforceRowText";
 import { pickHeroName } from "../../data/heroNames";
 import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
 
@@ -544,11 +545,12 @@ export class SettlementInfoMenu {
       populationCap - districtBonus,
       districtBonus,
     );
-    const pool = workforcePool(settlement);
-    const assigned = assignedWorkersExplicit(settlement);
-    this.workforceEl.textContent = hasLegacyStaffing(settlement)
-      ? `auto crew · ${autoStaffedCount(settlement)} bldgs (${autoStaffedSlots(settlement)} slots), pool ${pool}`
-      : `${assigned}/${pool} assigned · ${Math.max(0, pool - assigned)} idle${assigned > pool ? " · over pool" : ""}`;
+    // The row's own words live in `workforceRowText` (pure, asserted directly):
+    // the assigned/idle counts, the `over pool` marker, and -- new with the
+    // build-crew rule -- the stall count, appended last. A site with no builders
+    // makes no progress, and this is the one surface that says so without the
+    // player opening every building.
+    this.workforceEl.textContent = workforceRowText(settlement);
     this.incomeEl.textContent = `${effectiveSettlementIncome(
       settlement,
       state.heroes,

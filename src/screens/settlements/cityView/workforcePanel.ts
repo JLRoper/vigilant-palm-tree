@@ -12,6 +12,7 @@ export interface WorkforcePanelOptions {
 }
 
 const ROLE_LABELS: Record<WorkforceBuildingRole, string> = {
+  building: "Building",
   producer: "Producer",
   market: "Market",
   recruiter: "Recruit",

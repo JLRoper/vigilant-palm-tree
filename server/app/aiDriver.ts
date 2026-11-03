@@ -16,6 +16,7 @@ import {
   pickCharterAction,
   pickGarrisonRecruitment,
   pickHeroArmyBuildings,
+  pickAiConstructionStaffing,
   pickHeroArmyRecruitment,
   pickHeroRefitStep,
   pickSettlersWagonAction,
@@ -950,6 +951,45 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
             .map((p) => `${p.kind}@${p.gx},${p.gy}`)
             .join(" ")} @ ${settlementId}`,
         );
+      }
+    }
+    // The AI crews its own sites (2026-11-03, second half of the building
+    // programme). A placement in a grown settlement lands at `workers: 0`, and
+    // under the build crew's rule a site with nobody on it makes no progress at
+    // all -- so without this every AI site would freeze half-built. The seat
+    // spends its OWN pool through the same AssignWorkers command the player
+    // uses, obeying the same 4-builder ceiling; there is no carve-out and no
+    // free labour. Ordered by the shared planner (stalled site first, then
+    // fewest days remaining). The snapshot is re-read after the placements so
+    // the sites placed THIS round are staffable immediately.
+    if (exhausted === null) {
+      const staffSnap = await cfg.loadGame(gameName);
+      if (!staffSnap) {
+        memory.delete(gameName);
+        return "game_gone";
+      }
+      if (!aiStillActive(staffSnap.state, seat)) return "turn_lost";
+      for (const item of pickAiConstructionStaffing(staffSnap.state, seat)) {
+        const assigned = await dispatch(ctx, {
+          kind: "AssignWorkers",
+          gameName,
+          actor: seat,
+          settlementId: item.settlementId,
+          gx: item.gx,
+          gy: item.gy,
+          workers: item.workers,
+          ...(item.district ? { district: item.district } : {}),
+        });
+        if ("stop" in assigned) {
+          if (assigned.stop === "turn_lost") return "turn_lost";
+          exhausted = assigned.stop;
+          break;
+        }
+        if (!assigned.outcome.ok) {
+          console.info(
+            `[aiDriver] "${gameName}" construction staffing rejected (${assigned.outcome.reason}): ${item.workers} workers @ ${item.gx},${item.gy} ${item.settlementId}`,
+          );
+        }
       }
     }
     if (exhausted === null) {

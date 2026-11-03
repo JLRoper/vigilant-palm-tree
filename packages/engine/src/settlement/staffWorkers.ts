@@ -6,8 +6,7 @@ import type {
   SettlementState,
 } from "@heroes/contracts";
 import { districtKey } from "../control";
-import { buildingMaxWorkers } from "../buildingRegistry";
-import { assignedWorkersExplicit, hasLegacyStaffing, workforcePool } from "./workforce";
+import { assignedWorkersExplicit, hasLegacyStaffing, staffingCeiling, workforcePool } from "./workforce";
 
 export interface AssignWorkersOptions {
   settlementId: SettlementId;
@@ -111,6 +110,12 @@ function writeWorkers(settlement: SettlementState, located: LocatedBuilding, wor
  * The pool gate is unchanged: an incremented total is checked against
  * `workforcePool`, and decrements are always allowed (an oversubscribed
  * settlement must be able to shed workers).
+ *
+ * The CREW CEILING is `staffingCeiling(b)` (2026-11-03): a building under
+ * construction takes up to `CONSTRUCTION_MAX_BUILDERS` (4) whatever its kind,
+ * a finished one takes its kind's own cap. The rejection reasons are unchanged
+ * -- there is no new one for a site; a 5th builder is `invalid_workers` exactly
+ * as a 4th on a finished cap-3 kind always was.
  */
 export function assignWorkers(state: GameState, opts: AssignWorkersOptions): AssignWorkersResult {
   const settlement = state.settlements[opts.settlementId];
@@ -119,20 +124,20 @@ export function assignWorkers(state: GameState, opts: AssignWorkersOptions): Ass
   const located = locateBuilding(settlement, opts.gx, opts.gy, opts.district);
   if (!located) return { state, ok: false, reason: "no_building" };
   const building = located.building;
-  const maxWorkers = buildingMaxWorkers(building.kind);
-  if (maxWorkers < 1) return { state, ok: false, reason: "not_staffable" };
-  if (!Number.isInteger(opts.workers) || opts.workers < 0 || opts.workers > maxWorkers) {
+  const ceiling = staffingCeiling(building);
+  if (ceiling < 1) return { state, ok: false, reason: "not_staffable" };
+  if (!Number.isInteger(opts.workers) || opts.workers < 0 || opts.workers > ceiling) {
     return { state, ok: false, reason: "invalid_workers" };
   }
   if (opts.source) {
     const source = locateBuilding(settlement, opts.source.gx, opts.source.gy, opts.district);
     if (!source || source.building === building) return { state, ok: false, reason: "invalid_source" };
-    const sourceMax = buildingMaxWorkers(source.building.kind);
+    const sourceMax = staffingCeiling(source.building);
     // A legacy source is auto-staffed at its own cap, so a pick-up takes one
     // from max -- the same base the client's stepper reads and displays.
     const sourceWorkers = (source.building.workers ?? sourceMax) - 1;
-    const destinationWorkers = hasLegacyStaffing(settlement) ? 1 : (building.workers ?? maxWorkers) + 1;
-    if (sourceMax < 1 || sourceWorkers < 0 || sourceWorkers > sourceMax || destinationWorkers > maxWorkers || opts.workers !== destinationWorkers) {
+    const destinationWorkers = hasLegacyStaffing(settlement) ? 1 : (building.workers ?? ceiling) + 1;
+    if (sourceMax < 1 || sourceWorkers < 0 || sourceWorkers > sourceMax || destinationWorkers > ceiling || opts.workers !== destinationWorkers) {
       return { state, ok: false, reason: "invalid_workers" };
     }
     const afterSource = writeWorkers(settlement, source, sourceWorkers);

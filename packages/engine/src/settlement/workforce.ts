@@ -43,12 +43,64 @@ export function effortFraction(b: BuildingDef): number {
   return Math.min(b.workers / buildingMaxWorkers(b.kind), 1);
 }
 
+// THE BUILD CREW (2026-11-03). A building under construction is staffed work:
+// its daily decrement is `buildRate(buildersOnSite(b))` days per day tick and a
+// site with no builders makes NO progress at all (0 builders = 0 days). The
+// crew ceiling while `construction` is set is `CONSTRUCTION_MAX_BUILDERS` for
+// EVERY kind; the moment the timer clears, `buildingMaxWorkers(kind)` governs
+// again, so the construction ceiling raises no building's operational capacity
+// (a house still holds exactly 1 worker once it is finished).
+//
+// The curve is scaled so its TOP is the rate today's engine already reaches at
+// a kind's own cap -- `buildRate(4) === 2.00 === 1 + effortFraction(full crew)`
+// -- one step is 1/3. That equality is the whole point: the free auto crew
+// (`workers === undefined` = a full crew) therefore builds in EXACTLY the time
+// it builds today, and an untouched building is not nerfed by this feature.
+export const CONSTRUCTION_MAX_BUILDERS = 4;
+export const BUILD_RATE_PER_EXTRA_BUILDER = 1 / 3;
+
+/** Days a site advances per day tick: 0 / 1.00 / 1.33 / 1.67 / 2.00 for 0-4
+ * builders. The ceiling is applied here as well as in `buildersOnSite`, so no
+ * caller can buy more than the construction cap by passing a raw count. */
+export function buildRate(builders: number): number {
+  const crew = Math.min(Math.max(builders, 0), CONSTRUCTION_MAX_BUILDERS);
+  if (crew <= 0) return 0;
+  return 1 + BUILD_RATE_PER_EXTRA_BUILDER * (crew - 1);
+}
+
+/** THIS building's crew cap: the construction ceiling while it is a site, its
+ * kind's own operational cap once it is finished. Every ceiling reader (the
+ * reducer, the pool arithmetic, the stepper, the drag, the panels, the district
+ * road) reads this and never `buildingMaxWorkers` directly for a crew limit. */
+export function staffingCeiling(b: BuildingDef): number {
+  return b.construction ? CONSTRUCTION_MAX_BUILDERS : buildingMaxWorkers(b.kind);
+}
+
+/** The builders actually on the building: an absent count is the auto crew and
+ * reads as the ceiling (unchanged), an explicit count is clamped to it. An
+ * auto-crewed site is therefore a full 4-builder crew. */
+export function buildersOnSite(b: BuildingDef): number {
+  const ceiling = staffingCeiling(b);
+  if (b.workers === undefined) return ceiling;
+  return Math.min(Math.max(b.workers, 0), ceiling);
+}
+
+/** How many of the settlement's construction sites have nobody on them -- the
+ * sites making no progress. Main city and every district. The settlement panel
+ * prints this so a frozen site somewhere is visible without opening it. */
+export function stalledConstructionSites(s: SettlementState): number {
+  const stalled = (b: BuildingDef): boolean => b.construction !== undefined && buildersOnSite(b) <= 0;
+  let total = s.buildings.filter(stalled).length;
+  for (const d of Object.values(s.districts ?? {})) total += d.buildings.filter(stalled).length;
+  return total;
+}
+
 /** Worker slots the settlement's auto-staffed (`workers === undefined`) buildings occupy. */
 export function autoStaffedSlots(s: SettlementState): number {
   let total = 0;
-  for (const b of s.buildings) if (b.workers === undefined) total += buildingMaxWorkers(b.kind);
+  for (const b of s.buildings) if (b.workers === undefined) total += staffingCeiling(b);
   for (const d of Object.values(s.districts ?? {})) {
-    for (const b of d.buildings) if (b.workers === undefined) total += buildingMaxWorkers(b.kind);
+    for (const b of d.buildings) if (b.workers === undefined) total += staffingCeiling(b);
   }
   return total;
 }

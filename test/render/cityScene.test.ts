@@ -11,6 +11,7 @@ import type {
   CityGhostBuildingNode,
   CityLabelNode,
   CityMineNode,
+  CityPersonNode,
   CityResourceSpotNode,
   CitySkyboxNode,
 } from "../../src/render/scene/types";
@@ -430,4 +431,19 @@ test("non-farm buildings carry no farmStyle, and farm variety keys off the settl
     farmFieldStyleAt("Home", 0, 2),
     "farm style is farmFieldStyleAt(settlementName, gx, gy)",
   );
+});
+
+test("builders are drawn on a site, and a stalled site draws nobody (2026-11-03)", () => {
+  const buildings: BuildingDef[] = [
+    { gx: 0, gy: 0, kind: "barracks", level: 1, style: "classic", workers: 3, construction: { daysRemaining: 4 } },
+    { gx: 2, gy: 0, kind: "barracks", level: 1, style: "classic", workers: 0, construction: { daysRemaining: 4 } },
+    { gx: 4, gy: 0, kind: "barracks", level: 1, style: "classic", workers: 2 },
+    { gx: 6, gy: 0, kind: "barracks", level: 1, style: "classic" },
+  ];
+  const nodes = nodesOfKind<CityPersonNode>(buildCityScene(baseInput({ buildings })), "cityPerson");
+  const at = (gx: number): CityPersonNode | undefined => nodes.find((n) => n.gx === gx);
+  assert.equal(at(0)?.count, 3, "a building under construction draws its builders -- the skip is gone");
+  assert.equal(at(2), undefined, "a stalled site draws none: the visual statement of 'nobody is working here'");
+  assert.equal(at(4)?.count, 2, "a finished building is unchanged");
+  assert.equal(at(6)?.count, 4, "an auto-crewed building is a full crew");
 });

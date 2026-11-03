@@ -1,6 +1,7 @@
 import { FloatingPanel, styleButton } from "@screens/shared/panel";
 import type { BuildingDef, BuildingKind } from "@heroes/contracts";
 import type { SettlementState } from "../../../state/gameState";
+import { siteStatus } from "./siteStatus";
 import { catalogFailed, catalogReady, getCachedUnit, loadUnitCatalog } from "../../../data/unitCatalog";
 import { getUnitImageUrl } from "../../../data/unitImages";
 import {
@@ -12,7 +13,6 @@ import {
   buildingUpkeep,
   buildingUpgradeCost,
   getBuildingEffect,
-  buildingMaxWorkers,
   buildingDraftMax,
   canAssignWorkers,
   districtKey,
@@ -21,6 +21,7 @@ import {
   assignedWorkersExplicit,
   hasLegacyStaffing,
   staffingBase,
+  staffingCeiling,
   TOWN_HALL_COSTS,
   type RecruitEntry,
 } from "@heroes/engine";
@@ -264,20 +265,12 @@ export class BuildingMenu {
       this.menu.appendContent(prodEl);
     }
 
-    if (workforce && buildingMaxWorkers(building.kind) >= 1) {
+    if (workforce && staffingCeiling(building) >= 1) {
       this.menu.appendContent(this.buildWorkforceRow(building, workforce, resolveLive, recruitRefreshers));
     }
 
     if (constructionDaysRemaining !== undefined) {
-      const conEl = document.createElement("div");
-      conEl.textContent = `Under construction — ${constructionDaysRemaining} day${constructionDaysRemaining === 1 ? "" : "s"} remaining`;
-      Object.assign(conEl.style, {
-        fontSize: "11px",
-        color: "#f0c860",
-        lineHeight: "1.5",
-        marginBottom: "4px",
-      });
-      this.menu.appendContent(conEl);
+      this.menu.appendContent(this.buildSiteStatusLine(building, resolveLive, constructionDaysRemaining));
     }
 
     const costStr = formatPlacementCost(building.kind);
@@ -453,13 +446,48 @@ export class BuildingMenu {
     }
   }
 
+  /**
+   * The site's own line (design §6.1). Same element, same colour, same raw day
+   * number as before -- fractions included -- with the CREW and the RATE added:
+   * `Under construction — 1.33× (2 of 4 builders) · 4 days remaining`, or
+   * `Under construction — stalled: no builders · 4 days remaining` when nobody
+   * is on the site, which under the build-crew rule means it is not advancing at
+   * all. The sentence itself is `siteStatus` (asserted directly, no DOM), and the
+   * `data-*` hooks carry the same crew and rate so a browser pass can read them
+   * without parsing the words.
+   */
+  private buildSiteStatusLine(
+    building: BuildingDef,
+    resolveLive: (() => BuildingDef | undefined) | undefined,
+    daysRemaining: number,
+  ): HTMLDivElement {
+    const live = resolveLive?.() ?? building;
+    const status = siteStatus(live, daysRemaining);
+    const conEl = document.createElement("div");
+    conEl.textContent = status.text;
+    conEl.dataset.testid = "site-status";
+    conEl.dataset.builders = String(status.builders);
+    conEl.dataset.rate = status.rate;
+    Object.assign(conEl.style, {
+      fontSize: "11px",
+      color: "#f0c860",
+      lineHeight: "1.5",
+      marginBottom: "4px",
+    });
+    return conEl;
+  }
+
   private buildWorkforceRow(
     building: BuildingDef,
     workforce: BuildingMenuWorkforce,
     resolveLive: (() => BuildingDef | undefined) | undefined,
     recruitRefreshers: Array<() => void>,
   ): HTMLDivElement {
-    const max = buildingMaxWorkers(building.kind);
+    // The CREW CEILING, not the kind's operational cap: a building under
+    // construction takes up to `CONSTRUCTION_MAX_BUILDERS` whatever its kind
+    // (2026-11-03), so the stepper, its `n / max` and its `+` gate would all
+    // disagree with the reducer if this read `buildingMaxWorkers`.
+    const max = staffingCeiling(building);
     const row = document.createElement("div");
     Object.assign(row.style, {
       display: "flex",

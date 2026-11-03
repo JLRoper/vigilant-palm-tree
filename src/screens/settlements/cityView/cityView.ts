@@ -14,11 +14,11 @@ import {
   assignedWorkersExplicit,
   autoStaffedCount,
   autoStaffedSlots,
-  buildingMaxWorkers,
   canAssignWorkers,
   isProducerKind,
   isRecruitBuilding,
   staffingBase,
+  staffingCeiling,
   WORKFORCE_UPGRADE_ACCEL_KINDS,
   workforcePool,
 } from "@heroes/engine";
@@ -62,10 +62,12 @@ export interface CitySelectionSnapshot {
   settlementId: string | null;
 }
 
-/** Workforce tags of a building, in display order: producer, market, recruiter,
- * upgrade-accel. A building can carry several (farmhouse → producer+recruiter,
- * mageGuild → recruiter+upgrade-accel); a building with none reports ["idle"]. */
-export type WorkforceBuildingRole = "producer" | "market" | "recruiter" | "upgrade-accel" | "idle";
+/** Workforce tags of a building, in display order: building (a construction
+ * site, which takes precedence and is the ONLY tag a site carries), producer,
+ * market, recruiter, upgrade-accel. A building can carry several (farmhouse →
+ * producer+recruiter, mageGuild → recruiter+upgrade-accel); a building with none
+ * reports ["idle"]. */
+export type WorkforceBuildingRole = "building" | "producer" | "market" | "recruiter" | "upgrade-accel" | "idle";
 
 /** Live staffing snapshot for the workforce panel (district-true: each entry
  * carries its OWN building's district coords, null for main-settlement ones).
@@ -705,7 +707,13 @@ export class CityView {
     return { building, district: this.openDistrict ? { q: this.openDistrict.q, r: this.openDistrict.r } : null };
   }
 
-  private rolesFor(kind: BuildingKind): WorkforceBuildingRole[] {
+  /** Takes the BUILDING, not the kind: whether a site is under construction is
+   * a property of this building (2026-11-03), and a site is tagged `building`
+   * rather than the finished role it will produce -- a site producing nothing
+   * while the panel calls it a `Producer` is the panel lying. */
+  private rolesFor(b: BuildingDef): WorkforceBuildingRole[] {
+    if (b.construction) return ["building"];
+    const kind = b.kind;
     const roles: WorkforceBuildingRole[] = [];
     if (isProducerKind(kind)) roles.push("producer");
     if (kind === "market") roles.push("market");
@@ -715,7 +723,10 @@ export class CityView {
   }
 
   private snapshotEntry(b: BuildingDef, district: { q: number; r: number } | null): WorkforceSnapshot["buildings"][number] {
-    const max = buildingMaxWorkers(b.kind);
+    // The ceiling, not the kind's cap: a site takes up to the construction cap
+    // whatever its kind, so the panel's stepper and its `n / max` disagree with
+    // the reducer if this reads `buildingMaxWorkers`.
+    const max = staffingCeiling(b);
     return {
       gx: b.gx,
       gy: b.gy,
@@ -724,7 +735,7 @@ export class CityView {
       staffable: max >= 1,
       max,
       workers: b.workers,
-      roles: this.rolesFor(b.kind),
+      roles: this.rolesFor(b),
     };
   }
 
@@ -904,8 +915,13 @@ export class CityView {
     const cell = screenToGridCell(layout, this.size, viewportW, x, y);
     if (!cell) return;
     const hit = this.workforceBuildingAt(cell.gx, cell.gy);
-    if (!hit || buildingMaxWorkers(hit.building.kind) < 1) return;
-    const max = buildingMaxWorkers(hit.building.kind);
+    if (!hit) return;
+    // The BUILDING's own ceiling, not its kind's cap: a site takes up to 4
+    // builders whatever the kind, so a kind-cap maximum here would refuse the
+    // 2nd-4th builder on the very site the feature exists to crew (and would
+    // read an auto-crewed site's pickup base as the kind's cap, not 4).
+    const max = staffingCeiling(hit.building);
+    if (max < 1) return;
     const { pool, assigned } = this.workforceTotals();
     const workers = hit.building.workers ?? max;
     if (workers < 1) return;
@@ -973,7 +989,7 @@ export class CityView {
     const target = this.workforceBuildingAt(cell.gx, cell.gy);
     if (!target) return;
     const legacy = hasLegacyStaffing(live);
-    const targetMax = buildingMaxWorkers(target.building.kind);
+    const targetMax = staffingCeiling(target.building);
     const nextTarget = staffingBase(target.building.workers, targetMax, legacy) + 1;
     if (nextTarget > targetMax) return;
     let ok = false;
@@ -984,7 +1000,7 @@ export class CityView {
       const source = list?.find((b) => b.gx === drag.source!.gx && b.gy === drag.source!.gy && b.kind === drag.source!.kind);
       if (!source) return;
       if (source.gx === target.building.gx && source.gy === target.building.gy && source.kind === target.building.kind) return;
-      const sourceMax = buildingMaxWorkers(source.kind);
+      const sourceMax = staffingCeiling(source);
       if ((source.workers ?? sourceMax) < 1) return;
       ok = this.onAssignWorkers?.(
         target.building.gx,
