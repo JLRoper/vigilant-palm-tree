@@ -287,8 +287,8 @@ async function installRecorder(page: Page): Promise<void> {
   await page.evaluate(async () => {
     // Hand the debug API to the page's global scope so later evaluate()
     // callbacks can reach it by a name they share with this module.
-    (window as unknown as { dbg: () => unknown }).dbg = () =>
-      (window as unknown as { __gameDebug: unknown }).__gameDebug;
+    (window as unknown as { dbg: () => Db }).dbg = () =>
+      (window as unknown as { __gameDebug: Db }).__gameDebug;
     // Subscribe to the SAME bus module instance the app uses (Vite serves one
     // URL, so the dynamic import here and the app's static import resolve to
     // one module), to see whether the events the palette refresh rides on
@@ -299,7 +299,7 @@ async function installRecorder(page: Page): Promise<void> {
     (window as unknown as { __busLog: typeof log }).__busLog = log;
     for (const t of ["turn:ended", "state:committed"]) {
       ev.bus.on(t, () => {
-        const d = (window as unknown as { __gameDebug?: { getState: () => { day: number } } }).__gameDebug;
+        const d = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug;
         log.push({ t, day: d ? d.getState().day : -1 });
       });
     }
@@ -331,7 +331,7 @@ async function createSettlersGame(page: Page, name: string): Promise<void> {
   await page.locator('input[type="checkbox"]').first().uncheck({ force: true }).catch(() => {});
   await page.locator("button").filter({ hasText: /^Create Game$/ }).first().click();
   await page.waitForFunction(
-    (want: string) => (window as unknown as { __gameDebug?: { activeGameName?: string } }).__gameDebug?.activeGameName === want,
+    (want: string) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === want,
     name,
     { timeout: 30000 },
   );
@@ -419,7 +419,7 @@ async function run() {
       `the web under test must serve source modules (got "${moduleType}") -- another server owns ${WEB_PORT}`,
     );
 
-    await page.waitForFunction(() => !!(window as unknown as { __gameDebug?: unknown }).__gameDebug, { timeout: 60000 });
+    await page.waitForFunction(() => !!(window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug, { timeout: 60000 });
     await wait(500);
     await installRecorder(page);
 
