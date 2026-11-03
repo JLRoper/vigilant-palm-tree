@@ -10,6 +10,11 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.11] - 2026-11-03
+
+- Logistics: the wagon steppers no longer stay pressable when the engine can only refuse. The route row's +1 is off with an empty unassigned-wagon pool, its −1 is off on a one-wagon route, and the hero's cargo/treasury −1 is off for a slot the hero holds nothing in — each carrying the panel's own sentence for that refusal.
+- Engine: the one-wagon route floor is one exported constant (`MIN_TRADE_ROUTE_WAGONS`), read by both the clamp and the client's gate.
+
 ## [0.39.10] - 2026-11-03
 
 the four skybox-only settings rows now state the backdrop they need
