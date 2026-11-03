@@ -10,6 +10,14 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.38.0] - 2026-11-03
+
+District roads: a purely decorative ground layer joins each district to its settlement's tile.
+
+- Track count is the district's own staffing share (one track per 5 points of workforce: unstaffed lays no road, 15 lays three, a fully staffed district hits the 20 cap).
+- The layout lives in the engine (`packages/engine/src/settlement/roadNetwork.ts`): `settlementRoadNetwork()` grows the network outward from the settlement tile in distance order and links each district to the cheapest node already in the network, so an abandoned district re-routes the chain that hung off it, and the routes are A* over the live map so roads bend around mountains, forest and unbridged rivers.
+- The painter draws each edge as a bowed hairline: `ROAD_WIDTH_BASE` 0.55px + 0.05px per track capped at 1.5px, and a deterministic FNV-1a bow per canonical tile-pair so a recompute, a reload and every frame draw identical curves.
+
 ## [0.37.2] - 2026-11-03
 
 The city-view build palette's affordability feedback, from the round-2 playthrough: the palette refreshes its rows before it opens and while it stays open (`turn:ended` / `state:committed`), so a treasury that refills during a turn no longer leaves every row dimmed at "Not enough gold (need 100, have 0)" until the city is left and re-entered; a placement the cart cannot cover now says why on the palette notice instead of failing silently behind a buildable-looking ghost; and that cart line retires with the snapshot that wrote it, while a geometry refusal (a rule, not a reading of the treasury) stays.
