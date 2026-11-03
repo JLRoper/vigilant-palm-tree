@@ -83,6 +83,18 @@ export type MpResyncedEvent = {
   state: GameState;
   cursor: number;
   reason: ResyncReason;
+  /**
+   * The cursor paired with the state the client held when this snapshot
+   * arrived, or `null` when that state carries no cursor at all -- an unseeded
+   * `start()`, which is the load path's row without a `last_event_id` and
+   * onHumanTurnEnd's restart. `null` means the fetching GET is the client's
+   * FIRST pairing: the snapshot's own cursor is the one the client's state will
+   * henceforth be held against, so a consumer must reconcile it rather than
+   * refuse it (see src/game/garrisonEventBridge.ts). A non-null value leaves
+   * the consumer's existing refusal rules untouched. Absent (third-party
+   * emitters, tests predating this field) reads as paired.
+   */
+  pairedCursor?: number | null;
 };
 
 export type MpStateChangedEvent = {
