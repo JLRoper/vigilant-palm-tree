@@ -736,6 +736,16 @@ async function run(): Promise<void> {
     // Proven to fail (2026-11-03, github/main c4d8ed3): `buildCityScene`
     // dropping a district's buildings moves this capture 10,633 px = 1.038%,
     // FAIL; restored, 0.000%.
+    //
+    // The first building is a Farmhouse, not a House, since 2026-11-03: CITY P6
+    // (#344) tripled the House's placementCost.gold to 300, exactly the 300 a
+    // classic settlement founds with (packages/engine/src/init.ts), so the
+    // Farm Field below could not be placed any more -- measured on
+    // github/main 17fd1ca, the Farm Field row came back disabled ("need 120,
+    // have 0"), `placeDistrictBuilding` returned false, and the capture quietly
+    // lost the 2x2 producer this scene exists to pin (35,368 px = 3.454%,
+    // budget 0.5%). Both placements are asserted now so the next price move
+    // fails loudly at the scene instead of moving the baseline.
     await withPageRetry(context, "district-city-view", async (page) => {
       await dismissHomeAndCreateGame(page, `${GAME_NAME}-district-city-view`, SEED);
       await selectHero(page);
@@ -743,8 +753,12 @@ async function run(): Promise<void> {
       const hex = await districtHex(page, home.q, home.r);
       await openDistrict(page, hex.q, hex.r);
       await openDistrictPalette(page);
-      await placeDistrictBuilding(page, "House", 2, 2);
-      await placeDistrictBuilding(page, "Farm Field (2×2)", 0, 0);
+      if (!(await placeDistrictBuilding(page, "Farmhouse", 2, 2))) {
+        throw new Error("district-city-view: the centre Farmhouse row was unaffordable -- the fixture no longer builds what this capture pins");
+      }
+      if (!(await placeDistrictBuilding(page, "Farm Field (2×2)", 0, 0))) {
+        throw new Error("district-city-view: the 2x2 Farm Field row was unaffordable -- the fixture no longer builds what this capture pins");
+      }
       await wait(300);
       await clearToasts(page);
       await captureAndCompare("district-city-view", page);
