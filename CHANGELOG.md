@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.37.2] - 2026-11-03
+
+The city-view build palette's affordability feedback, from the round-2 playthrough: the palette refreshes its rows before it opens and while it stays open (`turn:ended` / `state:committed`), so a treasury that refills during a turn no longer leaves every row dimmed at "Not enough gold (need 100, have 0)" until the city is left and re-entered; a placement the cart cannot cover now says why on the palette notice instead of failing silently behind a buildable-looking ghost; and that cart line retires with the snapshot that wrote it, while a geometry refusal (a rule, not a reading of the treasury) stays.
+
 ## [0.37.1] - 2026-10-26
 
 The settlement-placement friction a real playthrough hit: a grid click now places the held building from the click's own coordinates (a bare click used to be a silent no-op), a refused footprint states the rule in words beside the ghost and in the palette instead of only tinting the ghost red, and a repeated cart commit (Confirm after a placement) writes nothing -- it used to send a second identical PlaceBuildings command, append a second buildings_placed event and, on the granular store, be rejected with a duplicate-key 500.
