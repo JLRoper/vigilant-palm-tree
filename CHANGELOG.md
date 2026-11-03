@@ -10,13 +10,17 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.38.10] - 2026-11-03
+## [0.38.11] - 2026-11-03
 
 Copilot's review comment on PR #288 is real, and it is a defect PR #288 introduced. An unseeded `MultiplayerSync.start()` (the load path's row carries no `last_event_id`, and `onHumanTurnEnd` restarts the sync by name) did its first full resync, seeded `this.cursor` from that same GET and opened the event stream there, while `garrisonEventBridge` REFUSED the snapshot -- unflagged games drop every reason but `event_not_derivable`, and a flagged one adopts only when `aiTurnSuperseded` -- so the client's TurnController never took the state the cursor belonged to, and `applyRows`' per-row filter (`id <= cursor`) then discarded the redelivery of every row the snapshot had jumped over. Before #288 the stream was opened at `after=0` and the whole backlog replayed as deltas, which masked the gap; #288 closed that hole and left the refusal with nothing behind it. A new integration test at the sync+bridge level, over a real `TurnController`, asserts what the client ends up holding: it fails on 0.38.6 for both paths (the local player's turn on load, and a flagged game's unchanged AI turn) with the stale garrison 4 instead of 9, and passes here.
 
 The fix is the cursor/snapshot pairing the design already implied: `mp:resynced` now carries `pairedCursor`, the cursor the client's state was paired with going into the fetch -- `null` for an unseeded start, where that GET is the client's FIRST pairing, so its snapshot's own cursor is the one the client's state will be held against and dropping it can only leave the cursor ahead of the only state the client holds (permanently, not until the next boundary: every later unflagged `initial` resync was refused by the same reason gate). `garrisonEventBridge` therefore reconciles an unpaired snapshot wherever the phase is not one the local client is driving (`safeForDeltas()`, re-checked after `flushPendingCommands`) instead of dropping it. A non-null `pairedCursor` keeps every existing rule byte-identical -- those refusals are phase-scoped, and the next boundary resync repairs them, which is why the guard stays.
 
 `patch`: this diverged; the loss was silent and permanent for the session (a pending `BattleOffered`, a troop total, a hero position). New field on an existing bus event, no schema or wire-contract change, new test `test/io/multiplayerSyncGarrisonBridge.test.ts`.
+
+## [0.38.10] - 2026-11-03
+
+the settlement UI tells the truth: a blocked upgrade names its cap, and the panel prints one rate
 
 ## [0.38.9] - 2026-11-03
 

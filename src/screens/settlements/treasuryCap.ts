@@ -1,5 +1,5 @@
 import type { GameState, PlayerId, SettlementState } from "@heroes/contracts";
-import { settlementTreasuryCap } from "@heroes/engine";
+import { buildingPlacementCost, buildingSettlementEffects, settlementTreasuryCap } from "@heroes/engine";
 
 // A full treasury is a deliberate progression gate, but nothing on screen said
 // so: applyEffectiveIncome pays Math.min(income, headroom), so at the cap the
@@ -44,6 +44,46 @@ export function treasuryCapMessage(settlement: SettlementState): string {
 /** The same sentence with the settlement named, for the toast surface. */
 export function treasuryCapToastMessage(settlement: SettlementState): string {
   return `${settlement.name}: ${treasuryCapMessage(settlement)}`;
+}
+
+/**
+ * The cap can HOLD a purchase of this size, or it cannot.
+ *
+ * A gold cost above the cap is not a shortfall the player can close by waiting:
+ * `applyEffectiveIncome` pays `Math.min(income, headroom)`, so gold income is
+ * discarded at the cap and the treasury can never reach the price. F-2/F-6: the
+ * town hall's L2->L3 upgrade costs 5,000g while a level-1 settlement's cap is
+ * 1,500g (BASE_TREASURY[1]) and a level-2 settlement's is 4,000g
+ * (BASE_TREASURY[2]), so the same offer is cap-blocked at both levels -- a
+ * control that only says "need 5,000, have 1,500" there is asking the player for
+ * something the cap forbids.
+ */
+export function treasuryCapBlocksGold(settlement: SettlementState, goldCost: number): boolean {
+  return goldCost > settlementTreasuryCap(settlement);
+}
+
+/**
+ * What raises the cap, read from the registry so the number cannot drift from
+ * the buildings that actually pay it (`buildingSettlementEffects` scales
+ * `treasuryBonus` by level).
+ */
+export function capBuildingHint(): string {
+  const perLevel = buildingSettlementEffects("bank", 1).treasuryBonus;
+  const placement = buildingPlacementCost("bank").gold ?? 0;
+  return `a Bank or Treasury (+${perLevel.toLocaleString()}g of cap per level, ${placement.toLocaleString()}g each)`;
+}
+
+/**
+ * The sentence a cap-blocked control uses: what the cap is, that waiting cannot
+ * help, and the way out. Deliberately not a shortfall line -- the missing half
+ * here is capacity, not coin.
+ */
+export function treasuryCapBlockerMessage(settlement: SettlementState, goldCost: number): string {
+  const cap = settlementTreasuryCap(settlement);
+  return (
+    `Costs ${goldCost.toLocaleString()}g, more than this settlement's ${cap.toLocaleString()}g treasury cap — ` +
+    `income is discarded at the cap, so the gold can never be held. Build ${capBuildingHint()} first.`
+  );
 }
 
 /** Count plus the first few names, for when one turn caps more holdings than are worth a toast each. */
