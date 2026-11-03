@@ -195,6 +195,53 @@ async function eventCountAfter(name: string, kind: string, afterId: number, hero
   return r.rows[0].n as number;
 }
 
+/**
+ * One sample of the AI keep's warehouse, tagged with the game's event cursor.
+ *
+ * Both numbers come off ONE statement, so a sample describes a single instant:
+ * `ev` is the highest event id appended when the row was read. A command saves
+ * the settlement BEFORE appending its event (server/app/commandHandler.ts:
+ * `saveHeroesAndSettlements` then `eventRepo.append`), so a sample tagged `ev`
+ * is the state that event's own command left behind -- which is what lets ONE
+ * command's debit be read off a run the browser never sees, without replaying
+ * the turn.
+ */
+interface LedgerSample {
+  ev: number;
+  wood: number;
+  stone: number;
+}
+
+async function sampleKeep(name: string, keepId: string): Promise<LedgerSample | null> {
+  const r = await db.query(
+    `SELECT g.settlements->$2->'warehouse'->>'wood' AS wood,
+            g.settlements->$2->'warehouse'->>'stone' AS stone,
+            (SELECT COALESCE(max(e.id), 0)::int FROM game_events e JOIN games gg ON gg.id = e.game_id
+              WHERE gg.name = $1) AS ev
+       FROM games g WHERE g.name = $1`,
+    [name, keepId],
+  );
+  const row = r.rows[0];
+  if (!row || row.wood === null) return null;
+  return { ev: row.ev as number, wood: Number(row.wood), stone: Number(row.stone ?? 0) };
+}
+
+/**
+ * What ONE event's own command did to the sampled warehouse: the difference
+ * between the sample carrying that event's id and the last sample before it.
+ * `null` when the sampler never observed that pair (the caller asserts on it).
+ */
+function ledgerDeltaAcross(
+  samples: LedgerSample[],
+  eventId: number,
+): { wood: number; stone: number } | null {
+  const at = samples.find((s) => s.ev === eventId);
+  let before: LedgerSample | undefined;
+  for (const s of samples) if (s.ev < eventId) before = s;
+  if (!at || !before) return null;
+  return { wood: round2(at.wood - before.wood), stone: round2(at.stone - before.stone) };
+}
+
 /** Polls `fn` until it returns something truthy, with a hard, bounded deadline. */
 async function pollUntil<T>(what: string, timeoutMs: number, fn: () => Promise<T | null | false>): Promise<T> {
   const deadline = Date.now() + timeoutMs;
@@ -423,6 +470,9 @@ async function main(): Promise<void> {
     // --- drive the game to completion over the API -------------------------
     const baseline = (await serverRow(name)).settlements;
     const snaps: TurnSnap[] = [];
+    // The keep's warehouse across each AI turn, sampled against the event
+    // cursor (index 0 = the founding turn) -- see sampleKeep()/LedgerSample.
+    const ledgers: LedgerSample[][] = [];
     let founded: TurnSnap["newAiSettlement"] = null;
     for (let turn = 1; turn <= MAX_AI_TURNS && !founded; turn++) {
       const before = await serverRow(name);
@@ -444,13 +494,34 @@ async function main(): Promise<void> {
         `EndTurn #${turn} response did not carry the AI keep/hero: ${JSON.stringify(humanSide)}`);
 
       // The driver now plays the whole AI turn with no client attached.
-      await pollUntil(
-        `the server driver to finish AI turn #${turn}`, AI_TURN_TIMEOUT_MS,
-        async () => {
-          const row = await serverRow(name);
-          return row.active_player_id === HUMAN_SEAT && row.round > before.round ? row : null;
-        },
-      );
+      // Sample the keep's warehouse against the event cursor for the whole of
+      // that turn, so each command's own debit is measurable afterwards.
+      let sampling = true;
+      const samples: LedgerSample[] = [];
+      const sampler = (async () => {
+        while (sampling) {
+          try {
+            const s = await sampleKeep(name, keep.id);
+            if (s) samples.push(s);
+          } catch {
+            /* a sample is best-effort; the assertions below say what was observed */
+          }
+          await wait(40);
+        }
+      })();
+      try {
+        await pollUntil(
+          `the server driver to finish AI turn #${turn}`, AI_TURN_TIMEOUT_MS,
+          async () => {
+            const row = await serverRow(name);
+            return row.active_player_id === HUMAN_SEAT && row.round > before.round ? row : null;
+          },
+        );
+      } finally {
+        sampling = false;
+        await sampler;
+      }
+      ledgers.push(samples);
       const snap = await snapshot(name, keep.id, baseline);
       snap.humanSideWood = humanSide.wood;
       snap.humanSideStone = humanSide.stone;
@@ -477,20 +548,33 @@ async function main(): Promise<void> {
     assert.equal(charter.hero_id, AI_HERO_ID, `charter hero=${charter.hero_id}`);
     assert.equal(charter.owner_id, AI_SEAT, `charter owner=${charter.owner_id}, expected the AI seat`);
     assert(charter.settlement_name.length > 0, "the charter has no settlement name");
-    // The hero is funded up front, so the driver founds the charter on the very
+    // The hero is funded up front, so the driver STARTS its charter on the very
     // first AI turn it ever drives -- snapshots[0] is that turn, read after the
-    // round wrap it caused (its `round` is therefore the round that FOLLOWED
-    // the founding turn).
+    // round wrap it caused (its `round` is therefore the round that FOLLOWED it).
+    // (The settlement itself is founded 2 travel turns + 10 construction days
+    // later -- `snap.newAiSettlement`, asserted in section A.)
     assert.equal(foundingIdx, 0,
       `the charter was first observed on snapshot ${foundingIdx} (round ${snaps[foundingIdx].round}) -- this fixture ` +
-      `funds the hero before the browser closes, so the founding turn must be the driver's first AI turn`);
+      `funds the hero before the browser closes, so the charter's start must be the driver's first AI turn`);
 
-    // Founding-turn debits, measured against the AI keep's OWN steady
-    // per-turn production (the later turns' human-side -> ai-side deltas):
-    // exactly CHARTER_GOLD_COST off the hero purse and the warehouse cost out
-    // of the founding settlement's stock. Round the deltas to 2dp -- the
-    // columns are NUMERIC and the engine's own production is 2dp, so any
-    // residual here is binary float noise, not state.
+    // Founding-turn debits. The GOLD half is exact either way: the purse enters
+    // the turn at CHARTER_GOLD_COST and leaves at 0.
+    //
+    // The WOOD/STONE half is measured where it is taken, not modelled from the
+    // turn's net. A turn-level net is not the charter's own ledger: on its first
+    // turn the driver's plan ALSO commits warehouse resources to buildings
+    // (a PlaceBuildings command runs in that same turn) and the turn's end
+    // credits the settlement's production, so the net is
+    //   production - the AI's own cart - the charter's warehouse cost.
+    // Measured on this fixture (c0b933e, 0.46.1): the keep went 537 -> 397
+    // (PlaceBuildings, -140) -> 377 (CharterStarted, exactly -20) -> 563
+    // (a +186 end-of-turn credit) = +26, while a turn-level model that reads the
+    // median of the LATER turns as "the keep's own production" asks for
+    // 151 - 20 = 131: the median nets out the AI's own cart on the turns that
+    // carry one, so it is a net-of-cart figure, not a production figure.
+    // The charter's own debit is what this block is about, so it is read off the
+    // CharterStarted event's own sample pair -- exactly the warehouse cost, with
+    // nothing else attributed to it.
     const foundSnap = snaps[0];
     const later = snaps.slice(1);
     assert.equal(foundSnap.humanSideHeroGold, CHARTER_GOLD_COST,
@@ -503,16 +587,26 @@ async function main(): Promise<void> {
     const baselineStone = median(stoneDeltas);
     const woodNet = round2(foundSnap.aiSideWood - foundSnap.humanSideWood);
     const stoneNet = round2(foundSnap.aiSideStone - foundSnap.humanSideStone);
-    assert.equal(woodNet, round2(baselineWood - CHARTER_WAREHOUSE_COST.wood),
-      `the founding turn's net wood change was ${woodNet}, expected the keep's own ${baselineWood}/turn production ` +
-      `minus exactly ${CHARTER_WAREHOUSE_COST.wood} (AI-turn deltas: ${JSON.stringify(woodDeltas)})`);
-    assert.equal(stoneNet, round2(baselineStone - CHARTER_WAREHOUSE_COST.stone),
-      `the founding turn's net stone change was ${stoneNet}, expected the keep's own ${baselineStone}/turn production ` +
-      `minus exactly ${CHARTER_WAREHOUSE_COST.stone} (AI-turn deltas: ${JSON.stringify(stoneDeltas)})`);
+    const foundingLedger = ledgers[0] ?? [];
+    // `eventId()` hands back the raw BIGSERIAL column, which node-postgres
+    // returns as a STRING; the sample's `ev` is an int4. Compare as numbers.
+    const charge = startedId === null ? null : ledgerDeltaAcross(foundingLedger, Number(startedId));
+    assert(charge,
+      `the founding turn's ledger never observed the keep across the CharterStarted event ` +
+      `(samples: ${foundingLedger.map((s) => `ev${s.ev}:w${s.wood}`).join(" -> ") || "(none)"})`);
+    assert.equal(charge.wood, -CHARTER_WAREHOUSE_COST.wood,
+      `the charter debited ${round2(-charge.wood)} wood from the keep's warehouse, expected exactly ` +
+      `${CHARTER_WAREHOUSE_COST.wood} (the turn's net wood was ${woodNet}, the AI's own cart and the turn's ` +
+      `credit being the rest)`);
+    assert.equal(charge.stone, -CHARTER_WAREHOUSE_COST.stone,
+      `the charter debited ${round2(-charge.stone)} stone from the keep's warehouse, expected exactly ` +
+      `${CHARTER_WAREHOUSE_COST.stone} (the turn's net stone was ${stoneNet})`);
     console.log(`>> founding debits exact: purse -${CHARTER_GOLD_COST}g ` +
-      `(${foundSnap.humanSideHeroGold} -> ${foundSnap.aiSideHeroGold}), keep wood ${foundSnap.humanSideWood} -> ` +
-      `${foundSnap.aiSideWood} (= ${baselineWood} production - ${CHARTER_WAREHOUSE_COST.wood}), stone ` +
-      `${foundSnap.humanSideStone} -> ${foundSnap.aiSideStone} (= ${baselineStone} production - ${CHARTER_WAREHOUSE_COST.stone})`);
+      `(${foundSnap.humanSideHeroGold} -> ${foundSnap.aiSideHeroGold}), charter warehouse ` +
+      `-${-charge.wood}w/-${-charge.stone}s at its own event; keep wood ${foundSnap.humanSideWood} -> ` +
+      `${foundSnap.aiSideWood} (net ${woodNet}, the steady AI-turn net being ${baselineWood} and this turn's ` +
+      `own cart the rest), stone ${foundSnap.humanSideStone} -> ${foundSnap.aiSideStone} (net ${stoneNet}, ` +
+      `steady ${baselineStone})`);
 
     // The target obeys the same human-parity placement rule the client's
     // overlay enforces (passable, >= 4 hexes from every settlement that
