@@ -21,11 +21,12 @@ This is the design doc the multiplayer system never had (former open question #5
 | Seat counts | `multiplayerLobby.ts` (`SEAT_COUNTS`) | 2, 3, or 4 seats per game |
 | Host / Join | same | Host creates a game (default name `lan-YYYY-MM-DD-xxxx`, any of the eight map sizes `small` → `gigantic`); Join connects to an existing one by name |
 | Seat claim | `server/routes.ts` lobby claim/start (writes `games.lobby` jsonb) | Each seat is claimed by index; `claimed` records `handle`, optional `email`, `claimedAt` |
+| Free-seat advertisement | `GET /games/:name` (`server/routes.ts`) | `availableSeats` = the seats a client could still claim — `[0, lobby.seats)` minus the claimed seats minus AI combatant seats, and empty once `lobby.startedAt` is set (a fresh claim is a 409 by then). `seatTotal` = `players.length` (the game's seat count, AI seats included). Both read `lobby.claimed`, which only ever holds claimed seats — an unclaimed seat is absent, not falsy (2026-11-03) |
 | Handle | lobby UI | Purely cosmetic |
 | Email binding | `attachPlayerSeat.ts` + `server/auth.ts` | If the claimer was signed in, the seat is bound to their auth email (server-derived, never client-supplied). Sign-in is optional — anonymous claims leave the seat unbound. |
 | Start gate | `lobby.startedAt` | Game is playable once the host starts it |
 | Rejoin reclaim | `server/routes.ts` lobby claim | A STARTED game's seat whose `claimed.email` matches the caller's auth email can be reclaimed by that identity (handle/claimedAt refresh; the game stays started). Anonymous (handle-only) claims cannot rebind, and brand-new seats stay unclaimable after start. |
-| Local seat identity | `src/players/localPlayer.ts` | Seat id kept in `localStorage` (`heroes.mp.localPlayerId.<game>`) plus an in-memory map; `MultiplayerSync.resync()` falls back to seat 0 for legacy starter games nobody claimed |
+| Local seat identity | `src/players/localPlayer.ts` | Seat id kept in `localStorage` (`heroes.mp.localPlayerId.<game>`) plus an in-memory map. On load the client plays the seat **this browser claimed** (`resolveInitialLocalSeat`); with no claim of its own it falls back to the lowest claimed seat, and `MultiplayerSync.resync()` still falls back to seat 0 for legacy starter games nobody claimed. One browser holds ONE seat per game (see [Decision 4](#4-seat-truth-and-the-single-browser-hotseat-decided-2026-11-03-shipped-2026-11-03)). |
 
 ### Sync model (`src/io/multiplayerSync.ts`)
 
@@ -35,7 +36,7 @@ This is the design doc the multiplayer system never had (former open question #5
 - **Self-event dedup:** the client's own commands return `lastEventId`; those ids are skipped (a client must not re-apply its own mutations, which were applied locally). The `actor_seat` column covers the same ground whenever the local seat is known; the id set protects the unclaimed-seat case.
 - **Full resync** (`getGame` + `hydrateGameState`, cursor reseeded from `game.last_event_id`) on: initial load, an event the engine cannot derive (`event_not_derivable`), or a cursor gap. Rejoin after any absence heals through the same path — no special rejoin flow exists or is needed for state.
 - **Snapshot pairing (`mp:resynced.pairedCursor`):** a resync also carries the cursor the *client's* state was paired with going into the fetch, or `null` when it had none — an unseeded `start()`, which is the load path's row without a `last_event_id` and `onHumanTurnEnd`'s restart, so that GET is the client's FIRST pairing. The cursor and the rows in between can then never be lost: `applyRows` skips every row at or below the cursor (the snapshot it came from already contains them), so a consumer that refuses the snapshot would leave the cursor ahead of the only state the client holds. `garrisonEventBridge` therefore reconciles an unpaired snapshot (subject to the phase gates) instead of dropping it; a paired snapshot keeps the design's refusal rules, which are phase-scoped and repaired by the next boundary resync.
-- **Turn flow:** strict round-robin. The server enforces turn ownership on every command (`server/app/commandHandler.ts` guard); `activePlayerId` changes on the client emit `mp:turnStarted` off the bus.
+- **Turn flow:** strict round-robin. The server enforces turn ownership on every command (`server/app/commandHandler.ts` guard); `activePlayerId` changes on the client emit `mp:turnStarted` off the bus. **End Turn is seat-scoped on both sides** (2026-11-03): the toolbar offers the control only on the local seat's own turn (`canEndTurnFromSeat`; an unknown local seat keeps the legacy behaviour), the command declares the seat that is asking (`EndTurn.clientSeat`, required over HTTP by `parseCommand`), and `endTurnSeatRefusal` refuses a declaration that is not the seat being ended. The in-process callers — the drop policy's `runServerEndTurnForSeat` and the AI driver — build the command without a declaration, because they *are* the server acting on the seat's behalf.
 - **Telemetry/presence:** each poll fires a best-effort report (RTT, bytes, ok) to `/api/games/:name/telemetry`; `server/telemetry/presenceRegistry.ts` keeps an in-memory, per-process, non-persisted ring and prunes clients silent for `STALE_AFTER_MS = 6s`. This feeds the dev Network Map overlay (`src/screens/debug/networkMap.ts`, see [network-map.md](./network-map.md)). On top of that debug view there is now an **enforcement-grade presence layer** — `server/app/dropPolicy.ts` counts telemetry reports *and* valid commands as heartbeats, marks seats disconnected after 60s, and persists the disconnected signal into the games row (see [Drop policy](#2-drop-policy--grace-then-skip-decided-2026-09-27-shipped-2026-09-27)). The same telemetry POST answers 200 with the live seat-presence view, so the client's per-poll call doubles as the presence read.
 
 ## Design decisions (2026-09-27)
@@ -94,6 +95,22 @@ All four decisions below are shipped (2026-09-27). Test coverage: `test/server/d
 
 **Historical rationale:** this section records the original host-client v1 choice. The server actor and B3 chartering described in the current-status correction supersede that implementation decision for flagged games.
 
+### 4. Seat truth and the single-browser hotseat (decided 2026-11-03, shipped 2026-11-03)
+
+**Decision:** one browser holds **one seat per game**, and on load it is the seat *that browser* claimed. A single browser driving two human seats in sequence (a hotseat) is **out of scope** and is filed as its own finding — the mechanism it would need is named below rather than half-built.
+
+**What was actually broken (fixed here):** claiming a seat and playing it disagreed. The lobby's Join tab claims seat *n* and writes it to `localStorage` (`heroes.mp.localPlayerId.<game>`), but `GameSessionManager.loadGame` then adopted the **first** claimed seat in the lobby jsonb, so a browser that had claimed seat 1 was silently reset to seat 0 on the load that followed (`resolveInitialLocalSeat` now prefers the browser's own claim; the lowest claimed seat remains the fallback for a browser with no claim of its own, which is what every pre-existing flow produced). Measured in a live client on a 2-human game: seat 1 claimed, reload → Load Game → Open, local seat **1** (was 0), and with seat 1 holding the turn the toolbar's End Turn control was **enabled** for that client while the same turn left it **disabled** for a seat-0 client.
+
+**Why a true hotseat is out of scope — three mechanisms, each measured or read in the code:**
+
+1. **One local seat per client, per game.** The seat lives in one `localStorage` key plus one in-memory entry keyed by game name (`src/players/localPlayer.ts`), and the whole client (fog, selection, treasury, the HUD's "Your turn" line) renders from that one seat. Driving a second seat means a seat switch, not just a claim.
+2. **A second claim in the same browser is the same browser.** `localStorage` is shared by every tab of one origin, so two tabs on one machine are not two clients either: the second claim overwrites the first, and the next load in *either* tab adopts it.
+3. **Presence is per-seat and client-reported.** `MultiplayerSync.reportTelemetry` returns early when the client has no seat for the game and reports exactly one `playerId` otherwise, and the drop policy counts those reports (plus valid commands) as that seat's heartbeat. So a browser driving both seats in turn leaves the seat it is not currently reporting silent: after `DISCONNECT_AFTER_MS` the row reads disconnected, and after the `SKIP_GRACE_MS` grace the server ends that seat's turn for it — `[dropPolicy] seat N … disconnected (60s without a heartbeat)` → `… server ended its turn` in the dev log. That is the behaviour a hotseat would have to change.
+
+**What the drop policy should then do, if the hotseat is ever built:** presence has to become "**no client reports this seat**" instead of "one client, one seat" — i.e. the telemetry body would carry every seat the caller holds (today it carries one `playerId`), the heartbeat would keep all of them alive, and the grace timer would key on the *set* of seats no live client reports. The seat switch itself (a UI that changes the local seat mid-game) and per-tab seat storage (`sessionStorage`, or a per-tab suffix on the key) are the other two pieces. None of the three is started here.
+
+**Not changed:** the drop policy's own rule (a seat whose client goes silent still has its turn ended after the grace), the AI driver's ownership of AI seats, and `lobby.seats` staying the human-slot count.
+
 ## Open questions
 
 1. **Auto-EndTurn vs. BATTLE phase** — ~~resolved 2026-09-27: hold during battle~~ (see Implementation decisions).
@@ -101,7 +118,7 @@ All four decisions below are shipped (2026-09-27). Test coverage: `test/server/d
 
 ## Out of scope
 
-Internet play, matchmaking, spectator seats, claimable AI lobby seats, simultaneous turns, and WebSocket transport remain out of scope. SSE is plain HTTP streaming, not a WebSocket. See the [operations guide](./operations.md) for LAN configuration.
+Internet play, matchmaking, spectator seats, claimable AI lobby seats, simultaneous turns, **single-client hotseat (one browser driving two human seats in sequence — [Decision 4](#4-seat-truth-and-the-single-browser-hotseat-decided-2026-11-03-shipped-2026-11-03))**, and WebSocket transport remain out of scope. SSE is plain HTTP streaming, not a WebSocket. See the [operations guide](./operations.md) for LAN configuration.
 
 ## See also
 

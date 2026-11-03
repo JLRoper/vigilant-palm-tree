@@ -57,6 +57,22 @@ spoofed `actor` gets caught here. If not, the request falls through to
 before #179. Signing in is what upgrades "trusted seat" to "trusted seat you
 proved you own."
 
+**EndTurn declares the seat it is asking AS (2026-11-03).** A seat-based check
+alone could not tell a seat's own turn-end from another seat's client ending
+it, because naming the *active* seat satisfied it -- a seat-0 client ended seat
+1's turn that way (playthrough round 2b, F1). `EndTurn` therefore carries
+`clientSeat` (the seat the requesting client is playing), required over HTTP by
+`parseCommand`, and `commandHandler.ts`'s `endTurnSeatRefusal` refuses a
+declaration that is not the seat being ended with the same
+`forbidden_not_your_turn` the ownership guard returns. The one legitimate
+mismatch is a browser-driven AI seat, whose turn seat 0's client ends for it;
+that exemption is scoped to unflagged games so D10 still owns server-driven AI
+seats. The in-process callers (the drop policy's `runServerEndTurnForSeat`, the
+AI driver) declare no seat at all and keep the pre-existing rule. The residual
+is the same trust model as `actor`: an anonymous caller can still *assert* the
+active seat, because nothing binds a caller to a seat without a credential
+(the email binding is the only one that exists today).
+
 ## Email-to-seat mapping
 
 `games.lobby.claimed[seat]` (JSONB, from `008_lobby.sql`) has an optional

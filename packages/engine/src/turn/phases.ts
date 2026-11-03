@@ -1,4 +1,4 @@
-import type { GamePhase, GameState, HeroId } from "@heroes/contracts";
+import type { GamePhase, GameState, HeroId, PlayerId } from "@heroes/contracts";
 
 export function startBattle(state: GameState, attackerId: HeroId, defenderId: HeroId): GameState {
   if (state.phase.kind === "BATTLE") return state;
@@ -57,4 +57,24 @@ export function canEndTurn(state: GameState): boolean {
   const phase = state.phase;
   const p = state.players.find((pl) => pl.id === phase.playerId);
   return p?.faction === "player";
+}
+
+/**
+ * The same question asked on behalf of ONE seat: may this client be offered
+ * the End Turn control? `canEndTurn` answers "the seat holding the turn is a
+ * human one", which is equally true on the OTHER human seat's turn -- that is
+ * how a seat-0 client was served a live, enabled button during seat 1's turn
+ * and ended it (playthrough round 2b, F1). A null local seat (a solo or
+ * no-server game, or a browser that never claimed) keeps the legacy answer:
+ * there is no second client to protect the turn from.
+ *
+ * Deliberately NOT the rule for the AI path: `canEndTurn` rejects AI factions,
+ * so a browser-driven AI seat's turn answers false for every seat -- that turn
+ * is ended by the turn controller's own tick (and, on a server-driven game, by
+ * the server), never by this control.
+ */
+export function canEndTurnFromSeat(state: GameState, localSeat: PlayerId | null): boolean {
+  if (!canEndTurn(state)) return false;
+  if (localSeat === null) return true;
+  return state.activePlayerId === localSeat;
 }

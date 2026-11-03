@@ -14,7 +14,7 @@ import {
 } from "./heroUpkeepCost";
 import { makePillDivider, makePillLabel, makePillValueSpan, makeStatPill } from "./statPill";
 
-export { canEndTurn } from "@heroes/engine";
+export { canEndTurn, canEndTurnFromSeat } from "@heroes/engine";
 
 export type SaveStatus = "idle" | "saving" | "saved" | "error";
 
