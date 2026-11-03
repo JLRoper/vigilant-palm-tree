@@ -949,3 +949,135 @@ test("the hero block's −1 is disabled, with the panel's own sentence, for a sl
     },
   );
 });
+
+// ── The cargo row's refusal sentence must name the REAL blocker ──
+//
+// Two surfaces mount this verb -- the settlement panel's Warehouse row and this
+// modal -- and they share src/screens/shared/cargoTransfer.ts precisely so they
+// "cannot disagree about direction or amounts". The settlement panel already
+// tells the two dead cases apart (`request.source` is the whole source side
+// BEFORE the destination's room clamped it): "The warehouse is full" when the
+// hero is carrying cargo, "The hero's wagons are empty" only when there is
+// nothing to move. The modal used ONE sentence per verb, so a hero CARRYING
+// cargo into a warehouse at its storage cap was told its wagons were empty --
+// the opposite of the truth, on the exact path that delivers gathered
+// resources into a settlement.
+//
+// Reachable in play: BASE_STORAGE at level 1 is 500 per resource
+// (packages/engine/src/settlement/capacity.ts), and a settlement produces into
+// it every turn.
+test("the cargo row names the warehouse cap, not empty wagons, when the hero IS carrying cargo", { timeout: 90_000 }, async () => {
+  const server = await createServer({
+    root,
+    server: { host: "127.0.0.1", port: 0, open: false },
+    logLevel: "error",
+  });
+  await server.listen();
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage({ viewport: { width: 1000, height: 900 } });
+    await page.route("**/cargo-refusal-fixture", (route) => route.fulfill({
+      contentType: "text/html",
+      body: '<!doctype html><html><body style="margin:0"></body></html>',
+    }));
+    await page.addInitScript("window.__name = (fn) => fn");
+    await page.route("**/api/**", (route) => route.abort());
+    await page.goto(`${server.resolvedUrls!.local[0]}cargo-refusal-fixture`);
+
+    const seen = await page.evaluate(async () => {
+      // Path VARIABLES, not inline literals: TypeScript cannot resolve a
+      // "/src/..." specifier, so a literal here is a TS2307 in the test tree.
+      const modalPath = "/src/screens/logistics/logisticsModal.ts";
+      const busPath = "/src/core/eventBus.ts";
+      const enginePath = "/packages/engine/src/index.ts";
+      const { openLogisticsModal } = await import(modalPath) as typeof import("../../../src/screens/logistics/logisticsModal");
+      const { bus } = await import(busPath) as typeof import("../../../src/core/eventBus");
+      const engine = await import(enginePath) as typeof import("../../../packages/engine/src/index");
+      const state = engine.createInitialState();
+      const settlement = Object.values(state.settlements)[0];
+      const hero = Object.values(state.heroes)[0];
+      settlement.ownerId = hero.ownerId;
+      settlement.level = 1;
+      settlement.citySpots = [];
+      settlement.districts = {};
+      settlement.buildings = [];
+      hero.q = settlement.q;
+      hero.r = settlement.r;
+      hero.name = "Scout";
+      hero.wagons = 5; // 5 x 50 = a 250-per-resource hold
+      state.tradeRoutes = [];
+      state.selectedHeroId = hero.id;
+
+      openLogisticsModal({
+        parent: document.body,
+        getState: () => state,
+        actions: {
+          transferResources: () => ({ ok: true, reason: "" }),
+          assignWagons: () => ({ ok: true, reason: "" }),
+          buyWagons: () => ({ ok: true, reason: "" }),
+          createTradeRoute: () => ({ ok: true, reason: "" }),
+          updateTradeRoute: () => ({ ok: true, reason: "" }),
+        },
+      });
+      const settle = async (): Promise<void> => {
+        bus.emit({ type: "state:committed" });
+        await new Promise((resolve) => setTimeout(resolve, 60));
+      };
+      const btn = (focus: string) => {
+        const b = document.querySelector(`[data-focus="${focus}"]`) as HTMLButtonElement | null;
+        return { disabled: b?.disabled ?? null, title: b?.title ?? null };
+      };
+
+      // (1) The hero IS carrying wood and the warehouse's wood is at the cap.
+      const cap = engine.settlementResourceCap(settlement).wood;
+      hero.resources = { wood: 250, stone: 0, iron: 0, arcane: 0, food: 0 };
+      settlement.warehouse = { wood: cap, stone: 0, iron: 0, arcane: 0, food: 0 };
+      await settle();
+      const warehouseFull = btn("hero-cargo-deposit");
+
+      // (2) The other way round: stock to take, but no room in the hold.
+      settlement.warehouse = { wood: 120, stone: 0, iron: 0, arcane: 0, food: 0 };
+      hero.resources = { wood: 250, stone: 0, iron: 0, arcane: 0, food: 0 };
+      await settle();
+      const wagonsFull = btn("hero-cargo-withdraw");
+
+      // (3) The genuinely-empty cases keep their own sentences.
+      settlement.warehouse = { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
+      hero.resources = { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
+      await settle();
+      const emptyDeposit = btn("hero-cargo-deposit");
+      const emptyWithdraw = btn("hero-cargo-withdraw");
+
+      // (4) A live deposit names what it will move, exactly as the settlement
+      // panel's row does (the same shared sentence).
+      settlement.warehouse = { wood: 120, stone: 0, iron: 0, arcane: 0, food: 0 };
+      hero.resources = { wood: 250, stone: 0, iron: 0, arcane: 0, food: 0 };
+      await settle();
+      const liveDeposit = btn("hero-cargo-deposit");
+
+      return { cap, warehouseFull, wagonsFull, emptyDeposit, emptyWithdraw, liveDeposit };
+    });
+
+    assert.equal(seen.warehouseFull.disabled, true, "no room in the warehouse -> the deposit is off");
+    assert.notEqual(
+      seen.warehouseFull.title,
+      "the hero's wagons are empty",
+      `a hero CARRYING cargo into a warehouse at its cap (${seen.cap}) must not be told its wagons are empty`,
+    );
+    assert.equal(
+      seen.warehouseFull.title,
+      "The warehouse is full",
+      `the modal must name the real blocker, the way the settlement panel's row does; got "${seen.warehouseFull.title}"`,
+    );
+    assert.equal(seen.wagonsFull.disabled, true, "no room in the hold -> the take is off");
+    assert.equal(seen.wagonsFull.title, "The hero's wagons are full");
+    assert.equal(seen.emptyDeposit.title, "The hero's wagons are empty");
+    assert.equal(seen.emptyWithdraw.title, "The warehouse is empty");
+    assert.equal(seen.liveDeposit.disabled, false);
+    assert.equal(seen.liveDeposit.title, "Move 250 of the hero's cargo into the warehouse");
+  } finally {
+    await browser?.close().catch(() => {});
+    await server.close();
+  }
+});

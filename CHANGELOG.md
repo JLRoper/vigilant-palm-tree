@@ -10,6 +10,17 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.48.1] - 2026-11-03
+
+The Logistics window's cargo buttons told the wrong story about why they were dead — and the resource-pickup suite was not part of `npm run test:all` at all.
+
+`cargoTransferRequest` computes `source` — what the source side holds *before* the destination's room clamped it — precisely so a surface can tell "nothing to move" from "no room for it" (`src/screens/shared/cargoTransfer.ts`). The settlement panel's Warehouse row read it; the Logistics modal did not, using one sentence per verb. Measured in a real browser: a hero carrying 250 wood standing on a level-1 settlement whose wood was at its 500 cap saw the modal's dead deposit button say *"the hero's wagons are empty"* while the panel's own row, mounting the same verb off the same shared model, said *"The warehouse is full"* — and the modal's live button carried no tooltip at all, so it never said what a click would move. The player guide already described both as saying so (docs/player-guide.md).
+
+- `src/screens/shared/cargoTransfer.ts`: new `cargoTransferTitle(verb, request)` — one sentence per cargo button in every state of it: what it will move, otherwise WHICH SIDE IS FULL (`source > 0` means the source has goods and the destination has no room). Both surfaces read it now, so they cannot drift into two stories about one click.
+- `src/screens/logistics/logisticsModal.ts` reads it for the enabled and disabled states; `src/screens/settlements/settlementInfoMenu.ts` reads it too, with its four strings byte-identical to before.
+- Pinned by `test/screens/logistics/logisticsModal.test.ts` (the new case is red on the previous commit: `actual: "the hero's wagons are empty"` at a capped warehouse) and by three cases in `test/screens/shared/cargoTransfer.test.ts`; the settlement panel's existing `test/screens/settlements/cargoTransferRow.test.ts` fixes the panel's wording unchanged.
+- `tools/run-test.mjs` + `package.json`: `resourcePickup` is a runner entry now (`ENTRIES` + `ALL_ORDER`, its own ephemeral port pair), so **`npm run test:all` finally runs `test/resourcePickup.e2e.ts`** — it never did, having run directly off `.env` ports outside the chain. The suite itself no longer hides a step behind the debug controller: the hero is selected and moved with REAL mouse clicks on the map canvas (asserted by the client's own `lastClick.moved`), and one pickup and one delivery are each asserted three ways — the DOM, the `GET /api/games/:name` payload and the games row — taking 100 of a 383-wood tile and leaving 283, then moving warehouse wood 300 → 400, then repeating that delivery through the Logistics modal's own button.
+
 ## [0.48.0] - 2026-11-03
 
 The House was the strongest building in the game by 112.5x and the largest wood sink in a city, measured by RUNNING the engine on 0.47.0 (main `9b4f17f`): one level-3 House paid 4,500 gold/turn (1,500 population x the L3 tax of 3) for a 100g + 5w placement and 3 wood/turn of upkeep, against the neutral gold mine's 120 gold/turn from a 300g placement. The report that filed the pick said 37-112x; both ends still hold.
