@@ -428,7 +428,7 @@ async function main(): Promise<void> {
       const before = await serverRow(name);
       assert.equal(before.active_player_id, HUMAN_SEAT,
         `turn ${turn}: the human seat must be active to end its turn (active_player_id=${before.active_player_id})`);
-      const ended = await command(name, { kind: "EndTurn", actor: HUMAN_SEAT });
+      const ended = await command(name, { kind: "EndTurn", actor: HUMAN_SEAT, clientSeat: HUMAN_SEAT });
       assert.equal(ended.status, 200, `EndTurn #${turn} -> ${ended.status} ${JSON.stringify(ended.json)}`);
       assert.equal(ended.json?.activePlayerId, AI_SEAT,
         `EndTurn #${turn} handed the turn to ${ended.json?.activePlayerId}, expected the AI seat ${AI_SEAT}`);

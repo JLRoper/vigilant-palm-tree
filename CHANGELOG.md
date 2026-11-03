@@ -21,6 +21,13 @@ read one shared direction/amount model (`src/screens/shared/cargoTransfer.ts`), 
 panel's own buttons are renamed **Deposit gold** / **Withdraw gold** because they were always
 gold-only despite the generic label (playthrough finding F-2).
 
+## [0.38.11] - 2026-11-03
+
+seat truth: a seat's own turn
+- End Turn is seat-scoped on both sides (playthrough round 2b, F1): the toolbar offers the control only on the local seat's own turn (`canEndTurnFromSeat`), the command declares the seat that is asking (`EndTurn.clientSeat`, required over HTTP by `parseCommand`), and `endTurnSeatRefusal` refuses a declaration that is not the seat being ended. A browser-driven AI seat's turn, ended by seat 0's client, and the drop policy's own skip keep working.
+- `GET /games/:name`'s `availableSeats` now means what it says (F3): the seats a client could still claim, instead of the falsy keys of `lobby.claimed` (structurally always `[]`). `seatTotal` is the game's seat count, AI seats included (F7).
+- A browser plays the seat it claimed (F2): `loadGame` no longer resets a client that claimed seat 1 back to seat 0. The single-browser hotseat is out of scope, with the drop-policy change it would need named in docs/multiplayer.md (Decision 4).
+
 ## [0.38.10] - 2026-11-03
 
 the settlement UI tells the truth: a blocked upgrade names its cap, and the panel prints one rate

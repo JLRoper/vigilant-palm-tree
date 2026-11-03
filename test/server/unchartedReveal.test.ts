@@ -206,7 +206,7 @@ test("EndTurn in an uncharted game reconciles reveal for human seats only", asyn
       "at least one AI seat exists",
     );
 
-    const res = await postCommand(name, { kind: "EndTurn", actor: 0 });
+    const res = await postCommand(name, { kind: "EndTurn", actor: 0, clientSeat: 0 });
     assert.equal(res.error, undefined, `EndTurn should succeed: ${JSON.stringify(res)}`);
 
     const after = await getGame(name);

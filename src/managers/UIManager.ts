@@ -1,4 +1,4 @@
-import { buildHud, updateHud, canEndTurn, type HudHandles, type PathCostReadout } from "@screens/shared/hud";
+import { buildHud, updateHud, canEndTurnFromSeat, type HudHandles, type PathCostReadout } from "@screens/shared/hud";
 import type { PlayerId } from "../state/gameState";
 import type { MapSize } from "../map/gameMap";
 import { getInMemoryLocalPlayerId } from "../players/localPlayer";
@@ -136,7 +136,19 @@ export class UIManager {
       state: {
         backendOk: () => session.isBackendOk(),
         hasActiveGame: () => session.getActiveGameId() !== null,
-        canEndTurnNow: () => canEndTurn(state.getState()),
+        // F1 (playthrough round 2b): the control belongs to the seat that
+        // holds the turn. `canEndTurn` alone offered it on the other human
+        // seat's turn too, which is how a seat-0 client ended seat 1's. The
+        // unknown-seat case (a solo/no-server game, or a browser that never
+        // claimed) keeps today's behavior, like canOpenLogistics below.
+        canEndTurnNow: () => {
+          const gs = state.getState();
+          if (!gs) return false;
+          return canEndTurnFromSeat(
+            gs,
+            getInMemoryLocalPlayerId(session.getActiveGameName() ?? ""),
+          );
+        },
         // S3 (logistics-interface-fixes plan §5.8): mirrors the controller's
         // turn gate. Unknown local seat keeps the button enabled (today's
         // behavior) -- the controller rejects only a known mismatched seat.
