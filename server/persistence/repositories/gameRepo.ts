@@ -54,12 +54,6 @@ export interface GameRow {
   seed: number;
   hero_q: number;
   hero_r: number;
-  // LEGACY, FROZEN AT CREATION: the column's DEFAULT 1 is the only writer
-  // (POST /games' INSERT does not name it) and no query in this repo advances
-  // it. `round` is the live counter the turn cycle moves. Kept in SELECT_COLUMNS
-  // only because the client's `Game` payload still carries it; do not read it
-  // for a save's progress.
-  turn: number;
   gold: number;
   enemy_positions: EnemyPos[];
   round: number;
@@ -95,7 +89,7 @@ export class GameNotFoundError extends Error {
 // omitted trade_routes/next_charter_id/next_settlement_id, so every GET
 // returned games without them and the client hydrated tradeRoutes: [].
 export const GAME_COLUMNS =
-  "id, name, seed, hero_q, hero_r, turn, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, lobby, next_charter_id, next_settlement_id, trade_routes, resource_deposits, created_at, updated_at";
+  "id, name, seed, hero_q, hero_r, gold, enemy_positions, round, day, active_player_id, players, heroes, settlements, map_size, lobby, next_charter_id, next_settlement_id, trade_routes, resource_deposits, created_at, updated_at";
 
 export interface SaveHeroesAndSettlementsExtra {
   players?: Player[];

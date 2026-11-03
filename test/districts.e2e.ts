@@ -161,9 +161,10 @@ async function loadGameFromHome(page: Page, name: string): Promise<void> {
   const tagged = await page.evaluate((gameName) => {
     const rows = [...document.querySelectorAll("div")].filter((d) => {
       const t = (d.textContent || "").trim();
-      // The row's progress line reads the ROUND (games.turn is frozen at
-      // creation, so it said "turn 1" for every save); match what the landing
-      // list actually renders.
+      // The row's progress line reads the ROUND (the games row carried a
+      // games.turn column that was frozen at creation and said "turn 1" for
+      // every save; it is gone now); match what the landing list actually
+      // renders.
       return t.startsWith(gameName) && /round \d+/.test(t) && d.querySelector("button");
     });
     const row = rows[rows.length - 1];

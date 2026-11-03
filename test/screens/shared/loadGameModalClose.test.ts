@@ -69,7 +69,6 @@ function gameRow(): Game {
     seed: 51847157,
     hero_q: 12,
     hero_r: 7,
-    turn: 1,
     gold: 2485,
     enemy_positions: [],
     created_at: "2026-10-25T20:00:00Z",

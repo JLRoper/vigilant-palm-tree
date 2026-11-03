@@ -277,17 +277,17 @@ async function runNewLoadSaveFlow(
   console.log(`>> New Game active: ${activeAfterNew}`);
 
   const newGameRes = await ctx.get(`${API_URL}/api/games/${TEST_NEW_NAME}`);
-  const newGameBody = (await newGameRes.json()) as { seed: number; turn: number; gold: number; updated_at: string };
+  const newGameBody = (await newGameRes.json()) as { seed: number; round: number; day: number; gold: number; updated_at: string };
   if (newGameBody.seed !== 1234) {
     throw new Error(`Seed not honored: got ${newGameBody.seed}`);
   }
-  if (newGameBody.turn !== 1 || newGameBody.gold !== 0) {
-    throw new Error(`New game not reset: turn=${newGameBody.turn} gold=${newGameBody.gold}`);
+  if (newGameBody.round !== 1 || newGameBody.day !== 1 || newGameBody.gold !== 0) {
+    throw new Error(`New game not reset: round=${newGameBody.round} day=${newGameBody.day} gold=${newGameBody.gold}`);
   }
   if (newGameBody.updated_at <= starterUpdatedAt) {
     throw new Error(`New game's updated_at not fresh: ${newGameBody.updated_at} <= ${starterUpdatedAt}`);
   }
-  console.log(`>> New Game DB row: seed=${newGameBody.seed} turn=${newGameBody.turn} gold=${newGameBody.gold}`);
+  console.log(`>> New Game DB row: seed=${newGameBody.seed} round=${newGameBody.round} day=${newGameBody.day} gold=${newGameBody.gold}`);
 
   const saveBtn = page.locator("#toolbar button", { hasText: "Save" });
   await wait(200);
