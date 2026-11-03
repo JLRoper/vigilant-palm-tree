@@ -492,8 +492,14 @@ form and the legacy form:
 - `auto crew · 8 bldgs (14 slots), pool 5 · 2 sites stalled`
 
 Exact words: `1 site stalled`, `2 sites stalled` (singular/plural on the count only). Absent when no
-site is stalled — no `0 sites stalled`. This is the one global tell that the premise is live, and the
-only way a player learns that a site somewhere is frozen without opening every building.
+site is stalled — no `0 sites stalled`. The suffix goes **last**, after the existing ` · over pool`
+marker when that is present, so the composed explicit string is
+`${assigned}/${pool} assigned · ${idle} idle[ · over pool][ · N sites stalled]` and the legacy string is
+`auto crew · ${count} bldgs (${slots} slots), pool ${pool}[ · N sites stalled]`. This is the one global
+tell that the premise is live, and the only way a player learns that a site somewhere is frozen without
+opening every building. (The legacy form can carry the suffix too: `hasLegacyStaffing` is true when
+*any* building is auto-staffed (`workforce.ts:78`), so a mixed settlement can have auto-crew buildings
+and an explicitly-0 stalled site at once — those auto-crew sites are never themselves stalled.)
 
 **5 — Build palette, the build-time line on a buildable entry** (`buildEntryStatus.ts:146`,
 `buildTimeLine`; today `Build time: 4 days — its upkeep is paid while it is under construction, and it
