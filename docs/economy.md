@@ -1,6 +1,6 @@
 # Economy
 
-<!-- docs:verified 2026-10-21 -->
+<!-- docs:verified 2026-11-03 -->
 
 The per-turn loop that ties [resources](./resources.md), [settlements](./settlements.md), and [heroes](./heroes.md) together.
 
@@ -156,7 +156,7 @@ Player owns one L1 settlement on wood, with two forest tiles in radius (3 wood t
 
 All economy state is stored in the `games` table JSONB columns:
 - `heroes` — per-hero `gold`
-- `settlements` — per-settlement `gold`, `warehouse`, `morale`, `resourceRates`, `autoTrade`, `population`, `buildings` (including a bank's own `bank` pot; per-building `workers` and `draft` ride on the granular `settlement_buildings` row too — nullable `workers INTEGER` / `draft JSONB` columns from migration `030_workforce.sql`, `NULL` = legacy auto-staffed / full pool), `upgrade`
+- `settlements` — per-settlement `gold`, `warehouse`, `morale`, `resourceRates`, `autoTrade`, `population`, `buildings` (including a bank's own `bank` pot; per-building `workers` and `draft` ride on the granular `settlement_buildings` row too — nullable `workers INTEGER` / `draft JSONB` columns from migration `030_workforce.sql`, `NULL` = legacy auto-staffed / full pool), `upgrade`, `districts` (each district's `q` / `r` / `citySpots` in the JSONB column, and each of its buildings in its own `settlement_buildings` row tagged `district_q` / `district_r` — migration `035_district_building_ledger.sql`, `NULL` = the main city grid)
 
 `activeCharters` round-trips server-side via its own `charters` table, not JSONB (see [settlements.md](./settlements.md#persistence)) — `StartCharter` writes it, `EndTurn`'s round-wrap pipeline advances/founds it via `advanceCharters()`. Settlement upgrades persist via `UpgradeState` in the settlement JSONB, and (as of Phase 3 Track A Week 2) actually advance/complete server-side via `server/app/turnService.ts`'s `advanceSettlementUpgrades()` call on round wrap, not just client-side.
 
