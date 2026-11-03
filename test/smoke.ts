@@ -210,10 +210,9 @@ async function runBuildInfoChecks(page: Page) {
   console.log(">> settings panel no longer renders build info (gear dropdown owns it)");
 }
 
-// NOTE: as of 2026-08-23 this function is defined but never called from
-// run() below -- see #175 for why the New/Load/Save/tiles/movement/battle
-// flows here don't currently execute. Kept correct (not deleted) for
-// whenever run() is reconnected to it.
+// Run by run() at the end of the pass: the New/Load/Save/tiles/movement flows
+// against the toolbar's own surfaces. The New Game prompt inside it is the
+// app's in-page dialog, not a native confirm() -- see the flag it asserts.
 async function runNewLoadSaveFlow(
   page: Page,
   ctx: {
@@ -231,7 +230,17 @@ async function runNewLoadSaveFlow(
 ) {
   console.log(">> New/Load/Save flow");
 
-  page.on("dialog", (dialog) => dialog.accept());
+  // A native confirm() must never be needed here: it blocks the renderer
+  // thread outright (measured: Page.handleJavaScriptDialog returned {} while
+  // every Runtime.evaluate timed out, and the rAF counter stood still), so the
+  // toolbar's New Game prompt is the app's own in-page dialog. This handler
+  // stays as the safety net for any other path and the flag below fails the
+  // run if this one ever regresses.
+  let nativeDialogSeen = false;
+  page.on("dialog", (dialog) => {
+    nativeDialogSeen = true;
+    void dialog.accept();
+  });
 
   await ctx.delete(`${API_URL}/api/games/${TEST_NEW_NAME}`).catch(() => {});
 
@@ -239,7 +248,20 @@ async function runNewLoadSaveFlow(
   const newBtn = page.locator("#toolbar button", { hasText: "New" });
   await menuBtn.click();
   await newBtn.click();
+  // With a game live the New Game item asks first, and the asking is a click on
+  // the app's own dialog rather than an answer to the browser's. Scope it to
+  // the prompt's own layer: the landing page's (hidden) card also has a
+  // "New Game" button, and an unscoped locator resolves to that one.
+  const prompt = page.locator("div[style*='z-index: 120']");
+  const promptGo = prompt.locator("button", { hasText: /^New Game$/ });
+  if ((await promptGo.count()) === 0) {
+    throw new Error("New Game with a live game must prompt before opening the form");
+  }
+  await promptGo.first().click();
   await wait(100);
+  if (nativeDialogSeen) {
+    throw new Error("a native dialog() appeared: the prompt must be the app's own in-page dialog");
+  }
   const nameInput = page.locator("input[type=text]").first();
   await nameInput.fill(TEST_NEW_NAME);
   const seedInput = page.locator("input[type=number]").first();
