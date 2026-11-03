@@ -126,11 +126,21 @@ async function newPage(context: BrowserContext, urlSuffix = ""): Promise<Page> {
   await waitForApiHealth(API_URL);
   // waitUntil "load", not "networkidle": once a session boots, its SSE event stream (/events/stream) holds a pending request forever, so networkidle can never fire.
   await page.goto(`${WEB_URL}${urlSuffix}`, { waitUntil: "load" });
+  // Boot no longer starts a game on its own: since #307 it reads GET /api/games
+  // FIRST and creates a starter game ONLY when the server says the account has
+  // none, so with games on the server (every run on the shared dev DB) an empty
+  // browser profile lands on the home overlay with activeGameName still null.
+  // Waiting on activeGameName therefore spun to its timeout and no scene could
+  // run at all. Wait on the app instead -- the debug API attached, and home's
+  // own interactive surface (its New Game button, the same one
+  // dismissHomeAndCreateGame clicks) on screen -- which is true exactly when the
+  // page is ready to drive, whether or not a game is open.
   await page.waitForFunction(
-    () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
+    () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug != null,
     null,
     { timeout: 20_000 },
   );
+  await page.locator("button", { hasText: "New Game" }).last().waitFor({ state: "visible", timeout: 20_000 });
   return page;
 }
 
@@ -674,8 +684,15 @@ async function run(): Promise<void> {
       const loaded = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName ?? null);
       if (loaded !== name) throw new Error(`Load path did not open the game: activeGameName=${loaded}`);
       // The load camera's contract (src/game/loadCamera.ts): a loaded game opens
-      // centred on the seat's hero. Assert it so a camera regression cannot pass
-      // as a mere pixel difference.
+      // framed on the seat's hero. Assert it so a camera regression cannot pass
+      // as a mere pixel difference. The tolerance is not slack: `centerOn`
+      // clamps the camera so the map's edge stays flush with the viewport, so on
+      // a map only a little larger than the 1280x800 viewport the hero cannot
+      // land exactly on the centre (measured 0,32 on the small map, whose own
+      // clamp slack is half the map-extent minus viewport difference -- under
+      // 64 px per axis). A regression that frames something else instead is
+      // hundreds of px out, as the map-centre perturbation below shows.
+      const LOAD_CENTRE_TOLERANCE_PX = 64;
       const centred = await page.evaluate(() => {
         const d = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
         const hero = d.getHeroes().find((h) => h.ownerId === 0);
@@ -684,8 +701,8 @@ async function run(): Promise<void> {
         return { q: hero.q, r: hero.r, dx: Math.abs(p.x - window.innerWidth / 2), dy: Math.abs(p.y - window.innerHeight / 2) };
       });
       if (!centred) throw new Error("no player hero after the Load path");
-      if (centred.dx > 2 || centred.dy > 2) {
-        throw new Error(`Load path did not centre on the seat hero (${centred.q},${centred.r}): off by ${centred.dx.toFixed(1)},${centred.dy.toFixed(1)}`);
+      if (centred.dx > LOAD_CENTRE_TOLERANCE_PX || centred.dy > LOAD_CENTRE_TOLERANCE_PX) {
+        throw new Error(`Load path did not frame the seat hero (${centred.q},${centred.r}): off by ${centred.dx.toFixed(1)},${centred.dy.toFixed(1)} (tolerance ${LOAD_CENTRE_TOLERANCE_PX}px)`);
       }
       await selectHeroAndHover(page);
       await clearToasts(page);
