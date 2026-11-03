@@ -38,3 +38,25 @@ export function getInMemoryLocalPlayerId(gameName: string): PlayerId | null {
 export function setInMemoryLocalPlayerId(gameName: string, id: PlayerId): void {
   inMemory.set(gameName, id);
 }
+
+/**
+ * Which seat a browser acts as in a game, from the seats the lobby has claimed
+ * and the seat this browser already claimed for itself (localStorage, written
+ * by the lobby's Host/Join flows). The browser's OWN claim wins -- before this,
+ * `GameSessionManager.loadGame` adopted the FIRST claimed seat, so a browser
+ * that claimed seat 1 through the Join tab was silently reset to seat 0 on the
+ * load that followed: the second human seat could not be held by one browser
+ * (playthrough round 2b, F2). With no stored claim (or one nobody holds -- the
+ * lobby is the authority) this falls back to the lowest claimed seat, which is
+ * what every pre-existing flow produced: `claimed` is a jsonb object, whose
+ * key order is Postgres's, not numeric, so "lowest" is the deterministic
+ * reading of "first".
+ */
+export function resolveInitialLocalSeat(
+  claimedSeats: readonly number[],
+  storedSeat: number | null,
+): PlayerId | null {
+  if (storedSeat !== null && claimedSeats.includes(storedSeat)) return storedSeat;
+  if (claimedSeats.length === 0) return null;
+  return Math.min(...claimedSeats);
+}

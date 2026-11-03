@@ -334,6 +334,95 @@ test("every new game carries lobby.uncharted = false unless the body opts in, an
 // ── seatFactions (faction-registry foundation): the creator's local
 // per-seat roster-faction choice, riding the enemySlots precedent. ──
 
+// F3 (playthrough round 2b): `availableSeats` advertised [] on a game with a
+// free seat, because the route derived it from the keys present in
+// `lobby.claimed` -- and an unclaimed seat is simply ABSENT from that map, so
+// the list could only ever hold a key whose value was falsy, which the claim
+// writer never produces. The field now means what it says: the seats a client
+// could still claim, quoted beside the lobby state it comes from.
+test("GET /games/:name lists the seats that are actually free (lobby.claimed beside availableSeats)", async () => {
+  const name = uniqueName();
+  try {
+    await createGame({ name, humanSlots: 2, enemySlots: 0 });
+    const before = (await (await fetch(`${baseUrl}/games/${name}`)).json()) as {
+      lobby: { seats?: number; claimed?: Record<string, unknown> };
+      players: unknown[];
+      seatTotal: number;
+      availableSeats: number[];
+    };
+    assert.equal(before.lobby.seats, 2);
+    assert.deepEqual(before.lobby.claimed, {});
+    assert.equal(before.seatTotal, 2, "every seat in the game counts");
+    assert.deepEqual(before.availableSeats, [0, 1], "nothing is claimed, so both seats are free");
+
+    const claim = await fetch(`${baseUrl}/games/${name}/lobby/claim`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ seat: 0, handle: "P0" }),
+    });
+    assert.equal(claim.status, 200, await claim.clone().text());
+
+    const after = (await (await fetch(`${baseUrl}/games/${name}`)).json()) as {
+      lobby: { claimed?: Record<string, unknown> };
+      seatTotal: number;
+      availableSeats: number[];
+    };
+    assert.deepEqual(Object.keys(after.lobby.claimed ?? {}), ["0"]);
+    assert.deepEqual(after.availableSeats, [1], "seat 1 is still joinable");
+    assert.equal(after.seatTotal, 2);
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("GET /games/:name counts AI combatant seats in seatTotal but never offers them (1 human + 2 AI)", async () => {
+  const name = uniqueName();
+  try {
+    await createGame({ name, humanSlots: 1, enemySlots: 2 });
+    const res = (await (await fetch(`${baseUrl}/games/${name}`)).json()) as {
+      lobby: { seats?: number };
+      players: { faction: string }[];
+      seatTotal: number;
+      availableSeats: number[];
+    };
+    assert.equal(res.lobby.seats, 1, "lobby.seats stays the human-slot count claim/start validate against");
+    assert.equal(res.players.length, 3);
+    assert.equal(res.seatTotal, 3, "seatTotal is the game's seat count, AI seats included");
+    assert.deepEqual(res.availableSeats, [0], "only the human seat is claimable");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("GET /games/:name offers no free seats once the lobby has started", async () => {
+  const name = uniqueName();
+  try {
+    await createGame({ name, humanSlots: 2, enemySlots: 0 });
+    for (const seat of [0, 1]) {
+      const claim = await fetch(`${baseUrl}/games/${name}/lobby/claim`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ seat, handle: `P${seat}` }),
+      });
+      assert.equal(claim.status, 200, await claim.clone().text());
+    }
+    const started = await fetch(`${baseUrl}/games/${name}/lobby/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(started.status, 200, await started.clone().text());
+    const res = (await (await fetch(`${baseUrl}/games/${name}`)).json()) as {
+      lobby: { startedAt?: string };
+      availableSeats: number[];
+    };
+    assert.ok(res.lobby.startedAt, "the lobby is started");
+    assert.deepEqual(res.availableSeats, [], "a fresh claim is a 409 lobby_already_started after the start");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
 test("POST /games seatFactions rides through to the players jsonb and clamps beyond the seat count", async () => {
   const name = uniqueName();
   try {
