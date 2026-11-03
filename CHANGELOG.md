@@ -10,9 +10,13 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.38.5] - 2026-11-03
+## [0.38.6] - 2026-11-03
 
 Playthrough round 2's battle-persistence cluster, both findings re-measured on 0.38.2 and fixed, with both surfaces of F2 closed. A load whose payload carried no `last_event_id` (the Load list's row is the only source, and only `GET /games/:name` returns that field) left the multiplayer sync's cursor unseeded, and the sync opened the event stream at `after=0` -- the poll route's contract makes that "replay the whole game_events log" -- so every historical event was re-delivered as a live delta and a replayed `BattleOffered` re-opened a battle the server had already settled (its closing `BattleResolved` answers "resync", and that snapshot was dropped outright while the phase was blocked, so the modal stayed up and Quick Resolve POSTed a second time). The stream is now deferred until the initial resync seeds the cursor, and a row at or below the cursor is never applied -- the phase cannot be re-opened by a settled battle. The server side is closed too: a defender-seat `ResolveBattle` / `SubmitBattleResult` for a pair the lobby no longer marks pending is refused with `battle_not_pending` on server-driven games (checked before any world mutation, so a refusal leaves nothing half-written), which retires the second persisted resolution that deleted a hero, while an attacker-seat resolve and a browser-driven game's client-local defender path stay ungated. The stale `heroes.troops` scalar is gone as well: one new `withSurvivorStacks` helper now writes the scalar everywhere survivor stacks are written -- both sides of a hero battle, the conceding side, and the settlement battle's attacker -- so the persisted column, the API and `hydrate`'s re-seed all agree with `hero_platoons` instead of the winner keeping its pre-battle headcount. `patch`: both findings are defects on shipped paths, no new command kind, no schema change and no wire-contract change (the new refusal reason is one more value on the existing command error field).
+
+## [0.38.5] - 2026-11-03
+
+- **fix(client): the client's settlement mirror now follows a capture.** `GameStateManager.rebuildSettlementsFromState()` was wired only to wholesale state replacement (boot, load, `state:committed`), and a `TurnController` command deliberately emits no `state:committed` (it would snap every hero) — so after a walk-in capture the `Castle` wrappers every render/UI path reads kept the pre-capture owner, along with every other mirrored field (buildings, auto-trade, level). The wrappers are now reconciled on the per-frame state-identity diff too, in place via `Castle.syncFromState`, because `EntityMirror` and the vision/territory caches alias those instances. Playthrough round 2, F4.
 
 ## [0.38.4] - 2026-11-03
 
