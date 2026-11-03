@@ -10,6 +10,14 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.38.6] - 2026-11-03
+
+The Load Game surfaces: three fixes, from playthrough round 2b.
+
+- **fix(home): the landing Load list reads the round, not the frozen `games.turn`.** The `games.turn` column is written once at creation (its DEFAULT 1 is the only writer) and never advances, so the landing page's Load list called a round-4 save "turn 1" while the in-game Load modal showed the real round. Both surfaces now render one shared progress line, and the column's legacy role is documented at both type sites.
+- **fix(load-modal): the in-game Load modal closes after a successful Open.** Its teardown swept a `z-index: 100` layer no dialog sits on (`openDialog` mounts its wrapper at 300), so a successful load left the modal over the game with its row stuck on "Loading…", its fullscreen backdrop eating every later click, and the panel still registered with the panel manager. The row now closes the dialog it was opened with.
+- **fix(load): loading an unfounded settlers game centres the camera on the seat's own unit.** The load path keyed off the literal hero id `p0-hero` with the classic castle-less spawn hex (6,5) as its fallback, so a settlers game with nothing founded opened fully fogged with the player's wagon off screen. The camera now resolves the local seat's wagon / commander / settlement, and the genuine nothing-to-centre-on case falls back to the map centre — documented, not a classic-game constant.
+
 ## [0.38.5] - 2026-11-03
 
 - **fix(client): the client's settlement mirror now follows a capture.** `GameStateManager.rebuildSettlementsFromState()` was wired only to wholesale state replacement (boot, load, `state:committed`), and a `TurnController` command deliberately emits no `state:committed` (it would snap every hero) — so after a walk-in capture the `Castle` wrappers every render/UI path reads kept the pre-capture owner, along with every other mirrored field (buildings, auto-trade, level). The wrappers are now reconciled on the per-frame state-identity diff too, in place via `Castle.syncFromState`, because `EntityMirror` and the vision/territory caches alias those instances. Playthrough round 2, F4.
