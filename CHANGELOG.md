@@ -10,6 +10,16 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.48.0] - 2026-11-03
+
+The House was the strongest building in the game by 112.5x and the largest wood sink in a city, measured by RUNNING the engine on 0.47.0 (main `9b4f17f`): one level-3 House paid 4,500 gold/turn (1,500 population x the L3 tax of 3) for a 100g + 5w placement and 3 wood/turn of upkeep, against the neutral gold mine's 120 gold/turn from a 300g placement. The report that filed the pick said 37-112x; both ends still hold.
+
+The defect is the price, not the grant. The grant scales x5 with level while the House cost a flat 100g to place at ANY level -- the only building in the registry shaped that way -- and it paid for that gold in the resource that is not scarce.
+
+- `packages/engine/src/buildingRegistry.ts`: the House's placement price is 300g (was 100g), so its full path to L3 costs 1,650g, exactly a gold mine's, and its gold/turn per 100g of placement cost falls from 112.5x the mine's to 37.5x (37.5x -> 12.5x against a mine standing on a gold spot; level 1 goes 22.5x -> 7.5x). Its wood upkeep is 2 per level (2/4/6 per turn, was 1), halving the late House's exchange rate from 1,500 gold per wood to 750, and the apartment's grant rises to 150 per level (was 100) so 2x2 housing is less of a trap beside four single-cell houses.
+- The population grant is deliberately NOT flattened. The report's own value curve (a flat 300/500/700) halves a built-out level-3 castle's population cap (80,000 -> 40,000) and takes the workforce binding that landed after the report (P2: a pool of 266 against a 275-slot demand) to 133 -- 48% of demand. The three shapes and their exact numbers are in the card's report.
+- Pinned by `test/engine/houseRebalance.test.ts` (five cases red on the base commit), with every moved expectation retargeted by name: the House's placement price in `test/engine/placeBuildings.test.ts` and `test/server/commandsRoute.test.ts`, the apartment's grant in `test/engine/districts.test.ts` and `test/engine/housePopulation.test.ts`, the starter set's 12 wood + 2 stone in `test/engine/init.test.ts`, `test/engine/starterLayout.test.ts`, `test/state/economy.test.ts` and `test/state/workforce.test.ts`, and the palette's own upkeep/shortfall wording in `test/screens/settlements/`. `docs/resource-gathering.md` and `docs/settlements.md` carry the new numbers.
+
 ## [0.47.0] - 2026-11-03
 
 Three limits of the AI's capital-taking, measured by DRIVING the real server-side driver over real generated boards — not by reading code.
