@@ -58,6 +58,46 @@ test("one row per warehouse resource, in warehouse order, carrying the live stoc
   assert.deepEqual(rows.map((r) => r.stock), [12, 34, 56, 78, 90]);
 });
 
+// F-3 (the round-2 city-view card): one panel cannot print two contradictory
+// Food rates. The settlement panel renders the top section's Food row from
+// `daily.food` and the warehouse's own Food row by iterating `daily.rows`; the
+// two must be the SAME entry, so the construction window -- the one moment a
+// producer's rate flips from nothing to its full output -- cannot be rendered
+// as two different numbers. The window itself is the honest half: an
+// under-construction farm pays the turn nothing, so the rate on screen is the
+// population's bill alone (the card's measured -5/day), and the instant the
+// farm finishes the same entry becomes its output minus the bill (the card's
+// +3.4/day, which is what the next turn paid: round(8.4) - 5 = +3).
+test("F-3: the construction window is one entry, and its net is exactly what the turn pays", () => {
+  const inFlight = settlement({
+    population: 500,
+    buildings: [{ ...building("farmField"), construction: { daysRemaining: 2 } }],
+  });
+  const window = settlementDailyRates(inFlight, SEED);
+  const warehouseFood = window.rows.find((r) => r.resource === "food")!;
+
+  assert.equal(
+    window.food,
+    warehouseFood,
+    "the top Food row and the warehouse Food row must be one entry, not two entries that happen to be equal",
+  );
+  assert.equal(window.food.produced, 0, "an under-construction farm pays the turn nothing");
+  assert.equal(window.food.spent, 5, "500 population eats 5/day");
+  assert.equal(window.food.net, -5, "so the only honest rate in the window is the bill: -5/day");
+  assert.equal(formatDailyRate(window.food.net), formatDailyRate(warehouseFood.net), "one number, both surfaces");
+
+  const finished = settlement({ population: 500, buildings: [building("farmField")] });
+  const after = settlementDailyRates(finished, SEED);
+  assert.ok(after.food.produced > 0, "the completed farm produces");
+  assert.equal(after.food, after.rows.find((r) => r.resource === "food"));
+  assert.equal(
+    after.food.net,
+    Math.round((after.food.produced - 5) * 100) / 100,
+    "and the projection is its output minus the bill -- the rate the next turn pays",
+  );
+  assert.ok(after.food.net > window.food.net, "the window's rate is not the finished rate");
+});
+
 test("the top food row is the same entry as the warehouse's food row", () => {
   const s = settlement({ warehouse: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 42 } });
   const daily = settlementDailyRates(s, SEED);
