@@ -110,6 +110,41 @@ export function pickupRefusalToast(reason: string): ClickRejectionToast {
 }
 
 /**
+ * The sentences for a refused DISTRICT entry -- the adventure map's
+ * double-click on a hex that cannot host a district. Keyed by the engine's own
+ * `DistrictEntryRefusal` vocabulary (`districtEntryDecision` in
+ * `packages/engine/src/settlement/districtConnectivity.ts`), the same
+ * one-table-per-refusal-family shape as `foundSettlementRefusalToast` and
+ * `pickupRefusalToast`.
+ *
+ * The channel is the ADVENTURE MAP's refusal toast (`showToast`, the surface
+ * `clickRejectionToast` already feeds), not the city grid's palette notice:
+ * the refusal happens on the map's double-click, BEFORE any city view exists,
+ * so there is no palette to write on -- a hex that cannot host a district
+ * never opens a grid for the palette notice to live in. The toast is the map's
+ * own "why did nothing happen" surface, and "Select a hero first" (the
+ * unrelated fallback the single click fires) is exactly the silence this
+ * replaces.
+ *
+ * An unknown code falls through to a message that shows it, because a refusal
+ * the client cannot explain is a bug to see rather than a silence to hide.
+ */
+export function districtEntryRefusalToast(reason: string): ClickRejectionToast {
+  switch (reason) {
+    case "outside_control_range":
+      return { message: "That hex is outside the settlement's control range", kind: "info" };
+    case "not_your_settlement":
+      return { message: "That land belongs to another settlement", kind: "info" };
+    case "district_not_connected":
+      return { message: "A district must touch the settlement or one of its districts", kind: "info" };
+    case "impassable_district_terrain":
+      return { message: "That ground cannot hold a district", kind: "info" };
+    default:
+      return { message: `District refused: ${reason}`, kind: "error" };
+  }
+}
+
+/**
  * The id of the seat's own covered wagon standing on `(q, r)`, if any -- the
  * founding gesture's subject. Read through contracts' `isCoveredWagonId` (the
  * engine, the server and the renderer share one convention) rather than
