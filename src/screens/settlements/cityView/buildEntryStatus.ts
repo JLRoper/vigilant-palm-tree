@@ -1,5 +1,5 @@
 import type { BuildingDef, BuildingKind } from "@heroes/contracts";
-import { buildingPlacementCost, buildingUpkeep } from "@heroes/engine";
+import { buildingBuildDays, buildingPlacementCost, buildingUpkeep } from "@heroes/engine";
 import { coversCell } from "../../../core/cityGrid";
 import type { NetCost } from "./netCost";
 import { footprintCells, footprintLine } from "./footprint";
@@ -86,6 +86,8 @@ export function buildEntryStatus(opts: BuildEntryStatusOptions): BuildEntryStatu
   const reasons = [...blocking];
   const size = footprintLine(opts.kind);
   if (size) reasons.push(size);
+  const buildTime = buildTimeLine(opts.kind);
+  if (buildTime) reasons.push(buildTime);
   const upkeep = upkeepLine(opts.kind);
   if (upkeep) reasons.push(upkeep);
   return { disabled: blocking.length > 0, reasons, title: reasons.join("\n") };
@@ -126,6 +128,28 @@ function upkeepLine(kind: BuildingKind): string {
   if (upkeep.wood > 0) parts.push(`${upkeep.wood} wood`);
   if (upkeep.stone > 0) parts.push(`${upkeep.stone} stone`);
   return parts.length > 0 ? `Upkeep: ${parts.join(", ")} per turn` : "";
+}
+
+/**
+ * E5 (playthrough round 2b): the palette row carried its build time as a bare
+ * number beside an hourglass GLYPH -- no label, and the row's tooltip
+ * (footprint + upkeep) never named it at all. The half that costs money was
+ * invisible too: a site under construction is charged its upkeep from the
+ * placement's own turn while it produces nothing (`applySettlementConsumption`
+ * bills `buildingUpkeepRequired` over every building, and
+ * `producerTurnOutput` returns null for one with `construction`), so the
+ * player paid for two days of output they never got with nothing on the
+ * placement surface saying so. Both facts are stated here, in the row's own
+ * tooltip, so they can be priced before the click instead of discovered in the
+ * building's menu afterwards.
+ */
+function buildTimeLine(kind: BuildingKind): string {
+  const days = buildingBuildDays(kind);
+  if (days <= 0) return "";
+  return (
+    `Build time: ${days} day${days === 1 ? "" : "s"} \u2014 its upkeep is paid while it is under construction, ` +
+    `and it produces nothing until it is finished`
+  );
 }
 
 /**

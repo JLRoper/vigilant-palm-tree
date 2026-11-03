@@ -525,8 +525,16 @@ export class BuildingPlacer {
         });
 
         if (days > 0) {
+          // E5: the days number is not decoration. It is the site's build time,
+          // it used to be a bare digit beside an hourglass glyph with no label
+          // anywhere (the row's tooltip names it now too, via buildEntryStatus),
+          // so the glyph, the number and the row all carry the same sentence for
+          // a pointer, a keyboard user and a screen reader alike.
+          const buildTimeLabel = `Build time: ${days} day${days === 1 ? "" : "s"}`;
           const hgIcon = document.createElement("img");
           hgIcon.src = HOURGLASS_SVG;
+          hgIcon.alt = buildTimeLabel;
+          hgIcon.title = buildTimeLabel;
           Object.assign(hgIcon.style, {
             width: `${ICON_SIZE}px`,
             height: `${ICON_SIZE}px`,
@@ -535,6 +543,7 @@ export class BuildingPlacer {
           costWrap.appendChild(hgIcon);
           const hgNum = document.createElement("span");
           hgNum.textContent = `${days}`;
+          hgNum.title = buildTimeLabel;
           Object.assign(hgNum.style, { fontSize: "10px", marginRight: "3px" });
           costWrap.appendChild(hgNum);
         }
