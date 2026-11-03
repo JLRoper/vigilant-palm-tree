@@ -43,10 +43,11 @@ import {
   paintBattleFloatingText,
 } from "../../src/render/scene/paint2d";
 import type { SceneNode } from "../../src/render/scene/types";
-import type { SettlementRoadNode } from "../../src/render/scene/types";
+import type { SettlementRoadNode, SettlementRoadTile } from "../../src/render/scene/types";
+import { ROAD_JUNCTION_PAD } from "../../src/render/scene/roadGraph";
 import type { Paint2DSpriteResolver } from "../../src/render/scene/paint2d/deps";
 import { HEX_SIZE } from "../../src/core/hex";
-import { makeNoopPaint2DDep, makeRecordingCtx } from "./_helpers";
+import { makeNoopPaint2DDep, makeRecordingCtx, type CtxCall } from "./_helpers";
 
 test("paintScene: empty input is a no-op (no calls emitted, no throw)", () => {
   const { ctx, calls } = makeRecordingCtx();
@@ -790,143 +791,201 @@ test("paintBattleFloatingText: emits a strokeText + fillText pair with the alpha
   assert.equal(fill?.args[0], "rgba(255,214,102,0.8)", "float fill should match the live gold-tinted alpha");
 });
 
-// District roads: a pale gravel surface with dark earth edges, drawn as a curve
-// that bows off the line between two tile centres, widening with the workforce
-// track count up to a cap. The road sits on the ground under every entity
-// layer, so its geometry and its two-tone palette are what is worth pinning.
+// District roads: a pale gravel surface with a dark earth casing under it,
+// stroked per TILE from that tile's own 6-bit edge mask. The road's geometry,
+// its width mapping and its seam invariant live in roadGraph.ts and are tested
+// in roadGraph.test.ts; what is worth pinning here is the PAINT: which tone goes
+// down when, at which width, and where the junction pads land.
 
-function roadNode(segments: SettlementRoadNode["segments"]): SettlementRoadNode {
-  return { kind: "settlementRoad", settlementId: "s0", segments };
+function roadNode(tiles: SettlementRoadTile[]): SettlementRoadNode {
+  return { kind: "settlementRoad", settlementId: "s0", tiles };
 }
 
-function strokesOf(calls: Array<{ name: string }>): number {
-  return calls.filter((c) => c.name === "stroke").length;
+function roadTile(overrides: Partial<SettlementRoadTile> = {}): SettlementRoadTile {
+  return { q: 0, r: 0, x: 0, y: 0, mask: 0b001001, strands: [5, 0, 0, 5, 0, 0], ...overrides };
 }
 
-type Point = { x: number; y: number };
-
-/** The control point of the one curve a single-segment node drew. */
-function controlPointOf(calls: Array<{ name: string; args: unknown[] }>): Point {
-  const curves = calls.filter((c) => c.name === "quadraticCurveTo");
-  assert.ok(curves.length >= 1, "the road draws a curve");
-  const [x, y] = curves[0].args as [number, number];
-  return { x, y };
-}
-
-/** Signed perpendicular distance of `p` from the line through `a` and `b`. */
-function offLine(p: Point, a: Point, b: Point): number {
-  const len = Math.hypot(b.x - a.x, b.y - a.y);
-  return ((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) / len;
-}
-
-/** Paints one edge and returns its bow as a fraction of the edge's length. */
-function bowOf(from: Point, to: Point): number {
-  const { ctx, calls } = makeRecordingCtx();
-  paintSettlementRoad(ctx, roadNode([{ strands: 2, from, to }]), makeNoopPaint2DDep());
-  const len = Math.hypot(to.x - from.x, to.y - from.y);
-  // The control point sits at twice the curve's apex deviation.
-  return offLine(controlPointOf(calls), from, to) / (2 * len);
-}
-
-test("paintSettlementRoad: a hairline track -- dark edge under a pale surface", () => {
-  const { ctx, calls } = makeRecordingCtx();
-  paintSettlementRoad(
-    ctx,
-    roadNode([{ strands: 3, from: { x: 0, y: 0 }, to: { x: 20, y: 0 } }]),
-    makeNoopPaint2DDep(),
-  );
-
-  assert.equal(strokesOf(calls), 2, "one dark edge stroke under one pale surface stroke");
-  assert.deepEqual(
-    calls.filter((c) => c.name === "set:strokeStyle").map((c) => c.args[0]),
-    ["rgba(46, 38, 28, 0.5)", "rgba(206, 190, 162, 0.55)"],
-  );
-  const widths = calls.filter((c) => c.name === "set:lineWidth").map((c) => c.args[0] as number);
-  assert.equal(widths.length, 2);
-  assert.ok(Math.abs(widths[1] - 0.7) < 1e-9, `surface is 0.55 + 3 x 0.05 wide, got ${widths[1]}`);
-  assert.ok(Math.abs(widths[0] - (widths[1] + 0.45)) < 1e-9, "the edge overhangs the surface by 0.45");
-
-  // Both strokes follow one curve between the two tile centres, so the dark
-  // edge stays an edge and never splits from the surface it underlays.
-  assert.deepEqual(
-    calls.filter((c) => c.name === "moveTo").map((c) => c.args),
-    [[0, 0], [0, 0]],
-    "each stroke starts on the tile centre",
-  );
-  const curves = calls.filter((c) => c.name === "quadraticCurveTo").map((c) => c.args);
-  assert.equal(curves.length, 2, "each stroke is a curve, not a ruled line");
-  assert.deepEqual(curves[0], curves[1], "the edge and the surface bow together");
-  assert.deepEqual(curves[0].slice(2), [20, 0], "the curve still lands on the far tile centre");
-
-  // Bow: the control point sits 2x the apex deviation off the chord, and the
-  // apex is 0.05..0.13 of this 20px edge.
-  const bow = offLine(controlPointOf(calls), { x: 0, y: 0 }, { x: 20, y: 0 });
-  assert.ok(Math.abs(bow) >= 2.8 && Math.abs(bow) <= 7.2, `control point is 2x a 0.07..0.18 bow, got ${bow}`);
-});
-
-test("paintSettlementRoad: the roads wander -- bounded, signed both ways, and stable", () => {
-  // A district's edges, on the real tile spacing (HEX_SIZE * sqrt(3) = 55.4px).
-  const edges: Array<{ from: Point; to: Point }> = [];
-  for (let i = 0; i < 12; i++) {
-    const angle = (Math.PI / 6) * i;
-    edges.push({ from: { x: 0, y: 0 }, to: { x: 55.4 * Math.cos(angle), y: 55.4 * Math.sin(angle) } });
+/** The strokeStyle in force at each `stroke`, in call order. */
+function strokeStyles(calls: CtxCall[]): string[] {
+  let style = "";
+  const out: string[] = [];
+  for (const c of calls) {
+    if (c.name === "set:strokeStyle") style = c.args[0] as string;
+    else if (c.name === "stroke") out.push(style);
   }
+  return out;
+}
 
-  const bows = edges.map((e) => bowOf(e.from, e.to));
-  for (const bow of bows) {
-    assert.ok(
-      Math.abs(bow) >= 0.07 - 1e-9 && Math.abs(bow) <= 0.18 + 1e-9,
-      `bow ${bow} must stay inside 0.07..0.18 of the edge`,
-    );
+/** The lineWidth in force at each `stroke`, in call order. */
+function strokeWidths(calls: CtxCall[]): number[] {
+  let width = 0;
+  const out: number[] = [];
+  for (const c of calls) {
+    if (c.name === "set:lineWidth") width = c.args[0] as number;
+    else if (c.name === "stroke") out.push(width);
   }
-  // A winding lane, not an arc: the district's roads must not all bow the same
-  // way, or the network reads as a curve the map drew on purpose.
+  return out;
+}
+
+/** The fillStyle in force at each `fill`, in call order. */
+function fillStyles(calls: CtxCall[]): string[] {
+  let style = "";
+  const out: string[] = [];
+  for (const c of calls) {
+    if (c.name === "set:fillStyle") style = c.args[0] as string;
+    else if (c.name === "fill") out.push(style);
+  }
+  return out;
+}
+
+const CASING = "rgba(46, 38, 28, 0.5)";
+const SURFACE = "rgba(206, 190, 162, 0.55)";
+
+test("paintSettlementRoad: every casing goes down before ANY body -- the two global passes", () => {
+  // The defect this exists to prevent: a later piece's casing landing on an
+  // earlier piece's surface, which rivets every junction and every shared tile
+  // centre with a dark bead. Three tiles at three different widths, so both the
+  // pass order AND the per-width grouping are exercised: the strokes must come
+  // out as one casing per width, then one body per width -- never interleaved.
+  const tiles = [
+    roadTile({ q: 0, r: 0, x: 0, y: 0, strands: [5, 0, 0, 5, 0, 0] }),
+    roadTile({ q: 1, r: 0, x: 55.4, y: 0, strands: [20, 0, 0, 20, 0, 0] }),
+    roadTile({ q: 2, r: 0, x: 110.8, y: 0, strands: [2, 0, 0, 2, 0, 0] }),
+  ];
+  const { ctx, calls } = makeRecordingCtx();
+  paintSettlementRoad(ctx, roadNode(tiles), makeNoopPaint2DDep());
+
+  const styles = strokeStyles(calls);
+  const firstSurface = styles.indexOf(SURFACE);
+  const lastCasing = styles.lastIndexOf(CASING);
+  assert.ok(firstSurface > 0 && lastCasing > 0, "both tones are painted");
   assert.ok(
-    bows.some((b) => b < 0) && bows.some((b) => b > 0),
-    `both sides must appear across a district, got ${JSON.stringify(bows.map((b) => Number(b.toFixed(3))))}`,
+    lastCasing < firstSurface,
+    `all casings must precede all bodies; got ${JSON.stringify(styles)}`,
   );
-
-  // Same two tiles, same road: a reload or a replay redraws the identical curve.
-  assert.deepEqual(edges.map((e) => bowOf(e.from, e.to)), bows);
-});
-
-test("paintSettlementRoad: the bow belongs to the tile pair, not the route direction", () => {
-  const from = { x: 100, y: 200 };
-  const to = { x: 155.4, y: 200 };
-  const { ctx, calls } = makeRecordingCtx();
-  paintSettlementRoad(ctx, roadNode([{ strands: 2, from, to }]), makeNoopPaint2DDep());
-  const { ctx: ctx2, calls: calls2 } = makeRecordingCtx();
-  paintSettlementRoad(ctx2, roadNode([{ strands: 2, from: to, to: from }]), makeNoopPaint2DDep());
-
+  assert.equal(styles.length, 6, "three distinct widths x two tones -- one stroke per group, not one per piece");
+  const widths = strokeWidths(calls);
   assert.deepEqual(
-    controlPointOf(calls2),
-    controlPointOf(calls),
-    "a re-route that reaches the edge from its other end draws the same road",
+    widths.slice(3),
+    widths.slice(0, 3).map((w) => w - 2),
+    "the body pass repeats the casing pass's widths, 1 px per side under each",
   );
+  assert.equal(calls.filter((c) => c.name === "stroke").length, 6);
+  assert.equal(calls.filter((c) => c.name === "beginPath").length, 6, "one path per group per tone");
+  // the pieces themselves are unchanged: 6 through halves, traced twice
+  assert.equal(calls.filter((c) => c.name === "bezierCurveTo").length, 12);
 });
 
-test("paintSettlementRoad: a busy district is only a little wider, sized against the sprites", () => {
+test("paintSettlementRoad: the body width is the edge's own track count, the casing +1 px per side", () => {
   const { ctx, calls } = makeRecordingCtx();
   paintSettlementRoad(
     ctx,
-    roadNode([{ strands: 20, from: { x: 0, y: 0 }, to: { x: 20, y: 0 } }]),
+    roadNode([roadTile({ strands: [1, 0, 0, 20, 0, 0] })]),
     makeNoopPaint2DDep(),
   );
-  const widths = calls.filter((c) => c.name === "set:lineWidth").map((c) => c.args[0] as number);
-  assert.equal(widths.length, 2);
-  assert.ok(Math.abs(widths[1] - 1.5) < 1e-9, `full workforce caps the surface at 1.5px, got ${widths[1]}`);
-  assert.ok(widths[1] < 2 && widths[0] < 2, "a hairline, not a stripe: a fortieth of a hex");
+
+  const widths = strokeWidths(calls);
+  assert.equal(widths.length, 4, "two halves x two tones");
+  // pass 1 = casings (body + 1.0 px each side), pass 2 = bodies
+  const quitness = [widths[0], widths[1]];
+  const bodis = [widths[2], widths[3]];
+  for (const w of quitness) assert.ok(w > 3 && w < 4.6, `casing stroke is the body + 2 px, got ${w}`);
+  for (let i = 0; i < 2; i++) {
+    assert.ok(Math.abs(quitness[i] - (bodis[i] + 2)) < 1e-9, "the casing overhangs the body by 1 px per side");
+  }
+  // the two halves carry their OWN edge's track count: edge 0 is 1 track (1.55),
+  // edge 3 is 20 tracks (2.50) -- a visible width step, which is the workforce reading
+  assert.ok(Math.abs(bodis[0] - 1.55) < 1e-9, `edge 0's half is 1 track, got ${bodis[0]}`);
+  assert.ok(Math.abs(bodis[1] - 2.5) < 1e-9, `edge 3's half is 20 tracks, got ${bodis[1]}`);
+  assert.ok(bodis[0] < 2 && bodis[1] < 3, "still a road, not a band across the hex");
 });
 
-test("paintSettlementRoad: a low-workforce track is thinner than a busy one", () => {
-  const quiet = makeRecordingCtx();
-  paintSettlementRoad(quiet.ctx, roadNode([{ strands: 1, from: { x: 0, y: 0 }, to: { x: 20, y: 0 } }]), makeNoopPaint2DDep());
-  const busy = makeRecordingCtx();
-  paintSettlementRoad(busy.ctx, roadNode([{ strands: 12, from: { x: 0, y: 0 }, to: { x: 20, y: 0 } }]), makeNoopPaint2DDep());
-  const quietWidth = quiet.calls.filter((c) => c.name === "set:lineWidth").at(-1)?.args[0] as number;
-  const busyWidth = busy.calls.filter((c) => c.name === "set:lineWidth").at(-1)?.args[0] as number;
-  assert.ok(Math.abs(quietWidth - 0.6) < 1e-9, `one track is 0.6px, got ${quietWidth}`);
-  assert.ok(busyWidth > quietWidth * 1.4, `12 tracks (${busyWidth}) must read wider than 1 track (${quietWidth})`);
+test("paintSettlementRoad: a through half is a real curve, and it starts on its own edge midpoint", () => {
+  const { ctx, calls } = makeRecordingCtx();
+  paintSettlementRoad(ctx, roadNode([roadTile()]), makeNoopPaint2DDep());
+
+  const moves = calls.filter((c) => c.name === "moveTo").map((c) => c.args as [number, number]);
+  assert.equal(moves.length, 4, "one path per piece per pass");
+  // edge 0 is E: its midpoint is centre + (27.7128, 0). The two pieces of the
+  // pair are [E midpoint -> centre] and [centre -> W midpoint], so moveTo #1 and
+  // #3 (the second piece, twice) start at the centre instead.
+  for (const m of [moves[0], moves[2]]) {
+    assert.ok(Math.abs(m[0] - 27.7128) < 1e-3, `the E half starts on edge 0's midpoint, got x=${m[0]}`);
+    assert.ok(Math.abs(m[1]) < 1e-9);
+  }
+  for (const m of [moves[1], moves[3]]) {
+    assert.ok(Math.hypot(m[0], m[1]) < 1e-9, "the far half starts where the first ended: the curve's midpoint");
+  }
+  const curves = calls.filter((c) => c.name === "bezierCurveTo");
+  assert.equal(curves.length, 4, "each piece is one cubic, so the exact tangents survive to the canvas");
+  // the second half arrives on edge 3 (W), the other side of the straight run
+  const second = curves[1];
+  assert.ok(Math.abs((second.args[4] as number) + 27.7128) < 1e-3, "the far half lands on the opposite edge midpoint");
+  assert.equal(calls.filter((c) => c.name === "lineTo").length, 0, "nothing is a sampled polyline");
+});
+
+test("paintSettlementRoad: two tiles either side of a shared edge paint the SAME world seam point", () => {
+  const left = roadTile({ q: 0, r: 0, x: 0, y: 0, mask: 0b001001 });
+  const right = roadTile({ q: 1, r: 0, x: HEX_SIZE * Math.sqrt(3), y: 0, mask: 0b001001 });
+  const paint = (tile: SettlementRoadTile) => {
+    const { ctx, calls } = makeRecordingCtx();
+    paintSettlementRoad(ctx, roadNode([tile]), makeNoopPaint2DDep());
+    const moves = calls.filter((c) => c.name === "moveTo");
+    const curves = calls.filter((c) => c.name === "bezierCurveTo");
+    // piece 0 is the edge-0 (E) half: seam -> centre. Piece 1 is the edge-3 (W)
+    // half: centre -> seam. So the shared edge is piece 0's START on one side and
+    // piece 1's END on the other.
+    return {
+      eastStart: moves[0].args as [number, number],
+      eastTangent: { x: (curves[0].args[0] as number) - (moves[0].args[0] as number), y: (curves[0].args[1] as number) - (moves[0].args[1] as number) },
+      westEnd: curves[1].args.slice(4, 6) as [number, number],
+      westArrival: { x: (curves[1].args[4] as number) - (curves[1].args[2] as number), y: (curves[1].args[5] as number) - (curves[1].args[3] as number) },
+    };
+  };
+  const a = paint(left);
+  const b = paint(right);
+  // The E half of the west tile leaves the seam, the W half of the east tile
+  // arrives at it: both meet their OWN edge perpendicularly, and on this
+  // projection the two perpendiculars are the same line.
+  const here = a.eastStart;
+  const there = b.westEnd;
+  assert.ok(Math.abs(here[0] - there[0]) < 1e-9, `one seam point, not two: ${here[0]} vs ${there[0]}`);
+  assert.ok(Math.abs(here[1] - there[1]) < 1e-9);
+  // the tangents are collinear: each runs along its own inward radius, and the
+  // two radii are the same line
+  const cross = a.eastTangent.x * b.westArrival.y - a.eastTangent.y * b.westArrival.x;
+  assert.ok(Math.abs(cross) < 1e-6, `the seam kinks (cross=${cross})`);
+});
+
+test("paintSettlementRoad: a branch junction gets a pad, sized off the trunk and painted in both tones", () => {
+  // mask 11 = E + NE + W: an opposite pair with a spur welded at the centre.
+  const { ctx, calls } = makeRecordingCtx();
+  paintSettlementRoad(ctx, roadNode([roadTile({ mask: 0b001011 })]), makeNoopPaint2DDep());
+
+  const arcs = calls.filter((c) => c.name === "arc");
+  assert.equal(arcs.length, 2, "the pad is drawn once per tone");
+  const radii = arcs.map((c) => c.args[2] as number);
+  assert.ok(Math.abs(radii[0] - (radii[1] + 1)) < 1e-9, "the pad has the same 1 px casing as the road");
+  // 5 tracks -> body 1.75 px, casing 1.0 px per side -> casing half-width 1.875
+  const casingHalf = (1.75 + 2) / 2;
+  assert.ok(radii[1] > casingHalf, `the pad must sit proud of the trunk's casing, got r=${radii[1]}`);
+  assert.ok(radii[1] < casingHalf + 1, "and not swallow the junction in a blob");
+  assert.ok(Math.abs(radii[1] - casingHalf * ROAD_JUNCTION_PAD) < 1e-9, "pad radius is ROAD_JUNCTION_PAD x the casing half-width");
+  assert.deepEqual(fillStyles(calls), [CASING, SURFACE]);
+
+  // a two-edge tile is a corner, not a junction, so it gets no pad
+  const corner = makeRecordingCtx();
+  paintSettlementRoad(corner.ctx, roadNode([roadTile({ mask: 0b000011 })]), makeNoopPaint2DDep());
+  assert.equal(corner.calls.filter((c) => c.name === "arc").length, 0);
+});
+
+test("paintSettlementRoad: the road is a pure function of the node", () => {
+  const tiles = [roadTile({ q: 3, r: 4, x: 200, y: 120, mask: 0b100111 })];
+  const first = makeRecordingCtx();
+  paintSettlementRoad(first.ctx, roadNode(tiles), makeNoopPaint2DDep());
+  const second = makeRecordingCtx();
+  paintSettlementRoad(second.ctx, roadNode(tiles), makeNoopPaint2DDep());
+  assert.deepEqual(second.calls, first.calls, "a reload or a replay redraws the identical roads");
 });
 
 test("paintSettlementRoad: an empty network emits nothing", () => {
@@ -935,12 +994,12 @@ test("paintSettlementRoad: an empty network emits nothing", () => {
   assert.equal(calls.length, 0);
 });
 
-test("paintSettlementRoad: a zero-length segment is skipped rather than stroked as a dot", () => {
+test("paintSettlementRoad: a lone edge runs to the tile centre and stops there", () => {
   const { ctx, calls } = makeRecordingCtx();
-  paintSettlementRoad(
-    ctx,
-    roadNode([{ strands: 4, from: { x: 5, y: 5 }, to: { x: 5, y: 5 } }]),
-    makeNoopPaint2DDep(),
-  );
-  assert.equal(strokesOf(calls), 0);
+  paintSettlementRoad(ctx, roadNode([roadTile({ mask: 0b000100 })]), makeNoopPaint2DDep());
+  const moves = calls.filter((c) => c.name === "moveTo").map((c) => c.args as [number, number]);
+  assert.equal(moves.length, 2);
+  // edge 2 is NW: midpoint at (-13.856, -24.0), and the stub runs to (0, 0)
+  assert.ok(Math.abs(moves[0][0] + 13.856) < 1e-3 && Math.abs(moves[0][1] + 24) < 1e-3);
+  assert.deepEqual(calls.filter((c) => c.name === "lineTo")[0].args, [0, 0]);
 });

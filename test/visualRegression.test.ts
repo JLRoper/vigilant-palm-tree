@@ -694,6 +694,19 @@ async function run(): Promise<void> {
     //    is 6x short of the 5,120 px a 0.5% budget over 1,024,000 px needs and
     //    CANNOT turn this red. The road needs a scoped capture over the band,
     //    or the engine-level road-network tests, to be measured on its own.
+    //
+    // STALE AS OF 2026-11-03 (the road study, stage B+C): the band is no longer
+    // 0.55-1.5 px. It is now a 1.55-2.50 px body under a 1.0 px-per-side casing,
+    // i.e. 3.55-4.50 px total, painted per tile from the tile's edge mask rather
+    // than as one bowed curve per segment -- and the geometry is a different
+    // shape, not just a wider one. That invalidates the 841 px figure: a road
+    // this wide can plausibly clear the 5,120 px budget on its own. So DO NOT
+    // treat a district-map diff as drift if this scene goes red on a road change;
+    // measure the road's own contribution (delete the network and diff, as the
+    // note above did) before deciding whether to re-cut the baseline, and justify
+    // the churn in the PR description if you do. The lesson the old note records
+    // still stands: this whole-canvas capture is a weak instrument for a ground
+    // layer, and road work wants the engine-level tests plus a scoped capture.
     await withPageRetry(context, "district-map", async (page) => {
       await dismissHomeAndCreateGame(page, `${GAME_NAME}-district-map`, SEED);
       await selectHero(page);
