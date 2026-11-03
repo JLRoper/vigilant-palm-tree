@@ -38,6 +38,7 @@ import { foodRequiredForPopulation } from "./economy/consumption";
 import { DEFAULT_HERO_ARCANE, DEFAULT_HERO_INTELLIGENCE } from "./combatConfig";
 import { DEFAULT_HERO_SPELL, maxManaFor } from "./combat/spells";
 import { DEFAULT_HERO_WAGONS, DEFAULT_TREASURY_WAGONS } from "./settlement/capacity";
+import { neutralGarrisonStacks } from "./settlement/neutralGarrison";
 import { demoPlatoonsForPlayer, normalizePlatoons, platoonTroopTotal, type UnitType } from "./units";
 import { MAX_PLAYERS, PLAYER_COLORS } from "./playerColors";
 import { cityViewSizeFor, foodBiasForTerrain, generateCitySpots } from "./settlement/citySpots";
@@ -565,6 +566,12 @@ function makeSettlements(
       garrisonUnpaidGold: 0,
       autoTrade: false,
       castleVariant: (Math.floor(castleRoll * 4) as CastleVariant),
+      // A neutral settlement is a capital nobody owns: before this it carried
+      // no garrison at all and a hero could simply walk in and take it for
+      // free. The table is pure (no rng draw), so seeding it cannot shift the
+      // stream above -- and `stacks` is only written for neutrals, leaving
+      // every owned seat's starting state exactly as it was.
+      ...(c.ownerId === null ? { stacks: neutralGarrisonStacks(c.level) } : {}),
       // Filled in by seedStarterBuildings below, in a second pass so the rng
       // draw order above stays exactly as it was.
       buildings: [] as BuildingDef[],

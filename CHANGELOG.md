@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.41.0] - 2026-11-03
+
+neutral capitals start garrisoned: 12 pikemen + 4 archers (16 troops, power 168) seeded on every neutral L3 capital, so walking in is refused (garrison_not_defeated) and the assault flow is the way through
+
 ## [0.40.1] - 2026-11-03
 
 fix(ui): the native prompt() freezes the renderer too — the asset-upload key comes from the app's own text-input dialog

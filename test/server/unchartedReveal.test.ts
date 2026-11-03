@@ -92,6 +92,24 @@ async function placeHeroAt(name: string, heroId: string, q: number, r: number): 
   );
 }
 
+// A neutral capital now starts with a live garrison (`NEUTRAL_CAPITAL_GARRISON`,
+// packages/engine/src/settlement/neutralGarrison.ts), and the walk-in capture is
+// gated on an EMPTIED one. This test is about the reveal delta the capture
+// makes, so it clears the garrison first -- the exact end state a won assault
+// leaves behind (`applySettlementBattleResult` writes normalizePlatoons([])).
+// The gate itself is pinned by test/engine/neutralGarrison.test.ts, not weakened
+// here.
+async function clearGarrison(name: string, settlementId: string): Promise<void> {
+  const row = await getGame(name);
+  const settlements = { ...(row.settlements as unknown as Record<string, Record<string, unknown>>) };
+  assert.ok(settlements[settlementId], `settlement ${settlementId} missing in ${name}`);
+  settlements[settlementId] = { ...settlements[settlementId], stacks: [] };
+  await pool.query(
+    `UPDATE games SET settlements = $1::jsonb, updated_at = now() WHERE name = $2`,
+    [JSON.stringify(settlements), name],
+  );
+}
+
 // The engine's reveal sorts keys numerically by (q, then r), which
 // lexicographic string sort does NOT reproduce once q has mixed signs or
 // digit lengths -- so the assertion must use the same comparator.
@@ -252,6 +270,7 @@ test("CaptureSettlement reveals the captured settlement's controlRange ring", as
     );
 
     await placeHeroAt(name, hero!.id, neutral!.q, neutral!.r);
+    await clearGarrison(name, neutral!.id);
     const res = await postCommand(name, {
       kind: "CaptureSettlement",
       actor: 0,
