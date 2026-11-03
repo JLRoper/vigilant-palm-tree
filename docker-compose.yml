@@ -17,6 +17,18 @@
 # removes exactly that pod and nothing else. The pod identity labels live in
 # docker/docker-compose.pod.yml (they must be ABSENT for the shared stack, and
 # compose cannot express a conditional label).
+#
+# The project name is PINNED. Compose otherwise derives it from the directory it
+# is invoked in, so the shared stack is project `heroes-js` from the primary
+# checkout but `stand-up-a-working-local-7ececd` from a worktree -- a different,
+# empty project whose `up api web` then collides on the hardcoded
+# container_name "game_db" ("Conflict. The container name \"/game_db\" is already
+# in use") after creating its own unused network and an empty
+# `<worktree>_game_db_data` volume. Pinning it makes `docker compose ... api web`
+# mean the same shared stack from any directory. A pod passes
+# `-p heroes-pod-<name>`, which outranks this key, so pods are unaffected.
+name: heroes-js
+
 services:
   db:
     image: postgres:16-alpine
