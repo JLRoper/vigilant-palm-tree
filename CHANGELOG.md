@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.38.9] - 2026-11-03
+
+the settlement UI tells the truth: a blocked upgrade names its cap, and the panel prints one rate
+
 ## [0.38.8] - 2026-11-03
 
 The granular per-building ledger (settlement_buildings) could not hold a district building at all: its unique key was (game_id, settlement_id, gx, gy) and a district's buildings sit on the district's own 5x5 grid, so a district building at (0,0) collided with the main city's (0,0) and no row could be written. The ledger held 11 rows for a town whose state carried 14 buildings, and a sum of its own rows came up short by exactly the districts' output -- 3.12 stone + 3.75 food/day on the playthrough card's Stone mark, against a panel aggregate of 5.88 stone / 26.95 food (playthrough round 2b, finding E8).
