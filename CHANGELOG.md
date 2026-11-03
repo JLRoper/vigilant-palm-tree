@@ -10,6 +10,27 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.44.0] - 2026-11-03
+
+a district's specialisation is derived from its own persisted buildings, and pays a scaling bonus the player can see
+
+A district had no identity: nothing in the game read a building's neighbours, so every district was the same flat pool of producers. Specialisation is now DERIVED from what a district already persists — there is no district-type field to set, no schema change and no migration. `districtSpecialisation` (`packages/engine/src/settlement/districtSpecialisation.ts`) counts a district's completed producers on ONE production chain (the chain is the resource they make, so the food chain is `farmField` + `farmhouse` + `granary`; a `mine` reads the district's own spots). A district qualifies only with at least 4 of them AND at least 60% of its buildings on that chain, and the effect then ramps with the share from 0 at the threshold to 25% at a district that is entirely one chain. The effect is paid on the chain and taken off every other chain the district produces, so the choice is real rather than free.
+
+Measured before and after, against a scratch export of `github/main` (`6cbf138` / 0.43.0), running the same scripts on both:
+- 12 seeded map seeds, 72 settlements: every settlement's buildings, districts, rates and gold are **byte-identical** — the diff is silent. A seeded district holds 2-3 distinct kinds, so the four-producer bar is what makes this structural rather than lucky.
+- A hand-built MIXED district (hut, mine, farm, house) is **unchanged** (wood 3, stone 3, food 6, gold 0); three farms + a house is **unchanged** (food 15).
+- Four farm fields go `food 19 -> 23`; four farms + a house (4 of 5) go `19 -> 21`.
+- Four farms + a level-1 `goldMine` trade `+2 food` for `-6 gold` (`gold 45 -> 39`); with a level-3 mine, `+2 food` for `-16 gold`. A district that hosts a valuable off-chain producer is a bad place to specialise — the bonus is sized against the district's own off-chain output.
+- The adjustment is computed on a chain's TOTAL rather than per producer: a level-1 producer pays 2-6 units and a fractional per-producer multiplier on those is swallowed by the payment loop's per-addition rounding (measured: per-producer scaling paid `food 22` where the headline said `19 + 25%`).
+
+`districtProductionLines` (`packages/engine/src/settlement/produceResources.ts`) is the single place a district's buildings become output, and both `produceSettlementResources` and `settlementProductionRates` walk it, so the rate a player reads cannot drift from the rate the turn pays. A district that is not specialised emits not one line more than it did before.
+
+- `packages/engine/src/settlement/districtSpecialisation.ts` (new): the derived rule, the constants (`DISTRICT_CHAIN_MIN_PRODUCERS` 4, `DISTRICT_CHAIN_MIN_SHARE` 0.6, `DISTRICT_CHAIN_MAX_EFFECT` 0.25), the scale, and `districtSpecialisationLabel` — the words and the multiplier are one source of truth.
+- `packages/engine/src/settlement/produceResources.ts`: `districtProductionLines`, and both district loops rewired onto it.
+- `src/screens/settlements/cityView/CityDesignBoxManager.ts` + `cityView.ts`: the specialisation is the City Design panel's status line — the one panel on screen for every district open — `Food district — 4 of 4 buildings on one chain: +25% food, -25% other chains here`, or `No specialisation — 3 of 4 buildings on the food chain; 4 needed`. Verified in the running client on the worktree's allocated ports against a private DB.
+- `docs/settlements.md`: the rule, the bars and the measured numbers.
+- `test/engine/districtSpecialisationProduction.test.ts` (new) imports only pre-existing exports, so it goes RED on the old engine by assertion (3 of 6 fail: `19 !== 23`, `19 !== 21`, `20 !== 23`) with the neutrality cases green on both sides; `test/engine/districtSpecialisation.test.ts` (new) pins the derivation. Unit suite: base 2758/0, this branch 2776/0.
+
 ## [0.43.0] - 2026-11-03
 
 neutral capitals start garrisoned: 12 pikemen + 4 archers (16 troops, power 168) seeded on every neutral L3 capital, so walking in is refused (garrison_not_defeated) and the assault flow is the way through

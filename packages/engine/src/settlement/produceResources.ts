@@ -9,7 +9,8 @@ import type {
 } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import { addStockClamped, settlementResourceCap, settlementTreasuryCap, treasuryHeadroom } from "./capacity";
-import { buildingFallbackGold, isDistrictBlockedByHero, producerTurnOutput } from "./producers";
+import { districtSpecialisation, districtSpecialisationScale } from "./districtSpecialisation";
+import { buildingFallbackGold, isDistrictBlockedByHero, producerTurnOutput, type ProducerResource } from "./producers";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -50,7 +51,83 @@ export interface SettlementProductionRates {
 }
 
 /**
- * The full per-turn production picture a settlement panel should display: the
+ * One production line a district contributes in a turn: the resource and the
+ * raw amount (the caller applies its own rounding, exactly as it does for the
+ * producer half).
+ */
+export interface DistrictProductionLine {
+  resource: ProducerResource;
+  amount: number;
+}
+
+/** The part of a district a production line needs. */
+export type DistrictProductionDistrict = Pick<DistrictState, "q" | "r" | "citySpots" | "buildings">;
+
+/**
+ * Every production line one district contributes, with the district's DERIVED
+ * specialisation applied (`districtSpecialisation.ts`).
+ *
+ * This is the ONE place a district's buildings are turned into output, and both
+ * loops below go through it -- the payment loop and the panel's rate map -- so
+ * the number a player reads at a district cannot drift from the number the turn
+ * pays for it, the same rule the tile and producer halves already follow.
+ *
+ * The shape matters, and it is what makes the change neutral by default:
+ *
+ *   1. EVERY producer pays exactly what it paid before, one line each, in the
+ *      same order. A district that is not specialised (a MIXED district, and
+ *      every district the game seeds -- two or three distinct kinds, one short
+ *      of `DISTRICT_CHAIN_MIN_PRODUCERS`) stops here with not one line added,
+ *      so its numbers are the pre-specialisation numbers byte for byte.
+ *   2. A specialised district then gets ONE ADJUSTMENT LINE PER RESOURCE it
+ *      has producers on: `effect` of that resource's output added when it is
+ *      the district's chain, taken away when it is not. The adjustment is
+ *      computed on the chain's own TOTAL rather than on each producer, because
+ *      a level-1 producer pays 2-6 units and a fractional per-producer
+ *      multiplier on those is swallowed whole by the loop's per-addition
+ *      rounding -- a 4-farm district at full specialisation paid 22 where the
+ *      headline said 19 + 25%. Aggregated, the same district pays 19 + 4.
+ */
+export function districtProductionLines(
+  district: DistrictProductionDistrict,
+  seed: number,
+): DistrictProductionLine[] {
+  const lines: DistrictProductionLine[] = [];
+  const rawByResource = new Map<ProducerResource, number>();
+  for (const b of district.buildings) {
+    const output = producerTurnOutput(
+      b,
+      { q: district.q, r: district.r, citySpots: district.citySpots },
+      seed,
+    );
+    if (!output) {
+      // The market and the other flat-gold buildings ride the same lines so a
+      // caller has one list to walk. Specialisation never touches them: it
+      // scales chains, and these are not producers.
+      const fallbackGold = buildingFallbackGold(b);
+      if (fallbackGold > 0) lines.push({ resource: "gold", amount: fallbackGold });
+      continue;
+    }
+    lines.push({ resource: output.resource, amount: output.amount });
+    rawByResource.set(output.resource, (rawByResource.get(output.resource) ?? 0) + output.amount);
+  }
+
+  const spec = districtSpecialisation(district);
+  if (!spec || spec.effect === 0) return lines;
+
+  // Insertion order of `rawByResource` is producer order, which is the order
+  // the buildings were persisted in -- so the adjustment lines are as
+  // deterministic as the producer lines they follow.
+  for (const [resource, raw] of rawByResource) {
+    const scale = districtSpecialisationScale(spec, resource);
+    if (scale === 1) continue;
+    lines.push({ resource, amount: round2(raw * (scale - 1)) });
+  }
+  return lines;
+}
+
+/**
+ * The full per-turn production picture a settlement panel should display:
  * warehouseRates() tile half merged with the producerTurnOutput() building
  * half per warehouse resource (in-construction buildings contribute nothing,
  * the same rule the production loop itself applies). The plan's U1: a
@@ -101,17 +178,11 @@ export function settlementProductionRates(
   }
   for (const d of Object.values(settlement.districts ?? {})) {
     if (isDistrictBlockedByHero(settlement.ownerId ?? null, d.q, d.r, heroes)) continue;
-    for (const b of d.buildings) {
-      const output = producerTurnOutput(b, { q: d.q, r: d.r, citySpots: d.citySpots }, seed);
-      if (!output) {
-        const fallbackGold = buildingFallbackGold(b);
-        if (fallbackGold > 0) gold += fallbackGold;
-        continue;
-      }
-      if (output.resource === "gold") {
-        gold += output.amount;
+    for (const line of districtProductionLines(d, seed)) {
+      if (line.resource === "gold") {
+        gold += line.amount;
       } else {
-        totals.set(output.resource, (totals.get(output.resource) ?? 0) + Math.round(output.amount));
+        totals.set(line.resource, (totals.get(line.resource) ?? 0) + Math.round(line.amount));
       }
     }
   }
@@ -161,21 +232,15 @@ export function produceSettlementResources(
     }
     for (const d of Object.values(s.districts ?? {})) {
       if (isDistrictBlockedByHero(s.ownerId, d.q, d.r, heroes)) continue;
-      for (const b of d.buildings) {
-        const output = producerTurnOutput(b, { q: d.q, r: d.r, citySpots: d.citySpots }, seed);
-        if (!output) {
-          const fallbackGold = buildingFallbackGold(b);
-          if (fallbackGold > 0) gold += fallbackGold;
-          continue;
-        }
-        if (output.resource === "gold") {
-          gold += output.amount;
+      for (const line of districtProductionLines(d, seed)) {
+        if (line.resource === "gold") {
+          gold += line.amount;
         } else {
-          newWarehouse[output.resource] = Math.round(
+          newWarehouse[line.resource] = Math.round(
             addStockClamped(
-              newWarehouse[output.resource] ?? 0,
-              output.amount,
-              caps[output.resource],
+              newWarehouse[line.resource] ?? 0,
+              line.amount,
+              caps[line.resource],
             ),
           );
         }

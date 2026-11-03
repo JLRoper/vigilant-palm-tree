@@ -9,7 +9,7 @@ import type { ResourceType } from "../../../map/resourceTiles";
 import type { SpriteProvider } from "../../../render/assets";
 import type { BuildingDef, BuildingKind, FactionId, GameMode } from "@heroes/contracts";
 import { buildingFootprint, coversCell } from "../../../core/cityGrid";
-import { districtKey, hasLegacyStaffing, starterCityOnOpen } from "@heroes/engine";
+import { districtSpecialisationLabel, districtKey, hasLegacyStaffing, starterCityOnOpen } from "@heroes/engine";
 import {
   assignedWorkersExplicit,
   autoStaffedCount,
@@ -362,7 +362,7 @@ export class CityView {
       onWorkforce: () => this.openWorkforcePanel?.(),
       onRecruit: () => this.openRecruitmentPanel?.(),
       onBack: () => this.handleClose(),
-    }, this.getFloatingPanelRects);
+    }, this.getFloatingPanelRects, this.districtFocusLabel());
 
     window.addEventListener("keydown", this.onKeyDown);
 
@@ -649,6 +649,23 @@ export class CityView {
     return this.openDistrict
       ? (live.districts?.[districtKey(this.openDistrict.q, this.openDistrict.r)]?.buildings ?? [])
       : live.buildings;
+  }
+
+  /**
+   * The open district's DERIVED specialisation as one line, or null for the
+   * main settlement (which has none -- specialisation is a district's own
+   * identity). Computed from the LIVE district's own persisted buildings, the
+   * same input `districtProductionLines` scales the district's output by, so
+   * the line on screen is the rule the turn pays. Shown as the City Design
+   * panel's status line -- the one panel that is on screen for every district
+   * open.
+   */
+  private districtFocusLabel(): string | null {
+    if (!this.openDistrict) return null;
+    const live = this.getSettlement();
+    const district = live?.districts?.[districtKey(this.openDistrict.q, this.openDistrict.r)];
+    if (!district) return null;
+    return districtSpecialisationLabel(district);
   }
 
   /** Cart buildings for the scene with live `workers` merged in: syncCartBuildings does not copy staffing fields, and the person clusters must read live counts. */
@@ -1205,6 +1222,12 @@ export class CityView {
 
   private updateBuildButton(): void {
     this.designBox.setBuildPaletteOpen(this.placer.isPaletteOpen());
+    // The panel's status line is chrome too: every call site of this method is
+    // a moment the city view's own facts may have moved (a placement committed,
+    // a palette opened, the view reopened), and a district's derived
+    // specialisation is exactly such a fact -- placing the fourth farm field is
+    // what turns the line from "4 needed" into "+25% food".
+    this.designBox.setSpecialisation(this.districtFocusLabel());
   }
 
   private closing = false;

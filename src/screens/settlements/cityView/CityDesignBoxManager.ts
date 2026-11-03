@@ -1,4 +1,4 @@
-import { FloatingPanel, styleButton, createPanel } from "@screens/shared/panel";
+import { FloatingPanel, styleButton, createPanel, panelTheme } from "@screens/shared/panel";
 import { loadPanelGeometry } from "@screens/shared/panelLayout";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import {
@@ -30,8 +30,9 @@ export interface CityDesignBoxCallbacks {
 export class CityDesignBoxManager {
   private menu: FloatingPanel | null = null;
   private buildBtn: HTMLButtonElement | null = null;
+  private specialisationLine: HTMLDivElement | null = null;
 
-  show(callbacks: CityDesignBoxCallbacks, panelRects?: FloatingPanelRectProvider): void {
+  show(callbacks: CityDesignBoxCallbacks, panelRects?: FloatingPanelRectProvider, specialisation?: string | null): void {
     this.hide();
 
     const stored = loadPanelGeometry(PANEL_GEOMETRY_KEY);
@@ -53,6 +54,13 @@ export class CityDesignBoxManager {
     });
     this.menu = menu;
 
+    // The specialisation line goes FIRST, above the buttons: it is what the
+    // player is deciding when they use them. `setSpecialisation` owns its
+    // contents, and it is created on every show so a main-city open (no
+    // specialisation) never carries a stale district's line.
+    this.specialisationLine = null;
+    this.setSpecialisation(specialisation ?? null);
+
     this.buildBtn = this.addButton(menu, "⚒ Build", "Open the building palette (b)", callbacks.onBuild);
     this.addButton(menu, "♟ Workforce", "Open the worker assignment panel (w)", callbacks.onWorkforce);
     this.addButton(menu, "⚔ Recruit", "Open the recruitment panel (r)", callbacks.onRecruit);
@@ -62,6 +70,40 @@ export class CityDesignBoxManager {
     // (the City Design box is the one panel that exists on every city open, so
     // its default must never bury the others). A remembered position wins.
     if (!stored) this.placeFirstOpen(menu, panelRects);
+  }
+
+  /**
+   * The city's own status line: a district's DERIVED specialisation, or null
+   * for the main city (which has none). The text comes from the engine
+   * (`districtSpecialisationLabel`), so the words and the multiplier are one
+   * source of truth. Idempotent and safe before `show` -- nothing happens until
+   * there is a panel to write into.
+   */
+  setSpecialisation(text: string | null): void {
+    if (!this.menu) return;
+    if (!text) {
+      this.specialisationLine?.remove();
+      this.specialisationLine = null;
+      return;
+    }
+    if (!this.specialisationLine) {
+      const line = document.createElement("div");
+      line.style.fontFamily = panelTheme.font;
+      line.style.fontSize = "11px";
+      line.style.lineHeight = "1.35";
+      line.style.color = panelTheme.panel.color;
+      line.style.opacity = "0.85";
+      line.style.margin = "0 0 6px";
+      line.style.whiteSpace = "normal";
+      this.specialisationLine = line;
+      // During `show` the buttons do not exist yet, so appending IS "above
+      // them"; a line that first appears later (a district gaining its fourth
+      // producer) has to be inserted ahead of the first button instead.
+      if (this.buildBtn) this.buildBtn.parentElement?.insertBefore(line, this.buildBtn);
+      else this.menu.appendContent(line);
+    }
+    this.specialisationLine.textContent = text;
+    this.specialisationLine.title = text;
   }
 
   private addButton(
