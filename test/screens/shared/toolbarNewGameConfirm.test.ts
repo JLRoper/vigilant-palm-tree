@@ -18,7 +18,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
-import { installDom, restoreDom, findButton, findAll, textOf, settle, MockElement } from "../../helpers/mockDom";
+import { installDom, restoreDom, findButton, findAll, settle, MockElement } from "../../helpers/mockDom";
 import { panelManagerSizeForTest, resetPanelManagerForTest } from "../../../src/screens/shared/panelManager";
 import type { ToolbarState, ToolbarCallbacks } from "../../../src/screens/shared/toolbar";
 
