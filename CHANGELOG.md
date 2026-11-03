@@ -10,6 +10,16 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.42.2] - 2026-11-03
+
+The multiplayer lobby's seat chip row reaches the wire: its choice rides `POST /games` as an explicit seat count, the seats no human fills are AI combatant seats, and a lobby's AI seats no longer block the start.
+
+- `src/screens/multiplayer/multiplayerLobby.ts`: the Create Lobby handler passed only the human count to `api.createGame`, and `POST /games` builds the lobby's seats from it (`const seats = explicitSeats ?? (humanCount !== null ? humanCount : null);`), so the chip row's own choice was discarded -- measured live in a foregrounded tab: 4 seats with 2 human players produced `lobby.seats 2`, which is why the chip had been hedged to "Maximum seats". The chip's count now rides the create request as `lobby.seats`, `enemySlots` is derived from the seats the humans do not fill, and the chip reads "Number of seats (2-4)". The human count input keeps its meaning (1 to the number of seats) and the home Create Game screen's own "Number of human players" chips are untouched.
+- `server/routes.ts`: the start gate required a claim on every seat in `[0, lobby.seats)`, so a 4-seat lobby with 2 humans could never start (409 `seats_unclaimed`, `missing [2,3]`). It now skips a seat whose player is an AI combatant -- the same fact `availableSeats` already reads off the row -- so the lobby starts on its human claims alone, while an unclaimed HUMAN seat still blocks it.
+- `src/io/api.ts`: `createGame` gained the optional explicit seat count; a caller that passes none sends a byte-identical body, so the home, starter and SessionManager paths are unchanged.
+- Measured before and after through the real client, on a private DB (`PGDATABASE=game_poc_mpseats`) over the worktree's own allocated ports: before, the create body was `{"humanSlots":2,"enemySlots":0}` with no seat count and the row read `seats=2, players [player, player]`; after, the 4-and-2 pick sends `{"humanSlots":2,"enemySlots":2,"lobby":{"seats":4}}` and the row reads `seats=4, humanSlots=2, players [player, player, ai, ai]`, while the 2-and-2 pick is unchanged (`seats=2`, no AI seats). The 4-seat lobby starts once its two human seats are claimed, and its grid names the two AI seats instead of offering them.
+- Pinned by `test/screens/multiplayer/lobbySeatCount.test.ts` (drives the real screen and reads the create request body the server sees -- red before, green after) and by the explicit-seat-count case added to `test/multiplayer.smoke.ts` (red at the base with exactly that 409, green with the gate fix); `docs/multiplayer.md` and `docs/architecture.md` are updated where they said `seats` stays = humanSlots and that the LAN lobby path sends no `enemySlots`.
+
 ## [0.42.1] - 2026-11-03
 
 the type-gate baseline is exact: the 7 phantom settingsMenu errors are pruned, a stale entry now fails the gate, and --write-baseline refuses to raise a count or add an entry
