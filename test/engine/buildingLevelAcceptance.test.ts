@@ -41,14 +41,14 @@ const NEUTRAL: BuildingKind[] = [
 ];
 
 /** Each faction's own entries (the registry's `faction` field), including its tier-1 troop building. */
-const FACTION_KINDS: Record<FactionId, BuildingKind[]> = {
+const FACTION_KINDS: Record<Exclude<FactionId, "neutral">, BuildingKind[]> = {
   human: ["mageGuild", "barracks", "farmhouse", "archeryRange", "stables", "huntingLodge", "eyrie"],
   ashen: ["crypt", "ossuary", "wraithBarrows", "spireOfAsh", "blackChapel", "dragonBoneyard"],
   ironmark: ["forgeHall", "gunnersRedoubt", "golemFoundry", "deepAnvil", "delversHall", "hearthTemple", "ramPens"],
   verdant: ["groveSanctum", "warrenLodge", "sylvanStables", "worldrootGrove", "seedlingGrove", "druidCircle"],
 };
 
-const FACTIONS = Object.keys(FACTION_KINDS) as FactionId[];
+const FACTIONS = Object.keys(FACTION_KINDS) as Array<Exclude<FactionId, "neutral">>;
 const ALL_KINDS: BuildingKind[] = [...NEUTRAL, ...FACTIONS.flatMap((f) => FACTION_KINDS[f])];
 
 /** Gold >= 400 and 6 build days: the "grand" row a player could not tell apart from a house. */
@@ -94,7 +94,7 @@ test("the recorded union is the registry: 44 entries, 18 neutral plus each facti
 test("before the rule a level-1 keep could place its whole faction-legal set, grand row included", () => {
   // The pre-rule surface: the faction rule only, which is why these counts are the
   // measurement and not a tautology -- 18 neutral + the seat's own entries.
-  const before = (f: FactionId) => 18 + FACTION_KINDS[f].length;
+  const before = (f: Exclude<FactionId, "neutral">): number => 18 + FACTION_KINDS[f].length;
   assert.deepEqual(FACTIONS.map(before), [25, 24, 25, 24]);
 
   // After the gate, a level-1 keep keeps the 12 neutral economy/starter kinds it
