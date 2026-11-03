@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.43.0] - 2026-11-03
+
+neutral capitals start garrisoned: 12 pikemen + 4 archers (16 troops, power 168) seeded on every neutral L3 capital, so walking in is refused (garrison_not_defeated) and the assault flow is the way through
+
 ## [0.42.2] - 2026-11-03
 
 - **`test:cityview` and `test:logpanel` stop depending on the load-path substitution #307 removed, and bring their own game instead.** Both suites were green on 0.39.8 only because the client started a `starter-*` game for them: a boot on an empty `localStorage` cache silently substituted one (`GameSessionManager.initBackend`), and the suite drove whatever that put on screen. #307 (`dfc6a64`, "never substitute a starter game for a failed or empty load") made that conditional on the SERVER's list being empty — correct for a player, fatal for a suite that never opened a game itself. Neither suite is in #307's file set; the runs are the evidence, all on one database that already held a game (which is every real worktree DB):
