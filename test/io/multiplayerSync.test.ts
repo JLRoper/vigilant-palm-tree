@@ -590,16 +590,21 @@ test("a resync emits mp:presenceUpdated from the row's lobby presence", async ()
 // on. The fake above is inert in every earlier test: start() opens a
 // stream per test, but nothing dispatches into it.
 
-test("start() opens the stream at the current cursor; stop() closes it", async () => {
+test("start() opens the stream only once the cursor is seeded; stop() closes it", async () => {
   const server: FakeServer = { game: makeGameRow("gs1", { lastEventId: 7 }), events: [], calls: [] };
   installFetch(server);
   const sync = new MultiplayerSync();
 
+  // An unseeded start has no valid `after`: the stream contract makes
+  // after=0 mean "replay the whole log", which is how a settled battle got
+  // re-opened (F2's client half). The stream is deferred until the initial
+  // resync seeds the cursor, then opens THERE -- never at 0.
   sync.start("gs1");
-  const first = FakeEventSource.latest();
-  assert.equal(first.url, "/api/games/gs1/events/stream?after=0", "unseeded start streams from 0");
+  assert.equal(FakeEventSource.created.length, 0, "an unseeded start subscribes to no backlog");
   await sync.pollOnce();
   assert.equal(sync.getCursor(), 7);
+  const first = FakeEventSource.latest();
+  assert.equal(first.url, "/api/games/gs1/events/stream?after=7", "the deferred stream opens at the seeded cursor");
   sync.stop();
   assert.equal(first.closed, true, "stop() closes the stream");
 
@@ -616,11 +621,12 @@ test("restarting into a different game closes the old stream first", async () =>
   installFetch(server);
   const sync = new MultiplayerSync();
 
-  sync.start("gs2a");
+  sync.start("gs2a", { cursor: 1 });
   const first = FakeEventSource.latest();
-  sync.start("gs2b");
+  assert.equal(first.url, "/api/games/gs2a/events/stream?after=1");
+  sync.start("gs2b", { cursor: 2 });
   assert.equal(first.closed, true, "the old game's stream is closed on re-start");
-  assert.equal(FakeEventSource.latest().url, "/api/games/gs2b/events/stream?after=0");
+  assert.equal(FakeEventSource.latest().url, "/api/games/gs2b/events/stream?after=2");
   sync.stop();
 });
 
@@ -1315,5 +1321,74 @@ test("own-seat battle rows still emit mp:battleOutcome (the direct-response copy
 
   assert.equal(emissions.length, 1, "emission is unconditional; the consumer skips own-actor events");
   assert.equal(emissions[0].actorSeat, 0);
+  sync.stop();
+});
+
+// ---------------------------------------------------------------------------
+// F2 (playthrough round 2), the CLIENT half. The server half refuses the second
+// resolve; this is the surface that must never ask for it: a load whose payload
+// carried no last_event_id (GameSessionManager.loadGame forwards the list
+// route's row, and only GET /games/:name returns last_event_id) left the cursor
+// unseeded, and an unseeded start opened the event stream at after=0 -- asking
+// the server to replay the WHOLE game_events log as live deltas. A historical
+// BattleOffered then flipped the client into a battle the server had already
+// settled, and the BattleResolved that would have closed it was dropped (it
+// answers "resync", and the bridge refuses a snapshot while the phase is
+// blocked), so the modal stayed up and Quick Resolve POSTed a second time.
+// Acceptance: the client keeps the STORED phase, subscribes to no backlog, and
+// a re-delivered row cannot resurrect the settled battle.
+// ---------------------------------------------------------------------------
+
+test("a load with no cursor never replays the event backlog, so a settled battle cannot re-open (F2)", async () => {
+  // No pendingBattle marker on the row: the battle is settled, so hydration
+  // derives the STORED phase -- PLAYER_TURN for the human seat, not BATTLE.
+  const offered: EngineEvent = { type: "BattleOffered", actor: 1, attackerId: "h1", defenderId: "h0" };
+  const server: FakeServer = {
+    game: makeGameRow("f2a", {
+      lastEventId: 45,
+      heroes: [makeHero("h0", 0, 2, 2), makeHero("h1", 1, 3, 2)],
+    }),
+    events: [],
+    calls: [],
+  };
+  installFetch(server);
+  const { hydrateGameState } = await import("@heroes/engine");
+  const state = hydrateGameState(server.game);
+  assert.equal(state.phase.kind, "PLAYER_TURN", "the stored phase, not a resumed BATTLE");
+
+  const sync = new MultiplayerSync();
+  sync.start("f2a", { state });
+
+  assert.equal(
+    FakeEventSource.created.length,
+    0,
+    "an unseeded load subscribes to nothing: after=0 would replay the log",
+  );
+
+  await sync.pollOnce();
+  assert.equal(sync.getCursor(), 45, "the initial resync seeds the cursor from the same GET");
+  const es = FakeEventSource.latest();
+  assert.equal(
+    es.url,
+    "/api/games/f2a/events/stream?after=45",
+    "the stream opens at the snapshot cursor, not at the start of the log",
+  );
+
+  const applied: EngineEvent[][] = [];
+  bus.on("mp:eventsApplied", (ev: { events: EngineEvent[] }) => applied.push(ev.events));
+
+  // A row at or below the cursor is already baked into that snapshot. Even if a
+  // transport re-delivers it, it must not flip the phase.
+  es.dispatchLog(row(45, offered, 1), "45");
+  await tick();
+  assert.deepEqual(applied, [], "a settled row is never re-applied");
+  assert.equal(sync.getState()?.phase.kind, "PLAYER_TURN", "the settled battle does not re-open");
+
+  // A genuinely new offer still opens the battle -- that is what the marker is
+  // for, and it is the half the fix must not break.
+  es.dispatchLog(row(46, offered, 1), "46");
+  await tick();
+  assert.deepEqual(applied, [[offered]]);
+  assert.equal(sync.getState()?.phase.kind, "BATTLE");
   sync.stop();
 });
