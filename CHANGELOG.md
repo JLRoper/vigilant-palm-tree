@@ -10,7 +10,7 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.38.3] - 2026-11-03
+## [0.38.5] - 2026-11-03
 
 District-road round-2 feedback and fidelity: each refused district entry now states its reason, a shipyard harbour gets its pier, and the workforce width reading is measured and decided (not faked).
 
@@ -19,6 +19,14 @@ District-road round-2 feedback and fidelity: each refused district entry now sta
 - **F2 (cosmetic, decided) -- the workforce reading, measured.** The road's width is the reading and it follows the district's actual staffing (15% -> 3 tracks -> 0.70px; 100% -> 20 -> 1.50px), but the 1-vs-20-track delta is 0.90px on a 55.4px hex and every district of a game nobody has staffed is *genuinely* at 100% (`applyPlaceBuildings` places `workers: undefined`, the legacy auto-staffed max), so a busy trunk and a light lane render identically. The mapping is left as the carrier rather than varied by anything the data does not carry; the measurement and the legible-carrier / auto-100% question are recorded in `docs/settlements.md` and filed as a round-3 finding.
 
 The road behaviour the round-2 card proved correct is unchanged: per-terrain drawing, opposite bowing, sprite scaling, one paint per segment, surviving an End Turn and a reload, zero movement cost, and neither blocked nor overwritten by building placement.
+
+## [0.38.4] - 2026-11-03
+
+fix(logistics): the trade-routes Accept all is disabled when its only route cannot be accepted
+
+## [0.38.3] - 2026-11-03
+
+The town hall's level 2 and 3 art is re-generated onto the iso grid, so `test:towncenter` goes green (25/25, was 15/25). The old L2/L3 sprites still carried a 30° lot, a 107-row / 70-row transparent bottom pad and an 81px / 74px soil plinth, so upgrading a settlement brought the raised platform and the floating base straight back; both levels now measure the level-1 art's own convention — edge slope 0.523 / 0.521, bottom pad 0 rows, ground diamond 100% of the canvas, ≤12px of silhouette below the ground plane, one alpha component each. The regenerated anchor table follows the art (`pixel.townHall.2` 9→0, `pixel.townHall.3` 6→0): a grid-exact lot needs no bottom-pad compensation, exactly as `townHall.1` already measured 0. Eight candidates from four image-generation models, with the measured critique and the pick, are recorded in `design/building-pixel-townhall-l2-l3-wave/`; no game code changed, so patch.
 
 ## [0.38.2] - 2026-11-03
 
