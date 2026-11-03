@@ -10,7 +10,7 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.38.5] - 2026-11-03
+## [0.38.6] - 2026-11-03
 
 District-road round-2 feedback and fidelity: each refused district entry now states its reason, a shipyard harbour gets its pier, and the workforce width reading is measured and decided (not faked).
 
@@ -19,6 +19,10 @@ District-road round-2 feedback and fidelity: each refused district entry now sta
 - **F2 (cosmetic, decided) -- the workforce reading, measured.** The road's width is the reading and it follows the district's actual staffing (15% -> 3 tracks -> 0.70px; 100% -> 20 -> 1.50px), but the 1-vs-20-track delta is 0.90px on a 55.4px hex and every district of a game nobody has staffed is *genuinely* at 100% (`applyPlaceBuildings` places `workers: undefined`, the legacy auto-staffed max), so a busy trunk and a light lane render identically. The mapping is left as the carrier rather than varied by anything the data does not carry; the measurement and the legible-carrier / auto-100% question are recorded in `docs/settlements.md` and filed as a round-3 finding.
 
 The road behaviour the round-2 card proved correct is unchanged: per-terrain drawing, opposite bowing, sprite scaling, one paint per segment, surviving an End Turn and a reload, zero movement cost, and neither blocked nor overwritten by building placement.
+
+## [0.38.5] - 2026-11-03
+
+- **fix(client): the client's settlement mirror now follows a capture.** `GameStateManager.rebuildSettlementsFromState()` was wired only to wholesale state replacement (boot, load, `state:committed`), and a `TurnController` command deliberately emits no `state:committed` (it would snap every hero) — so after a walk-in capture the `Castle` wrappers every render/UI path reads kept the pre-capture owner, along with every other mirrored field (buildings, auto-trade, level). The wrappers are now reconciled on the per-frame state-identity diff too, in place via `Castle.syncFromState`, because `EntityMirror` and the vision/territory caches alias those instances. Playthrough round 2, F4.
 
 ## [0.38.4] - 2026-11-03
 
