@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.49.0] - 2026-11-03
+
+district roads: a per-tile road GRAPH with welded junctions, at a legible width (was sub-pixel edges)
+
 ## [0.48.1] - 2026-11-03
 
 The Logistics window's cargo buttons told the wrong story about why they were dead — and the resource-pickup suite was not part of `npm run test:all` at all.
