@@ -10,6 +10,11 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.5] - 2026-11-03
+
+- Logistics: the wagon steppers no longer stay pressable when the engine can only refuse. The route row's +1 is off with an empty unassigned-wagon pool, its −1 is off on a one-wagon route, and the hero's cargo/treasury −1 is off for a slot the hero holds nothing in — each carrying the panel's own sentence for that refusal.
+- Engine: the one-wagon route floor is one exported constant (`MIN_TRADE_ROUTE_WAGONS`), read by both the clamp and the client's gate.
+
 ## [0.39.4] - 2026-11-03
 
 F3 (the camera could lose the map): there was no pan clamp, so repeated drags walked it arbitrarily far off the map and the renderer -- which clamps the tiles it asks about to the map's bounds -- painted nothing. Measured on a 40x30 map at zoom 1 in a 1280x800 viewport: forty `pan(-400,-400)` drags took `mapTilesOnScreen` from 369 to 0 with the camera parked at (-16000,-16000), a black viewport whose only exit was a minimap click. `Camera.clampToMap` now keeps the map's world-pixel extent (measured from the four corner hexes) overlapping the viewport, compared against `viewport/zoom` so it holds at every zoom level, and centres a map that fits entirely. Every surface that moves the camera routes through `AdventureView.clampCamera`: the drag pan, the minimap frame drag, the wheel zoom, `centerOn` (minimap click, load centring, resize, focus-hero/settlement) and the zoom-out setting callback.
