@@ -232,7 +232,7 @@ export function evaluateTradeNeeds(
         s.id,
         { kind: "gold" },
         goldNeed,
-        `Treasury short: ${Math.floor(s.gold)}g against ${Math.ceil(garrisonGoldBurn(s, unitTypes))}g/wk burn`,
+        `Treasury short by ${goldNeed}g — ${Math.floor(s.gold)}g held, ${Math.ceil(garrisonGoldBurn(s, unitTypes))}g/wk burn`,
       );
     }
   }
@@ -245,7 +245,7 @@ export function evaluateTradeNeeds(
         null,
         { kind: "resource", resource: "food" },
         needs.food,
-        `Larder short: ${Math.floor(hero.resources?.food ?? 0)} food for a ${Math.ceil(needs.costFood)} food/wk army`,
+        `Larder short by ${needs.food} food — ${Math.floor(hero.resources?.food ?? 0)} in the larder, ${Math.ceil(needs.costFood)} food/wk army`,
       );
     }
     if (needs.gold !== null) {
@@ -254,7 +254,7 @@ export function evaluateTradeNeeds(
         null,
         { kind: "gold" },
         needs.gold,
-        `Purse short: ${Math.floor(hero.gold)}g for a ${Math.ceil(needs.costGold)}g/wk army`,
+        `Purse short by ${needs.gold}g — ${Math.floor(hero.gold)}g in the purse, ${Math.ceil(needs.costGold)}g/wk army`,
       );
     }
   }

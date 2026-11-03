@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { BuildingDef, SettlementState } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
-import { buildingUpkeepRequired, foodRequired, producerTurnOutput } from "@heroes/engine";
+import { buildingUpkeepRequired, foodRequired, producerTurnOutput, produceSettlementResources } from "@heroes/engine";
 import {
   dailyRateTitle,
   foodBalanceTitle,
@@ -113,14 +113,48 @@ test("production is the production loop's own number: tile rates plus every prod
   const { rows } = settlementDailyRates(s, SEED);
   const wood = rows.find((r) => r.resource === "wood")!;
 
+  // E1: the loop adds the tile half once and each producer separately, rounding
+  // the STOCK after every addition -- so the paid figure is the tile total
+  // rounded, plus the rounded output of each producer, never the rounded sum.
   let expected = 10;
   for (const b of s.buildings) {
     const output = producerTurnOutput(b, s, SEED);
     assert.equal(output?.resource, "wood", "fixture premise: a woodcutterHut produces wood");
-    expected += output?.amount ?? 0;
+    expected += Math.round(output?.amount ?? 0);
   }
-  assert.equal(wood.produced, Math.round(expected * 100) / 100);
+  assert.equal(wood.produced, expected);
   assert.ok(wood.produced > 10, "a producer must add to the tile rate, not replace it");
+});
+
+// E1 (playthrough round 2b): the panel's per-day rate must be the rate the turn
+// PAYS. The card measured the Gold hold's rows against the store: panel
+// -2.89/day of wood, store -2/day, and the same ~1-unit gap on stone and food
+// (panel +15.72/day, store +15). The cause was arithmetic, not intent -- the
+// panel summed raw producer fractions and rounded the total while the payment
+// loop rounds each addition -- so this pins the panel to the loop's own output
+// instead of a re-derived expectation that could drift with it.
+test("E1: the rate row is the delta one turn of the production loop actually pays", () => {
+  const s = settlement({
+    population: 500,
+    resourceRates: { wood: 7.11, stone: 24.5, iron: 2.4, food: 20.72 },
+    buildings: [building("townHall"), building("woodcutterHut", 1, 0, 0), building("farmField", 1, 2, 0)],
+  });
+  const daily = settlementDailyRates(s, SEED);
+  const before = { ...s.warehouse };
+  const after = produceSettlementResources({ s0: s }, SEED, []).s0.warehouse;
+
+  for (const row of daily.rows) {
+    assert.equal(
+      row.produced,
+      after[row.resource] - before[row.resource],
+      `${row.resource}: the panel's produced figure is what one turn of produceSettlementResources adds`,
+    );
+  }
+  // The tile halves and the producers round on their own, and the panel reports
+  // that arithmetic rather than the sum: 7.11/day of tile wood is 7/day in the
+  // store, and the hut's own fraction rounds separately.
+  assert.equal(daily.rows.find((r) => r.resource === "wood")!.produced, Math.round(7.11) + Math.round(producerTurnOutput(s.buildings[1], s, SEED)!.amount));
+  assert.equal(daily.rows.find((r) => r.resource === "iron")!.produced, 2, "2.4/day of tile iron is 2/day in the store");
 });
 
 test("a building under construction produces nothing, exactly as the turn loop pays nothing", () => {

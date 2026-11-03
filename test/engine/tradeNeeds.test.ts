@@ -309,3 +309,49 @@ test("a seat with no player row or no shortages yields no recommendations", () =
   });
   assert.deepEqual(evaluateTradeNeeds(allFed, 0, { peasant }), []);
 });
+
+// F6 (playthrough round 4): every "short" sentence printed the live AMOUNT
+// (the larder's stock, the purse's gold, the treasury's gold) where it says
+// "short", so the one sentence that exists to explain the recommendation told
+// the player there was no shortfall ("Larder short: 0 food"). The number after
+// "short by" is the shortfall now, and the stock it was printing moved into the
+// parenthetical, which says what it is.
+test("F6: a 'short' sentence names the SHORTFALL first, and the live stock as a labelled afterthought", () => {
+  const shortHero = makeHero("h0", 0, 2, 2, {
+    troops: 5,
+    stacks: stack("peasant", 5),
+    gold: 2,
+    resources: { wood: 0, stone: 0, iron: 0, arcane: 0, food: 3 },
+  });
+  const state = makeState({
+    players: [makePlayer(0, "player", ["h0"], ["s-rich"], { wagonsOwned: 4, wagonsUnassigned: 4 })],
+    heroes: [shortHero, makeHero("h1", 1, 18, 4)],
+    settlements: [settlement("s-rich", 0, 20, 20, { food: 500, gold: 1000 })],
+    day: 1,
+  });
+  const heroRecs = evaluateTradeNeeds(state, 0, { peasant });
+  assert.equal(heroRecs.length, 2, "one recommendation per short resource");
+  assert.equal(
+    heroRecs[0].reason,
+    "Larder short by 2 food — 3 in the larder, 5 food/wk army",
+    "5 food/wk bill against a 3-food larder: the shortfall is 2, not the 3 held",
+  );
+  assert.equal(heroRecs[1].reason, "Purse short by 3g — 2g in the purse, 5g/wk army");
+  for (const rec of heroRecs) {
+    assert.ok(!rec.reason.includes("short: "), `"short:" prints the stock, which is what the finding is about: ${rec.reason}`);
+  }
+
+  // The settlement half of the same class: a garrisoned, empty treasury.
+  const burning = makeState({
+    players: [makePlayer(0, "player", [], ["s-burn"], { wagonsOwned: 4, wagonsUnassigned: 4 })],
+    heroes: [],
+    settlements: [
+      settlement("s-burn", 0, 2, 2, { gold: 0, stacks: stack("peasant", 5) }),
+      settlement("s-rich", 0, 20, 20, { food: 500, gold: 1000 }),
+    ],
+    day: 1,
+  });
+  const goldRec = evaluateTradeNeeds(burning, 0, { peasant }).find((rec) => rec.to.id === "s-burn");
+  assert.ok(goldRec, "the garrisoned empty treasury is recommended");
+  assert.equal(goldRec.reason, "Treasury short by 5g — 0g held, 5g/wk burn");
+});

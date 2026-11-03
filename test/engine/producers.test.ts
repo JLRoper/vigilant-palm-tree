@@ -285,7 +285,7 @@ test("market fallback gold scales with explicit staffing and only for the market
   assert.equal(third.gold, 113, "1 of 3 workers scales 40 → 13.33, and the treasury write rounds 113.33 → 113");
   const [idle] = Object.values(produceSettlementResources({ s0: market(0) }, 7));
   assert.equal(idle.gold, 100, "zero staff shuts the market down");
-  assert.equal(settlementProductionRates(market(1), 7).goldPerTurn, 13.33);
+  assert.equal(settlementProductionRates(market(1), 7).goldPerTurn, 13, "E1: the treasury gained 13 on that fixture (100 -> 113), and the rate row states what the turn pays");
   const staffedHouse = settlementProductionRates(
     makeSettlement("s0", 0, 2, 2, { buildings: [{ gx: 0, gy: 0, kind: "house", level: 1, workers: 1 }] }),
     7,
