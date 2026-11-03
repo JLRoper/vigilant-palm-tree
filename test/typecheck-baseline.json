@@ -1,0 +1,618 @@
+{
+  "_note": "Known type-check debt of test/**. Produced by `node tools/typecheck-gate.mjs --write-baseline`. The gate fails if any file here grows, or if a file outside this list has an error. Fix a file and re-record to shrink the debt; never add an entry to silence a regression.",
+  "generatedFromProject": "tsconfig.test.json",
+  "totalErrors": 309,
+  "filesWithErrors": 79,
+  "files": {
+    "test/citySpots.test.ts": {
+      "count": 2,
+      "codes": [
+        "TS6133"
+      ],
+      "diagnosis": "declares a local (or import) that is never read"
+    },
+    "test/cityView.test.ts": {
+      "count": 3,
+      "codes": [
+        "TS6133",
+        "TS2345"
+      ],
+      "diagnosis": "declares a local (or import) that is never read"
+    },
+    "test/combat/manualBattle.test.ts": {
+      "count": 8,
+      "codes": [
+        "TS2739",
+        "TS6133"
+      ],
+      "diagnosis": "fixture is missing required fields the interface gained"
+    },
+    "test/combat/resolveBattle.test.ts": {
+      "count": 9,
+      "codes": [
+        "TS2739"
+      ],
+      "diagnosis": "fixture is missing required fields the interface gained"
+    },
+    "test/core/cityGridPointer.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2459"
+      ],
+      "diagnosis": "imports a member that is declared but not exported"
+    },
+    "test/core/cityGridSafeArea.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2459"
+      ],
+      "diagnosis": "imports a member that is declared but not exported"
+    },
+    "test/data/unitCatalogParity.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2305"
+      ],
+      "diagnosis": "imports a member that has moved out of that package"
+    },
+    "test/dragDrop.test.ts": {
+      "count": 3,
+      "codes": [
+        "TS2339",
+        "TS6133"
+      ],
+      "diagnosis": "reads a property the interface renamed or moved"
+    },
+    "test/engine/capacity.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS6133"
+      ],
+      "diagnosis": "declares a local (or import) that is never read"
+    },
+    "test/engine/caravanUpkeep.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2305"
+      ],
+      "diagnosis": "imports a member that has moved out of that package"
+    },
+    "test/engine/districtStartup.test.ts": {
+      "count": 3,
+      "codes": [
+        "TS2305",
+        "TS2345"
+      ],
+      "diagnosis": "imports a member that has moved out of that package"
+    },
+    "test/engine/districts.test.ts": {
+      "count": 4,
+      "codes": [
+        "TS2739"
+      ],
+      "diagnosis": "fixture is missing required fields the interface gained"
+    },
+    "test/engine/factionRegistry.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2305"
+      ],
+      "diagnosis": "imports a member that has moved out of that package"
+    },
+    "test/engine/foodProduction.test.ts": {
+      "count": 7,
+      "codes": [
+        "TS2345",
+        "TS2741",
+        "TS2305"
+      ],
+      "diagnosis": "argument shape drifted from the callee's signature"
+    },
+    "test/engine/heroFoodSupply.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2305"
+      ],
+      "diagnosis": "imports a member that has moved out of that package"
+    },
+    "test/engine/init.test.ts": {
+      "count": 4,
+      "codes": [
+        "TS2345",
+        "TS2305",
+        "TS6133"
+      ],
+      "diagnosis": "argument shape drifted from the callee's signature"
+    },
+    "test/engine/largeMapTier4.test.ts": {
+      "count": 2,
+      "codes": [
+        "TS2322",
+        "TS2739"
+      ],
+      "diagnosis": "hand-built fixture (or returned shape) no longer assignable to the interface it names"
+    },
+    "test/engine/logistics.test.ts": {
+      "count": 9,
+      "codes": [
+        "TS18048",
+        "TS2305",
+        "TS7006"
+      ],
+      "diagnosis": "possibly-undefined access on a fixture"
+    },
+    "test/engine/pathfinding.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2305"
+      ],
+      "diagnosis": "imports a member that has moved out of that package"
+    },
+    "test/engine/placeBuildings.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2305"
+      ],
+      "diagnosis": "imports a member that has moved out of that package"
+    },
+    "test/engine/producers.test.ts": {
+      "count": 7,
+      "codes": [
+        "TS2345",
+        "TS2741"
+      ],
+      "diagnosis": "argument shape drifted from the callee's signature"
+    },
+    "test/engine/resourcePickup.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2724"
+      ],
+      "diagnosis": "imports a member the module no longer exports"
+    },
+    "test/engine/starterLayout.test.ts": {
+      "count": 5,
+      "codes": [
+        "TS2345",
+        "TS2305"
+      ],
+      "diagnosis": "argument shape drifted from the callee's signature"
+    },
+    "test/engine/tradeHeroes.test.ts": {
+      "count": 5,
+      "codes": [
+        "TS2739"
+      ],
+      "diagnosis": "fixture is missing required fields the interface gained"
+    },
+    "test/engine/tradeNeeds.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS6133"
+      ],
+      "diagnosis": "declares a local (or import) that is never read"
+    },
+    "test/engine/upgradeBuildingFootprint.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2353"
+      ],
+      "diagnosis": "fixture sets a property the interface does not declare"
+    },
+    "test/engine/warehouseRates.test.ts": {
+      "count": 2,
+      "codes": [
+        "TS2345",
+        "TS2367"
+      ],
+      "diagnosis": "argument shape drifted from the callee's signature"
+    },
+    "test/heroTrade.e2e.ts": {
+      "count": 4,
+      "codes": [
+        "TS2353",
+        "TS2339"
+      ],
+      "diagnosis": "fixture sets a property the interface does not declare"
+    },
+    "test/io/multiplayerSync.test.ts": {
+      "count": 5,
+      "codes": [
+        "TS2345",
+        "TS2339",
+        "TS2353"
+      ],
+      "diagnosis": "argument shape drifted from the callee's signature"
+    },
+    "test/io/multiplayerSyncGarrisonBridge.test.ts": {
+      "count": 3,
+      "codes": [
+        "TS2740",
+        "TS2749",
+        "TS6133"
+      ],
+      "diagnosis": "fixture is missing most of the properties the interface requires"
+    },
+    "test/io/serverDrivenGames.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2353"
+      ],
+      "diagnosis": "fixture sets a property the interface does not declare"
+    },
+    "test/logistics-bugs/logistics.caravanAdvance.test.ts": {
+      "count": 7,
+      "codes": [
+        "TS18048",
+        "TS2305",
+        "TS7006"
+      ],
+      "diagnosis": "possibly-undefined access on a fixture"
+    },
+    "test/logistics-bugs/logistics.routeLifecycle.test.ts": {
+      "count": 8,
+      "codes": [
+        "TS18048",
+        "TS2305",
+        "TS7006"
+      ],
+      "diagnosis": "possibly-undefined access on a fixture"
+    },
+    "test/logistics-bugs/logistics.upkeepDesertion.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS18048"
+      ],
+      "diagnosis": "possibly-undefined access on a fixture"
+    },
+    "test/logistics-bugs/logistics.wagonPools.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2305"
+      ],
+      "diagnosis": "imports a member that has moved out of that package"
+    },
+    "test/map/castlePlacement.test.ts": {
+      "count": 8,
+      "codes": [
+        "TS2345"
+      ],
+      "diagnosis": "argument shape drifted from the callee's signature"
+    },
+    "test/persistence/endTurnFractionalGold.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS18048"
+      ],
+      "diagnosis": "possibly-undefined access on a fixture"
+    },
+    "test/proposedPath.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS6198"
+      ],
+      "diagnosis": "destructures elements that are never used"
+    },
+    "test/render/adventureScene.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2353"
+      ],
+      "diagnosis": "fixture sets a property the interface does not declare"
+    },
+    "test/render/battleScene.test.ts": {
+      "count": 4,
+      "codes": [
+        "TS2322",
+        "TS2345"
+      ],
+      "diagnosis": "hand-built fixture (or returned shape) no longer assignable to the interface it names"
+    },
+    "test/render/cityFoodSpots.test.ts": {
+      "count": 2,
+      "codes": [
+        "TS2339",
+        "TS2739"
+      ],
+      "diagnosis": "reads a property the interface renamed or moved"
+    },
+    "test/render/entityMirror.test.ts": {
+      "count": 2,
+      "codes": [
+        "TS2739",
+        "TS2740"
+      ],
+      "diagnosis": "fixture is missing required fields the interface gained"
+    },
+    "test/render/griffinNomadArt.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS7016"
+      ],
+      "diagnosis": "depends on a module that ships no type declarations"
+    },
+    "test/render/paint2d.test.ts": {
+      "count": 5,
+      "codes": [
+        "TS2339",
+        "TS6133",
+        "TS18046"
+      ],
+      "diagnosis": "reads a property the interface renamed or moved"
+    },
+    "test/render/pixelDiff.ts": {
+      "count": 1,
+      "codes": [
+        "TS7016"
+      ],
+      "diagnosis": "depends on a module that ships no type declarations"
+    },
+    "test/resourcePickup.e2e.ts": {
+      "count": 1,
+      "codes": [
+        "TS2322"
+      ],
+      "diagnosis": "hand-built fixture (or returned shape) no longer assignable to the interface it names"
+    },
+    "test/screens/adventure/adventureHoverInspect.test.ts": {
+      "count": 3,
+      "codes": [
+        "TS2554"
+      ],
+      "diagnosis": "calls the callee with the wrong number of arguments"
+    },
+    "test/screens/adventure/tileInfo.test.ts": {
+      "count": 10,
+      "codes": [
+        "TS2531",
+        "TS2739"
+      ],
+      "diagnosis": "Object is possibly null on a fixture lookup"
+    },
+    "test/screens/adventure/tilePickup.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2739"
+      ],
+      "diagnosis": "fixture is missing required fields the interface gained"
+    },
+    "test/screens/combat/arena.test.ts": {
+      "count": 9,
+      "codes": [
+        "TS2551",
+        "TS2345",
+        "TS2352"
+      ],
+      "diagnosis": "reads a property the interface renamed"
+    },
+    "test/screens/combat/arenaTelemetry.test.ts": {
+      "count": 3,
+      "codes": [
+        "TS2339",
+        "TS6133"
+      ],
+      "diagnosis": "reads a property the interface renamed or moved"
+    },
+    "test/screens/combat/assaultConfirmModal.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2352"
+      ],
+      "diagnosis": "cast between types the checker will not relate"
+    },
+    "test/screens/home/newGameModeChoice.test.ts": {
+      "count": 6,
+      "codes": [
+        "TS2345"
+      ],
+      "diagnosis": "argument shape drifted from the callee's signature"
+    },
+    "test/screens/home/settingsMenu.test.ts": {
+      "count": 7,
+      "codes": [
+        "TS2740"
+      ],
+      "diagnosis": "fixture is missing most of the properties the interface requires"
+    },
+    "test/screens/logistics/logisticsModal.test.ts": {
+      "count": 5,
+      "codes": [
+        "TS2307",
+        "TS2739"
+      ],
+      "diagnosis": "dominant diagnostic TS2307"
+    },
+    "test/screens/settlements/_cityPlacerHarness.ts": {
+      "count": 1,
+      "codes": [
+        "TS2345"
+      ],
+      "diagnosis": "argument shape drifted from the callee's signature"
+    },
+    "test/screens/settlements/cargoTransferRow.test.ts": {
+      "count": 6,
+      "codes": [
+        "TS2739",
+        "TS2307"
+      ],
+      "diagnosis": "fixture is missing required fields the interface gained"
+    },
+    "test/screens/settlements/settlementPlacement.test.ts": {
+      "count": 10,
+      "codes": [
+        "TS2352",
+        "TS2353"
+      ],
+      "diagnosis": "cast between types the checker will not relate"
+    },
+    "test/screens/shared/cargoTransfer.test.ts": {
+      "count": 3,
+      "codes": [
+        "TS2305",
+        "TS2322",
+        "TS2739"
+      ],
+      "diagnosis": "imports a member that has moved out of that package"
+    },
+    "test/server/aiDriver.test.ts": {
+      "count": 5,
+      "codes": [
+        "TS2322",
+        "TS2739",
+        "TS2741"
+      ],
+      "diagnosis": "hand-built fixture (or returned shape) no longer assignable to the interface it names"
+    },
+    "test/server/captureSettlementGarrison.test.ts": {
+      "count": 2,
+      "codes": [
+        "TS2322"
+      ],
+      "diagnosis": "hand-built fixture (or returned shape) no longer assignable to the interface it names"
+    },
+    "test/server/commandHandler.test.ts": {
+      "count": 11,
+      "codes": [
+        "TS7006",
+        "TS2322",
+        "TS2339"
+      ],
+      "diagnosis": "callback parameter carries no annotation"
+    },
+    "test/server/commandsRoute.test.ts": {
+      "count": 2,
+      "codes": [
+        "TS2304",
+        "TS2345"
+      ],
+      "diagnosis": "references a name that is not in scope"
+    },
+    "test/server/eventsNotifier.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2345"
+      ],
+      "diagnosis": "argument shape drifted from the callee's signature"
+    },
+    "test/server/foundSettlement.test.ts": {
+      "count": 3,
+      "codes": [
+        "TS2769",
+        "TS2739"
+      ],
+      "diagnosis": "no overload of the callee accepts this call"
+    },
+    "test/server/pendingBattle.test.ts": {
+      "count": 2,
+      "codes": [
+        "TS2322"
+      ],
+      "diagnosis": "hand-built fixture (or returned shape) no longer assignable to the interface it names"
+    },
+    "test/server/pickupResource.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2322"
+      ],
+      "diagnosis": "hand-built fixture (or returned shape) no longer assignable to the interface it names"
+    },
+    "test/server/recruitUnits.test.ts": {
+      "count": 7,
+      "codes": [
+        "TS18048",
+        "TS2322",
+        "TS2571"
+      ],
+      "diagnosis": "possibly-undefined access on a fixture"
+    },
+    "test/server/submitBattleResult.test.ts": {
+      "count": 26,
+      "codes": [
+        "TS18046",
+        "TS2322",
+        "TS18048"
+      ],
+      "diagnosis": "reads a value the type layer reports as unknown (untyped event/row payload)"
+    },
+    "test/server/submitSettlementBattleResult.test.ts": {
+      "count": 6,
+      "codes": [
+        "TS2322",
+        "TS2571",
+        "TS2339"
+      ],
+      "diagnosis": "hand-built fixture (or returned shape) no longer assignable to the interface it names"
+    },
+    "test/server/transferUnits.test.ts": {
+      "count": 2,
+      "codes": [
+        "TS2322"
+      ],
+      "diagnosis": "hand-built fixture (or returned shape) no longer assignable to the interface it names"
+    },
+    "test/smoke.ts": {
+      "count": 10,
+      "codes": [
+        "TS2339",
+        "TS6133",
+        "TS2304"
+      ],
+      "diagnosis": "reads a property the interface renamed or moved"
+    },
+    "test/state/economy.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2322"
+      ],
+      "diagnosis": "hand-built fixture (or returned shape) no longer assignable to the interface it names"
+    },
+    "test/state/endTurnFailureToast.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS6133"
+      ],
+      "diagnosis": "declares a local (or import) that is never read"
+    },
+    "test/state/gameState.test.ts": {
+      "count": 5,
+      "codes": [
+        "TS2740",
+        "TS2739",
+        "TS2741"
+      ],
+      "diagnosis": "fixture is missing most of the properties the interface requires"
+    },
+    "test/state/garrisonEventMerge.test.ts": {
+      "count": 11,
+      "codes": [
+        "TS2339",
+        "TS2740",
+        "TS6196"
+      ],
+      "diagnosis": "reads a property the interface renamed or moved"
+    },
+    "test/state/turnController.test.ts": {
+      "count": 4,
+      "codes": [
+        "TS2353",
+        "TS2352",
+        "TS2740"
+      ],
+      "diagnosis": "fixture sets a property the interface does not declare"
+    },
+    "test/state/turnControllerLogisticsGate.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS2739"
+      ],
+      "diagnosis": "fixture is missing required fields the interface gained"
+    },
+    "test/visualRegression.test.ts": {
+      "count": 1,
+      "codes": [
+        "TS6133"
+      ],
+      "diagnosis": "declares a local (or import) that is never read"
+    }
+  }
+}

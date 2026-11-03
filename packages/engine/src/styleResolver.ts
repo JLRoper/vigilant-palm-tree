@@ -35,7 +35,7 @@ export function pickStyleForBuilding(
 }
 
 export function randomFarmFieldStyle(): GenerationStyle {
-  return (Math.random() < 0.5 ? "pixel" : "pixel-alt") as GenerationStyle;
+  return Math.random() < 0.5 ? "pixel" : "pixel-alt";
 }
 
 /** FNV-1a over one settlement cell; shared by the persisted style and the plot-variant pick. */
@@ -50,7 +50,7 @@ function farmCellHash(seed: string, gx: number, gy: number): number {
 }
 
 export function farmFieldStyleAt(seed: string, gx: number, gy: number): GenerationStyle {
-  return (farmCellHash(seed, gx, gy) % 2 === 0 ? "pixel" : "pixel-alt") as GenerationStyle;
+  return farmCellHash(seed, gx, gy) % 2 === 0 ? "pixel" : "pixel-alt";
 }
 
 /**
