@@ -224,10 +224,67 @@ async function runOne(entry, opts) {
   });
 }
 
+// Prints the run's whole verdict, including what did NOT run. `npm run test:all`
+// used to abort at the first red entry with nothing but the failing entry's own
+// output, so a partial pass read as a full one: measured 2026-11-03, a red
+// `settlers` entry ended the chain and towncenter + visual + `npm run test:unit`
+// silently never ran.
+function printReport(suiteLabel, results, opts) {
+  const failed = results.filter((r) => r.status === "fail");
+  const notRun = results.filter((r) => r.status === "notRun");
+  console.log(`\n===== ${suiteLabel} report =====`);
+  for (const r of results) {
+    const verdict = r.status === "pass" ? "PASS" : r.status === "fail" ? `FAIL (${r.detail})` : "DID NOT RUN";
+    console.log(`>> [${suiteLabel}] verdict: ${r.entry} ${verdict}`);
+  }
+  console.log(
+    `>> [${suiteLabel}] ${results.filter((r) => r.status === "pass").length} passed, ` +
+      `${failed.length} failed, ${notRun.length} did not run`,
+  );
+  console.log(`>> [${suiteLabel}] DID NOT RUN: ${notRun.length === 0 ? "(none)" : notRun.map((r) => r.entry).join(", ")}`);
+  if (notRun.length > 0) {
+    console.log(
+      `>> [${suiteLabel}] those ${notRun.length} entr${notRun.length === 1 ? "y" : "ies"} were NOT verified by this run: ` +
+        `do not read this run as a full pass.`,
+    );
+  }
+  if (opts.chainAfterAll && (failed.length > 0 || notRun.length > 0)) {
+    console.log(
+      `>> [${suiteLabel}] \`npm run test:all\` chains \`npm run test:unit\` after this runner and tests stop at its ` +
+        `non-zero exit: test:unit did NOT run.`,
+    );
+  }
+}
+
+// Writes the request file exactly as runOne does and leaves the last one in
+// place: a real run's file is cleared by the RUNNER's exit path, never by the
+// entry, so the dry run must exercise that same path (a per-entry clear here
+// would hide a runner that fails to clean up after itself).
+async function dryRunAll(entries, opts) {
+  const results = [];
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const ports = await allocatePorts();
+    const req = writeRequest(entry, ports, opts);
+    console.log(`>> [dry-run] ${entry} -> ${ENTRIES[entry]} api=${req.apiPort} client=${req.clientPort} request @ ${REQUEST_PATH}`);
+    if (opts.failAt && entry === opts.failAt) {
+      results.push({ entry, status: "fail", detail: "exited code=1 signal=null (--fail-at)" });
+      if (opts.stopOnFail) {
+        for (const rest of entries.slice(i + 1)) results.push({ entry: rest, status: "notRun" });
+        break;
+      }
+      continue;
+    }
+    results.push({ entry, status: "pass" });
+  }
+  printReport(opts.suiteLabel, results, opts);
+  return results.some((r) => r.status === "fail") ? 1 : 0;
+}
+
 async function main() {
   const args = process.argv.slice(2);
   if (args.length === 0) {
-    console.error("usage: node tools/run-test.mjs <smoke|multiplayer|cityview|settlements|districts|logpanel|logisticsCaravan|uncharted|heroVariants|heroTrade|settlers|towncenter|visual|aiCharter|all> [--auto-close] [--shutdown-after-ms=N] [--update-baselines]");
+    console.error("usage: node tools/run-test.mjs <smoke|multiplayer|cityview|settlements|districts|logpanel|logisticsCaravan|uncharted|heroVariants|heroTrade|settlers|towncenter|visual|aiCharter|all> [--auto-close] [--shutdown-after-ms=N] [--update-baselines] [--stop-on-fail] [--dry-run] [--fail-at=<entry>]");
     return 2;
   }
 
@@ -241,6 +298,14 @@ async function main() {
     extra: {
       updateBaselines: args.includes("--update-baselines"),
     },
+    stopOnFail: args.includes("--stop-on-fail"),
+    dryRun: args.includes("--dry-run"),
+    failAt: (() => {
+      const a = args.find((x) => x.startsWith("--fail-at="));
+      return a ? a.split("=")[1] : null;
+    })(),
+    suiteLabel: cmd,
+    chainAfterAll: cmd === "all",
   };
 
   installRequestCleanup();
@@ -256,15 +321,44 @@ async function main() {
     });
   } catch {}
 
+  const entries = cmd === "all" ? ALL_ORDER : [cmd];
+  if (cmd !== "all" && !ENTRIES[cmd]) {
+    console.error(`>> run-test FAILED: unknown entry: ${cmd}`);
+    return 2;
+  }
+
   let code = 0;
   try {
-    if (cmd === "all") {
-      for (const e of ALL_ORDER) {
-        console.log(`\n===== ${e} =====`);
-        await runOne(e, opts);
+    if (opts.dryRun) {
+      code = await dryRunAll(entries, opts);
+    } else if (cmd === "all") {
+      const results = [];
+      for (let i = 0; i < ALL_ORDER.length; i++) {
+        const entry = ALL_ORDER[i];
+        console.log(`\n===== ${entry} =====`);
+        try {
+          await runOne(entry, opts);
+          results.push({ entry, status: "pass" });
+        } catch (e) {
+          results.push({ entry, status: "fail", detail: e?.message ?? String(e) });
+          if (opts.stopOnFail) {
+            for (const rest of ALL_ORDER.slice(i + 1)) results.push({ entry: rest, status: "notRun" });
+            break;
+          }
+        }
       }
+      printReport(cmd, results, opts);
+      code = results.some((r) => r.status === "fail") ? 1 : 0;
     } else {
-      await runOne(cmd, opts);
+      const results = [];
+      try {
+        await runOne(cmd, opts);
+        results.push({ entry: cmd, status: "pass" });
+      } catch (e) {
+        results.push({ entry: cmd, status: "fail", detail: e?.message ?? String(e) });
+      }
+      printReport(cmd, results, opts);
+      code = results.some((r) => r.status === "fail") ? 1 : 0;
     }
   } catch (e) {
     console.error(">> run-test FAILED:", e?.message ?? e);
