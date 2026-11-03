@@ -426,6 +426,13 @@ export class MultiplayerSync {
 
     const hydrated = hydrateClientGame(game);
     const seeded = Number(game.last_event_id ?? 0);
+    // The cursor paired with the state the client holds going into this
+    // snapshot, read BEFORE the cursor moves: null means that state carries no
+    // cursor at all (an unseeded start -- the load path's row had no
+    // last_event_id, and onHumanTurnEnd's restart), so THIS snapshot is the
+    // client's first pairing and a consumer must reconcile it rather than
+    // refuse it. See MpResyncedEvent.pairedCursor.
+    const pairedCursor = this.cursor;
     this.cursor = Number.isFinite(seeded) && seeded >= 0 ? seeded : 0;
     // The cursor is now known, so a deferred event stream may open (an unseeded
     // start has no valid `after` -- see ensureEventStream).
@@ -434,7 +441,14 @@ export class MultiplayerSync {
     const prev = this.lastSeen;
     this.lastSeen = hydrated;
     this.mirror.bootstrap(hydrated);
-    bus.emit({ type: "mp:resynced", gameName, state: hydrated, cursor: this.cursor, reason });
+    bus.emit({
+      type: "mp:resynced",
+      gameName,
+      state: hydrated,
+      cursor: this.cursor,
+      reason,
+      pairedCursor,
+    });
     this.emitStateChanged(gameName, prev, hydrated);
   }
 
