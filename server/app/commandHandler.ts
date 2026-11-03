@@ -28,6 +28,7 @@ transferGold,
   clampMorale,
   getOrCreateGameMap,
   resolveSavedMapGenVersion,
+  syncSettlementRoads,
   computeSettlementRates,
   cityViewSizeFor,
   foodBiasForTerrain,
@@ -1607,6 +1608,12 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         return { ok: false, reason: "impassable", events: [] };
       }
       const cost = map.cost(command.toTile.q, command.toTile.r);
+      // District roads price movement (packages/engine/src/settlement/roadNetwork.ts):
+      // install the layering from the settlements this command hydrated, right
+      // here and synchronously, so the price below is the one the client walked
+      // and no await can interleave another game's layering onto the shared,
+      // cached GameMap between the install and this read.
+      syncSettlementRoads(map, Object.values(state.settlements));
       const result = stepTravelCharter(state, command.heroId, command.toTile.q, command.toTile.r, cost);
       if (!result.ok) {
         return { ok: false, reason: result.reason, events: [] };

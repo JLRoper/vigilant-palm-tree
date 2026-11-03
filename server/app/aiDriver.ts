@@ -22,6 +22,7 @@ import {
   resolveSavedMapGenVersion,
   settlementOutcomeFromBattle,
   settlementStacks,
+  syncSettlementRoads,
   type MapGenVersion,
   type MapSize,
   type PendingBattleMarker,
@@ -923,6 +924,7 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
     return "turn_lost";
   }
   const charterMap = getOrCreateGameMap(charterSnap.seed, charterSnap.mapSize, charterSnap.mapGenVersion);
+  syncSettlementRoads(charterMap, Object.values(charterSnap.state.settlements));
   for (const heroId of heroIds) {
     const charterKey = `${charterSnap.state.round}:${seat}:${heroId}`;
     if (mem.charterTurns.has(charterKey)) continue;
@@ -977,6 +979,7 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
         const hero = snap.state.heroes[heroId];
         if (!hero) break;
         const map = getOrCreateGameMap(snap.seed, snap.mapSize, snap.mapGenVersion);
+        syncSettlementRoads(map, Object.values(snap.state.settlements));
         // Settlers mode (SETTLERS-PLAN.md §4 W5): the seat's only entity is a
         // covered wagon, and founding IS its turn. The decision comes from the
         // engine brain -- pickSettlersWagonAction, which asks the engine's own
@@ -1071,6 +1074,7 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
           );
           if (path.length === 0) break;
           const nextStep = path[0];
+          syncSettlementRoads(map, Object.values(snap.state.settlements));
           const cost = map.cost(nextStep.q, nextStep.r);
           if (!Number.isFinite(cost) || cost < 0) break;
           const step = await dispatch(ctx, {
@@ -1097,6 +1101,7 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
           movedThisSweep += 1;
           continue;
         }
+        syncSettlementRoads(map, Object.values(snap.state.settlements));
         const move = pickAiMove(
           snap.state,
           heroId,

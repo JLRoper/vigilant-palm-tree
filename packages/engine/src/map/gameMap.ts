@@ -83,6 +83,27 @@ export function isMapSize(value: unknown): value is MapSize {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(MAP_SIZES, value);
 }
 
+/**
+ * What entering a DISTRICT-ROADED hex costs, as a fraction of the same hex's
+ * terrain cost. A road is a made surface: the district network the settlements
+ * wear into the ground (packages/engine/src/settlement/roadNetwork.ts) makes the
+ * hex it crosses cheaper to walk into than the same hex unworn.
+ *
+ * This is a MODIFIER on the one movement-cost table (`GameMap.cost`), not a
+ * second cost path: every reader of `cost()` -- `findPath`'s A* relax, the
+ * route price `computePathCost` sums, the reachability split, the AI's step
+ * price, the charter's server-side recompute -- inherits it for free, and
+ * `TERRAIN_COST` itself is untouched. Because it MULTIPLIES, it can never turn
+ * an impassable hex (terrain `Infinity`, an unbridged wide river) into a
+ * passable one, so a road across a strait stays drawn-but-unwalked exactly as
+ * the harbour/pier rule describes.
+ *
+ * Roads are derived data, set per map by `GameMap.setRoadTiles` from the live
+ * settlements; a map with no roads installed costs exactly what it always did,
+ * which is why terrain generation and MapGenVersion do not move.
+ */
+export const ROAD_MOVEMENT_MULTIPLIER = 0.75;
+
 /** Dropdown label for a size, e.g. `Epic (120×90)`. */
 export function mapSizeLabel(mapSize: MapSize): string {
   const { width, height, label } = MAP_SIZES[mapSize];
@@ -97,6 +118,13 @@ export class GameMap {
   placedResourceTiles: readonly ResourceTile[] = [];
   rivers: (RiverTile | undefined)[] = [];
   placedRivers: readonly RiverTile[] = [];
+  /**
+   * District-road flags, one byte per tile: 1 where a road worn by a settlement
+   * crosses the hex. `null` means no roads are installed and every cost is the
+   * raw terrain/river cost. Built by `setRoadTiles`, so the A* hot path reads a
+   * typed-array index instead of a string key.
+   */
+  roadTiles: Uint8Array | null = null;
 
   constructor(seed = 1, mapSize?: MapSize, version: MapGenVersion = 3) {
     if (mapSize && MAP_SIZES[mapSize]) {
@@ -173,9 +201,55 @@ export class GameMap {
     if (!t) return Infinity;
     if (TERRAIN_COST[t] === Infinity) return Infinity;
     const river = this.riverAt(q, r);
-    if (!river) return TERRAIN_COST[t];
-    if (river.kind === "wide") return river.bridge ? RIVER_BRIDGE_CROSS_COST : Infinity;
-    return RIVER_SMALL_CROSS_COST;
+    const base = !river
+      ? TERRAIN_COST[t]
+      : river.kind === "wide"
+        ? river.bridge
+          ? RIVER_BRIDGE_CROSS_COST
+          : Infinity
+        : RIVER_SMALL_CROSS_COST;
+    if (!Number.isFinite(base)) return base;
+    // The district-road modifier, and the ONLY place it is applied: a roaded
+    // hex costs ROAD_MOVEMENT_MULTIPLIER of its terrain/river price. `q` and
+    // `r` are in bounds here -- `get` above proved it -- so the flag index is
+    // safe. A map with no roads (`roadTiles === null`) is paid exactly as before.
+    if (this.roadTiles && this.roadTiles[r * this.width + q] === 1) {
+      return base * ROAD_MOVEMENT_MULTIPLIER;
+    }
+    return base;
+  }
+
+  /**
+   * Installs the settlement district-road layering for this map: the set of
+   * "q,r" keys a road crosses. Derived data -- it is recomputed from the live
+   * settlements and replaced wholesale, never merged, so a re-route or an
+   * abandoned district cannot leave a stale discount behind. An empty set (or
+   * null) clears the layering and restores the raw terrain costs.
+   *
+   * Returns the number of roaded tiles installed.
+   */
+  setRoadTiles(keys: Iterable<string> | null | undefined): number {
+    if (!keys) {
+      this.roadTiles = null;
+      return 0;
+    }
+    let flags: Uint8Array | null = null;
+    let count = 0;
+    for (const key of keys) {
+      const comma = key.indexOf(",");
+      if (comma <= 0) continue;
+      const q = Number(key.slice(0, comma));
+      const r = Number(key.slice(comma + 1));
+      if (!Number.isInteger(q) || !Number.isInteger(r)) continue;
+      if (q < 0 || q >= this.width || r < 0 || r >= this.height) continue;
+      if (flags === null) flags = new Uint8Array(this.width * this.height);
+      const idx = r * this.width + q;
+      if (flags[idx] === 1) continue;
+      flags[idx] = 1;
+      count++;
+    }
+    this.roadTiles = flags;
+    return count;
   }
 
   /**

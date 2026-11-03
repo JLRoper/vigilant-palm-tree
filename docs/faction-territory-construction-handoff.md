@@ -195,11 +195,7 @@ tiles reduce movement cost for later crossings by any unit.
 
 **Still needs fleshing out — flagged as the most speculative part of the
 whole cluster, recommend confirming it's wanted at all before scheduling:**
-- There is currently **no terrain/road movement-cost concept anywhere in
-  `packages/engine/src/map/pathfinding.ts`** — this phase isn't extending
-  an existing system, it's building one from nothing. Worth weighing
-  against how much the game actually needs it right now versus Phases 1-5
-  landing and bedding in first.
+- **Updated:** district roads now DO carry a movement cost — entering a roaded hex costs `ROAD_MOVEMENT_MULTIPLIER` (`0.75`) of its terrain cost, a modifier on the engine's one movement-cost table (`GameMap.cost`, `packages/engine/src/map/gameMap.ts`) that `findPath`/`computePathCost`/the AI all read, installed from the live settlements by `syncSettlementRoads` (`packages/engine/src/settlement/roadNetwork.ts`). What is still missing is a **player-built** paved tile: this phase's "toggle build roads, pay gold" would extend that same table — one more modifier, keyed on the paved tile set — and must NOT fork a second cost path.
 - Gold cost per tile (or per trip) is an unset placeholder.
 - Does a paved tile benefit every player/faction that crosses it, or only
   the one who built it? Either answer has real balance and multiplayer
