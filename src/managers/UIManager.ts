@@ -35,7 +35,7 @@ import type { DistrictState, FactionId, BuildingKind, GameMode, WarehouseResourc
 
 type ToolbarCallbacks = {
   onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: MapSize; enemyCount?: number; factionId?: FactionId; uncharted?: boolean; gameMode?: GameMode }) => void;
-  onLoad: (loaded: import("../io/api").Game, tiles?: import("../io/api").TileRow[]) => void;
+  onLoad: (loaded: import("../io/api").Game, tiles?: import("../io/api").TileRow[]) => Promise<void>;
   onSave: () => void;
   onEndTurn: () => void;
   onForget: (id: number) => void;

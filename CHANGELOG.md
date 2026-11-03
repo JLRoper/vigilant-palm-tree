@@ -20,6 +20,10 @@ ever invoked. The Logistics window's hero block offers the same two buttons, bot
 read one shared direction/amount model (`src/screens/shared/cargoTransfer.ts`), and the hero
 panel's own buttons are renamed **Deposit gold** / **Withdraw gold** because they were always
 gold-only despite the generic label (playthrough finding F-2).
+## [0.38.14] - 2026-11-03
+
+Copilot's two comments on the landed load path. The browser's own seat is resolved instead of the first claimed one: a remembered seat, then the handle it claimed with, then the server-bound auth email, and NO seat when none of the three identifies the browser (this supersedes #292's `resolveInitialLocalSeat`, whose lowest-claimed-seat fallback was the same first-claim guess merely narrowed). The load promise is returned through the toolbar callback, so a failed load stays observable by the dialog that awaits it.
+
 ## [0.38.13] - 2026-11-03
 
 test:visual tells the truth again
@@ -33,6 +37,7 @@ Copilot's review comment on PR #288 is real, and it is a defect PR #288 introduc
 The fix is the cursor/snapshot pairing the design already implied: `mp:resynced` now carries `pairedCursor`, the cursor the client's state was paired with going into the fetch -- `null` for an unseeded start, where that GET is the client's FIRST pairing, so its snapshot's own cursor is the one the client's state will be held against and dropping it can only leave the cursor ahead of the only state the client holds (permanently, not until the next boundary: every later unflagged `initial` resync was refused by the same reason gate). `garrisonEventBridge` therefore reconciles an unpaired snapshot wherever the phase is not one the local client is driving (`safeForDeltas()`, re-checked after `flushPendingCommands`) instead of dropping it. A non-null `pairedCursor` keeps every existing rule byte-identical -- those refusals are phase-scoped, and the next boundary resync repairs them, which is why the guard stays.
 
 `patch`: this diverged; the loss was silent and permanent for the session (a pending `BattleOffered`, a troop total, a hero position). New field on an existing bus event, no schema or wire-contract change, new test `test/io/multiplayerSyncGarrisonBridge.test.ts`.
+
 
 ## [0.38.11] - 2026-11-03
 

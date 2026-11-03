@@ -171,7 +171,7 @@ const state: ToolbarState = {
 
 const callbacks: ToolbarCallbacks = {
   onNew: () => {},
-  onLoad: () => {},
+  onLoad: async () => {},
   onSave: () => {},
   onEndTurn: async () => {},
 };

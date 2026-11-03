@@ -17,12 +17,20 @@
 // document AND panelManager back to empty — plus a second open/close cycle
 // proving the surface is still usable, and the failure path (a failed load
 // must leave the dialog up with a retryable row).
+//
+// The failure path now fails through the callback the ENGINE wires
+// (createToolbarLoadCallback) rather than a hand-written rejecting handler:
+// the previous version handed the modal a callback production never builds, so
+// it asserted a path the production wiring could not reach. Copilot's second
+// comment on PR #289 named exactly that, and loadGameWiring.test.ts drives the
+// same property through the real toolbar.
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { installDom, restoreDom, findButton, settle, type MockElement } from "../../helpers/mockDom";
 import type { Game } from "../../../src/io/api";
+import { createToolbarLoadCallback } from "../../../src/managers/toolbarLoadCallback";
 import {
   escapeTarget,
   hasOpenPanels,
@@ -164,9 +172,16 @@ test("after a successful Open the Load surface still works (the next click lands
 
 test("a FAILED Open leaves the dialog open and the row retryable", async () => {
   const h = await setup();
-  await h.openLoad(async () => {
-    throw new Error("backend exploded");
-  });
+  // The engine's own callback, over a load that rejects: this is the value the
+  // modal awaits in production.
+  await h.openLoad(
+    createToolbarLoadCallback({
+      loadGame: async () => {
+        throw new Error("backend exploded");
+      },
+      afterLoad: () => {},
+    }),
+  );
 
   const open = findButton(h.body, "Open");
   assert.ok(open);
