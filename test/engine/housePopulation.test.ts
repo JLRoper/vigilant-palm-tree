@@ -59,9 +59,9 @@ test("the House's registry entry carries the per-level table, not a flat populat
 
 test("kinds without a populationByLevel table keep the populationBonus x level convention", () => {
   // Regression pin: only the House switched to an explicit table.
-  assert.equal(buildingSettlementEffects("apartment", 1).populationBonus, 100);
-  assert.equal(buildingSettlementEffects("apartment", 2).populationBonus, 200);
-  assert.equal(buildingSettlementEffects("apartment", 3).populationBonus, 300);
+  assert.equal(buildingSettlementEffects("apartment", 1).populationBonus, 150);
+  assert.equal(buildingSettlementEffects("apartment", 2).populationBonus, 300);
+  assert.equal(buildingSettlementEffects("apartment", 3).populationBonus, 450);
   assert.equal(buildingSettlementEffects("farmhouse", 2).populationBonus, 40);
   assert.equal(buildingSettlementEffects("tower", 3).populationBonus, 0);
 });

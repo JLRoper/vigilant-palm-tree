@@ -23,7 +23,7 @@ test("palette: an open palette recovers when the treasury refills, with no re-op
 
   placer.setAffordability(BROKE);
   const emptyRow = rowFor(body, "House");
-  assert.match(emptyRow.title, /Not enough gold \(need 100, have 0\)/);
+  assert.match(emptyRow.title, /Not enough gold \(need 300, have 0\)/);
   assert.equal(emptyRow.style.opacity, "0.5", "an unaffordable row is dimmed");
 
   // The treasury refills (End Turn) with the palette still open.

@@ -17,7 +17,7 @@ test("cityBuildNetCost: placements charge full cost, removals refund ceil(50%)",
     { gx: 2, gy: 2, kind: "goldMine" as const, level: 1, style: "classic" as const },
   ];
   const net = cityBuildNetCost(previous, next);
-  assert.equal(net.gold, 300 - 50, "goldMine costs 300; house refunds ceil(100/2)=50");
+  assert.equal(net.gold, 300 - 150, "goldMine costs 300; house refunds ceil(300/2)=150");
   assert.equal(net.wood, 6 - 3, "goldMine costs 6 wood; house refunds ceil(5/2)=3");
   assert.equal(net.stone, 4);
   assert.equal(net.iron ?? 0, 0);
@@ -39,7 +39,7 @@ test("applyPlaceBuildings: happy path deducts, applies, and stamps the build tim
   assert.equal(after.buildings.length, 1);
   assert.equal(after.buildings[0].kind, "goldMine");
   assert.equal(after.buildings[0].construction?.daysRemaining, 4, "goldMine buildDays, not client-supplied");
-  assert.equal(after.gold, 1000 - (300 - 50));
+  assert.equal(after.gold, 1000 - (300 - 150));
   assert.equal(after.warehouse.wood, 20 - (6 - 3));
   assert.equal(after.warehouse.stone, 10 - 4);
   assert.equal(result.state.dirty, true);

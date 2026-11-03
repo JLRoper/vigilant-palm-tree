@@ -298,7 +298,7 @@ test("POST /games/:name/commands accepts AdvanceCharterTravel over HTTP (was a 4
 });
 
 // Gold/warehouse above PlaceBuildings' net cost for a goldMine placement
-// (300g 6w 4s) minus the destroy refund for the seeded house (ceil(100/2)g,
+// (300g 6w 4s) minus the destroy refund for the seeded house (ceil(300/2)g,
 // ceil(5/2)w) -- the happy path's exact expected deltas.
 function placeBuildingsSettlement(name: string): SettlementState {
   return makeSettlement(ids(name).settlementId, 0, 2, 2, {
@@ -326,7 +326,7 @@ test("POST /games/:name/commands accepts PlaceBuildings over HTTP and stamps the
     assert.equal(after.buildings.length, 1, "the house was destroyed in the same commit");
     assert.equal(after.buildings[0].kind, "goldMine");
     assert.equal(after.buildings[0].construction?.daysRemaining, 4, "build timer recomputed server-side");
-    assert.equal(after.gold, 1000 - (300 - 50));
+    assert.equal(after.gold, 1000 - (300 - 150));
     assert.equal(after.warehouse.wood, 20 - (6 - 3));
     assert.equal(after.warehouse.stone, 10 - 4);
   } finally {
