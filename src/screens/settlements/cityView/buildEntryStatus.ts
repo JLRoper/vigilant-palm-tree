@@ -1,7 +1,8 @@
-import type { BuildingKind } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind } from "@heroes/contracts";
 import { buildingPlacementCost, buildingUpkeep } from "@heroes/engine";
+import { coversCell } from "../../../core/cityGrid";
 import type { NetCost } from "./netCost";
-import { footprintLine } from "./footprint";
+import { footprintCells, footprintLine } from "./footprint";
 
 const COST_RESOURCES = ["gold", "wood", "stone", "iron", "arcane"] as const;
 
@@ -40,6 +41,22 @@ export interface BuildEntryStatusOptions {
    * only hold a shipyard, and a shipyard may only stand on water.
    */
   districtTerrain?: string | null;
+  /**
+   * The grid the placement would land on -- its edge in cells and the
+   * buildings already standing on it (including anything staged in the cart,
+   * which is what the ghost's own check reads). Omit when the caller has no
+   * grid: the space rule is then simply not stated, exactly as the terrain
+   * rules are not.
+   */
+  space?: BuildEntrySpaceOptions | null;
+}
+
+/** The grid a palette row would place into. */
+export interface BuildEntrySpaceOptions {
+  /** City-grid edge in cells (`cityViewSizeFor(level)`: 5 / 10 / 15). */
+  size: number;
+  /** Everything already on that grid, staged placements included. */
+  buildings: ReadonlyArray<BuildingDef>;
 }
 
 export interface BuildConfirmStatusOptions {
@@ -64,6 +81,8 @@ export function buildEntryStatus(opts: BuildEntryStatusOptions): BuildEntryStatu
   }
   const terrainNote = districtTerrainBlock(opts.districtTerrain, opts.kind);
   if (terrainNote) blocking.push(terrainNote);
+  const spaceNote = footprintSpaceBlock(opts.space, opts.kind);
+  if (spaceNote) blocking.push(spaceNote);
   const reasons = [...blocking];
   const size = footprintLine(opts.kind);
   if (size) reasons.push(size);
@@ -107,4 +126,51 @@ function upkeepLine(kind: BuildingKind): string {
   if (upkeep.wood > 0) parts.push(`${upkeep.wood} wood`);
   if (upkeep.stone > 0) parts.push(`${upkeep.stone} stone`);
   return parts.length > 0 ? `Upkeep: ${parts.join(", ")} per turn` : "";
+}
+
+/**
+ * E4 (playthrough round 2b): a fresh LEVEL-1 settlement's 5x5 grid has no free
+ * 2x2 anchor at all -- the free starter set (town hall 2x2, three 2x2 farm
+ * fields, two houses, two woodcutter huts, a stone mine, a farmhouse) covers
+ * 22 of the 25 cells and the three left over are a single row -- so every 2x2
+ * palette row was an unplaceable offer. The row said `Takes 2x2 tiles (4)` and
+ * nothing else; the only explanation arrived after arming it and clicking,
+ * which reads as "the game ignored me". The palette now states the rule in the
+ * same voice as its other refusals and disables the row.
+ *
+ * The occupancy rule is the placer's own (`coversCell` -> the building's
+ * stored w/h, else its registry footprint at that level), so a staged building
+ * in the cart counts exactly as it does for the ghost: the palette and the
+ * ghost can never disagree about whether a footprint fits.
+ *
+ * Returns null when at least one anchor is free, or when the caller has no grid
+ * to check against (`space` omitted) -- "unknown" must never read as "blocked".
+ */
+export function footprintSpaceBlock(
+  space: BuildEntrySpaceOptions | null | undefined,
+  kind: BuildingKind,
+): string | null {
+  if (!space) return null;
+  // The row's own footprint vocabulary (ceiled cells), so the sentence about
+  // the grid says the same number as the line above it about the building.
+  const { w, h } = footprintCells(kind, 1);
+  const label = `${w}\u00D7${h}`;
+  if (w > space.size || h > space.size) {
+    return `A ${label} building does not fit this ${space.size}\u00D7${space.size} grid.`;
+  }
+  for (let x = 0; x + w <= space.size; x++) {
+    for (let y = 0; y + h <= space.size; y++) {
+      let free = true;
+      for (let dx = 0; dx < w && free; dx++) {
+        for (let dy = 0; dy < h && free; dy++) {
+          if (space.buildings.some((b) => coversCell(b, x + dx, y + dy))) free = false;
+        }
+      }
+      if (free) return null;
+    }
+  }
+  return (
+    `No free ${label} space in this city \u2014 every place it could stand is covered. ` +
+    `Raise the settlement's level for a bigger grid, or build it in a district.`
+  );
 }

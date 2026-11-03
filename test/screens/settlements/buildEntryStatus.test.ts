@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { buildStarterLayout } from "@heroes/engine";
 import {
   buildConfirmStatus,
   buildEntryStatus,
@@ -205,4 +206,58 @@ test("confirm status with null affordability is always ok", () => {
   const status = buildConfirmStatus({ net: { gold: 9999 }, charged: {}, affordability: null });
   assert.equal(status.ok, true);
   assert.deepEqual(status.reasons, []);
+});
+
+// ── E4 (playthrough round 2b): the grid may have no room for the footprint ──
+// The level-1 starter city covers 22 of its 25 cells and leaves a single row
+// free, so it has NO free 2x2 anchor: every 2x2 palette row was an offer the
+// grid could not accept, with the explanation arriving only after a click.
+
+test("E4: a footprint with no free anchor on the grid is refused, in words", () => {
+  const starter = buildStarterLayout({ size: 5, style: "pixel", farms: 3 });
+  const status = buildEntryStatus({ kind: "farmField", affordability: FULL, space: { size: 5, buildings: starter } });
+  assert.equal(status.disabled, true, "no free 2x2 anchor: the row is not an offer");
+  assert.deepEqual(status.reasons, [
+    "No free 2\u00D72 space in this city \u2014 every place it could stand is covered. " +
+      "Raise the settlement's level for a bigger grid, or build it in a district.",
+    "Takes 2\u00D72 tiles (4)",
+  ]);
+  // The three cells the starter set leaves free are a single row, so the 1x1
+  // kinds are genuinely placeable and keep their rows.
+  assert.equal(
+    buildEntryStatus({ kind: "house", affordability: FULL, space: { size: 5, buildings: starter } }).disabled,
+    false,
+  );
+});
+
+test("E4: the same row is placeable on a bigger grid -- the rule reads the grid it is handed", () => {
+  const starter = buildStarterLayout({ size: 5, style: "pixel", farms: 3 });
+  const big = buildEntryStatus({ kind: "warehouse", affordability: FULL, space: { size: 10, buildings: starter } });
+  assert.equal(big.disabled, false);
+  assert.deepEqual(big.reasons, ["Takes 2\u00D72 tiles (4)", "Upkeep: 1 wood, 1 stone per turn"]);
+});
+
+test("E4: the occupancy the rule reads is the one on the palette's own grid", () => {
+  // The cart is a shop: a staged placement (and a destroy) moves the grid the
+  // rows are checked against, so the refusal has to follow it.
+  const starter = buildStarterLayout({ size: 5, style: "pixel", farms: 3 });
+  const stillFull = buildEntryStatus({
+    kind: "apartment",
+    affordability: FULL,
+    space: { size: 5, buildings: [...starter, { gx: 2, gy: 4, kind: "house", level: 1 }] },
+  });
+  assert.equal(stillFull.disabled, true, "staging a 1x1 in a free cell does not open a 2x2 anchor");
+  assert.match(stillFull.title, /No free 2\u00D72 space in this city/);
+
+  // The harvest from the E4 measurement: the anchor the (0,0) 2x2 farm field
+  // holds is the one a cleared cell set gives back.
+  const freed = starter.filter((b) => !(b.gx === 0 && b.gy === 0));
+  const reopened = buildEntryStatus({ kind: "apartment", affordability: FULL, space: { size: 5, buildings: freed } });
+  assert.equal(reopened.disabled, false, "clearing that farm field opens the anchor it held");
+});
+
+test("E4: no grid given, no space claim -- the rule never guesses", () => {
+  const bare = buildEntryStatus({ kind: "farmField", affordability: FULL });
+  assert.equal(bare.reasons.some((r) => /No free/.test(r)), false);
+  assert.deepEqual(bare.reasons, ["Takes 2\u00D72 tiles (4)"]);
 });

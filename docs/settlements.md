@@ -200,7 +200,7 @@ Buildings gate what a settlement can recruit; the newest are **huntingLodge** (p
 | `treasury` | **gold** capacity only, +2000 × level | — |
 | `bank` | **gold** capacity +2000 × level | Its own gold pot (interest + withdrawal delay) |
 
-Caps are derived (`settlement/capacity.ts`) and **soft**: an addition is clamped to headroom, and stock above cap is never destroyed. `granary` and `farmField` moved from the palette's Civilian section to **Production** (both are producers); `farmhouse` stays in Troop Buildings because the palette's `recruits` check runs first.
+Caps are derived (`settlement/capacity.ts`) and **soft**: an addition is clamped to headroom, and stock above cap is never destroyed. `granary` and `farmField` moved from the palette's Civilian section to **Production** (both are producers); `farmhouse` stays in Troop Buildings because the palette's `recruits` check runs first. The palette also refuses a row it has no room for: `footprintSpaceBlock` (`src/screens/settlements/cityView/buildEntryStatus.ts`) disables an entry, and says why in the row's own tooltip, when no anchor for that footprint is free on the grid it is given — a level-1 settlement's 5×5 city holds 22 of its 25 cells with the free starter set and leaves no free 2×2 anchor, so every 2×2 row (Farm Field, Apartment, Warehouse, the built Town Hall) reads *"No free 2×2 space in this city — every place it could stand is covered. Raise the settlement's level for a bigger grid, or build it in a district."* instead of waiting for a click (playthrough round 2b, E4). The occupancy it checks is the placer's own `coversCell` over the grid INCLUDING the cart's staged placements, so the row and the ghost can never disagree.
 
 ### Workforce staffing (2026-10-17)
 

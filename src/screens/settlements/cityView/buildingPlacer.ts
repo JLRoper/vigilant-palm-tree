@@ -486,7 +486,7 @@ export class BuildingPlacer {
         const days = buildingBuildDays(kind);
         const hasTownHall = kind === "townHall" && this.buildings.some((b) => b.kind === "townHall");
         const isSelected = this.selectedKind === kind;
-        const status = buildEntryStatus({ kind, affordability: this.affordability, hasTownHall, isDistrict: this.isDistrict, districtTerrain: this.districtTerrain });
+        const status = buildEntryStatus({ kind, affordability: this.affordability, hasTownHall, isDistrict: this.isDistrict, districtTerrain: this.districtTerrain, space: { size: this.size, buildings: this.buildings } });
         const disabled = status.disabled;
 
         Object.assign(row.style, {
