@@ -3,6 +3,7 @@ import { Hero } from "../entities/hero";
 import { Castle } from "../entities/settlement";
 import { findPath } from "../map/pathfinding";
 import { GameMap } from "../map/gameMap";
+import { syncSettlementRoads } from "@heroes/engine";
 import { TurnController, createAiTurnMemory, type AiTurnMemory, type TurnControllerOptions } from "../state/turnController";
 import type { TurnControllerHooks } from "../state/turnController";
 import type { Axial } from "../core/hex";
@@ -70,6 +71,7 @@ export class GameStateManager {
 
   setGameMap(map: GameMap): void {
     this.gameMap = map;
+    this.syncRoadLayering();
   }
 
   getGameMap(): GameMap {
@@ -107,13 +109,34 @@ export class GameStateManager {
     this.turnController = this.makeTurnController(state);
     this.caravanTracker.reset();
     this.caravanTracker.syncFromState(state, this.gameMap);
+    this.syncRoadLayering();
   }
 
   replaceState(state: GameState): void {
     this.gameState = state;
     this.turnController = this.makeTurnController(state);
     this.caravanTracker.syncFromState(state, this.gameMap);
+    this.syncRoadLayering();
     bus.emit({ type: "state:committed" });
+  }
+
+  /**
+   * Keep the map's district-road layering pointed at this game's settlements
+   * (packages/engine/src/settlement/roadNetwork.ts): entering a roaded hex costs
+   * `ROAD_MOVEMENT_MULTIPLIER` of its terrain cost, and that discount lives on
+   * the engine's one movement-cost table (`GameMap.cost`), so the adventure
+   * view's route preview, the reachable split and the local AI tick all read it
+   * from the same map object they already use.
+   *
+   * Roads are DERIVED data: this replaces the layering wholesale from the live
+   * settlements on every state commit -- so founding a district lays a road and
+   * emptying one lifts the discount -- never merges, and installs nothing at all
+   * for a game with no districts. It is deliberately not a per-frame call: the
+   * layout is an A* per district, and the settlements only move on a commit.
+   */
+  private syncRoadLayering(): void {
+    if (!this.gameMap || !this.gameState) return;
+    syncSettlementRoads(this.gameMap, Object.values(this.gameState.settlements));
   }
 
   rebuildHeroesFromState(): void {
@@ -224,6 +247,7 @@ export class GameStateManager {
         // Same identity diff, same fix as the hero line above.
         this.rebuildSettlementsFromState();
         this.caravanTracker.syncFromState(nextState, this.gameMap);
+        this.syncRoadLayering();
         changed = true;
       }
     }

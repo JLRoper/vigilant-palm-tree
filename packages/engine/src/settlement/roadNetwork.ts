@@ -56,6 +56,19 @@ import {
 // whose only way out is such a harbour gets the same landing edge, so a
 // settlement across a strait stays connected. Nothing shorter than that is
 // drawn: a district no node is adjacent to still gets no road.
+//
+// The network is DERIVED data: it is recomputed from the settlement's live
+// districts and nothing of it is persisted. It now prices as well as draws --
+// entering a roaded hex costs `ROAD_MOVEMENT_MULTIPLIER` (0.75) of that hex's
+// terrain cost, applied as a modifier on the engine's one movement-cost table
+// (`GameMap.cost`, see packages/engine/src/map/gameMap.ts), so pathfinding, the
+// route price, the reachability split and the AI all read the same number with
+// no second cost path. `syncSettlementRoads` below installs the tiles;
+// impassable hexes stay impassable because the modifier multiplies, so a pier
+// over water is still drawn and still unwalked. Terrain generation and
+// MapGenVersion are untouched by this -- the roads are layered onto an
+// already-generated map, and a map nobody has laid roads on costs exactly what
+// it always did.
 
 /** Workforce points per road track: 0 -> 0, 15 -> 3, 100 -> 20. */
 export const WORKFORCE_PER_ROAD = 5;
@@ -221,4 +234,58 @@ export function settlementRoadNetwork(
   }
 
   return { center, routes, segments };
+}
+
+/**
+ * Every tile a network crosses -- the union of its routes' tile chains -- as
+ * the `"q,r"` keys `GameMap.setRoadTiles` takes. A route's `tiles` is
+ * `[from, ...path]`, so a hex two routes share is listed once by the Set.
+ *
+ * The pier/bridge edge of a harbour route is included: it is a drawn road, and
+ * the discount cannot make it walkable because a water hex prices at `Infinity`
+ * before the road modifier is ever applied.
+ */
+export function roadNetworkTiles(network: RoadNetwork): Set<string> {
+  const tiles = new Set<string>();
+  for (const route of network.routes) {
+    for (const tile of route.tiles) tiles.add(`${tile.q},${tile.r}`);
+  }
+  return tiles;
+}
+
+/**
+ * The district-road tiles of every settlement given, over `map`. This is the
+ * one derivation of "which hexes a road makes cheaper to enter" -- the map's
+ * own modifier read it in `GameMap.setRoadTiles`.
+ */
+export function settlementRoadTiles(
+  settlements: Iterable<SettlementDistrictLike>,
+  map: GameMap,
+): Set<string> {
+  const tiles = new Set<string>();
+  for (const settlement of settlements) {
+    for (const key of roadNetworkTiles(settlementRoadNetwork(settlement, map))) {
+      tiles.add(key);
+    }
+  }
+  return tiles;
+}
+
+/**
+ * Installs the settlement district roads onto `map` and returns the number of
+ * roaded tiles. Wholesale replace, never a merge: a road that stopped being
+ * laid stops being discounted, and an empty settlement list clears the layer
+ * back to raw terrain costs.
+ *
+ * Call this wherever a game's settlements and its map meet before movement is
+ * priced -- the client's GameStateManager and the server's per-command/charter
+ * map (server/app/commandHandler.ts, server/app/aiDriver.ts). It is idempotent,
+ * so a frame or a command that re-installs an unchanged network costs only the
+ * comparison, and a settlement with no districts returns 0 without any A*.
+ */
+export function syncSettlementRoads(
+  map: GameMap,
+  settlements: Iterable<SettlementDistrictLike>,
+): number {
+  return map.setRoadTiles(settlementRoadTiles(settlements, map));
 }
