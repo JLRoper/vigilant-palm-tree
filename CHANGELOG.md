@@ -10,6 +10,19 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.18] - 2026-11-03
+
+fix(ui): the native alert() freezes the renderer too — the landing page's backend-offline notice is the app's own dialog
+
+The landing page's Multiplayer button, with the API down, raised a native `alert()`. Measured in a real browser on this tip, tab foregrounded (`document.hidden === false`): the click never returned (`Input.dispatchMouseEvent` timed out at 5s — the box opens inside the click handler), every `Runtime.evaluate` — `1+1`, `location.href`, a plain counter read — timed out at 5s, `Page.handleJavaScriptDialog` answered `{}` (an empty object: a dialog really was pending) and unwedged the tab instantly, and the animation loop stood still for **10 026 ms** between two consecutive frames where the next-largest gap in the whole recording was 9 ms (481 ticks landed in 2.0 s either side). Dialog-free automation got a dead tab and a player got a frozen game. The three `confirm()` sites were fixed the same way in 0.39.7; this is the sibling the same card left open.
+
+- **The fix.** `src/screens/home/homeView.ts`'s offline notice routes through the `openConfirmDialog` helper those `confirm()` sites already use (`src/screens/shared/confirmDialog.ts`, wrapping `openDialog`/`FloatingPanel` — backdrop, Escape, teardown, `panelManager` registration). No new dialog idiom, and it stays a NOTICE rather than a question: nothing is confirmed and nothing is cancelled, both buttons only put the box away, and the handler resumes exactly as before.
+- **The z-index, the one option the site needed.** The helper's default (120) keeps a prompt under the landing overlay — right for its original map callers, but this button sits ON that overlay (200), so the notice passes 220. At 120 it would be a dialog the player can see and not click, exactly the trap the two home-screen `confirm()` sites hit.
+- **After**, same call site, same browser, same foregrounded tab: the click returned in 0.01 s, the notice is in the page at `z-index: 220` with the message verbatim and buttons `Close`/`OK`, the renderer stayed live while it was up (478 rAF ticks in the same 2.0 s window, was 0), zero native `alert()` calls recorded, and `Close`/`OK` each dismissed it with the page still running (487 ticks in the next 2.0 s) and the button still working.
+- **Tests.** `test/screens/home/homeBackendOfflineNotice.test.ts`: the browser's own `alert()` is never reached, the message still reaches the player, the notice is mounted above the landing overlay rather than at the helper's default 120, offline never opens the lobby, and — the resume proof — the same button with the backend up opens the Multiplayer Lobby. 3/3 fail against the old call site, 3/3 pass against the fix. `test/helpers/mockDom.ts` gained `window.location.origin`, which the lobby reads when it prints its join URL.
+- **Left alone, on purpose.** `prompt()` at `src/screens/home/assetManager.ts:180` blocks the renderer the same way but needs a text-input dialog that does not exist yet. `rg '\balert\s*\(' src test tools packages server` finds exactly one `alert()` site, and it was this one.
+
+
 ## [0.39.17] - 2026-11-03
 
 test:visual sees districts, the district road network's host and the Load path -- and the two main-side breakages it was standing in front of

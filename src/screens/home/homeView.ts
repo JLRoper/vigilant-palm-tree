@@ -191,7 +191,31 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
   mpBtn.addEventListener("click", async () => {
     if (busy) return;
     if (!opts.isBackendOk()) {
-      alert("Backend offline. Multiplayer requires the API.");
+      // NOT a native alert(): that blocks the renderer thread outright --
+      // measured in a real browser, tab foregrounded (document.hidden ===
+      // false), the same way the confirm() card measured its sibling: the
+      // click never returned (`Input.dispatchMouseEvent` timed out at 5s,
+      // because the box opens inside the handler), every `Runtime.evaluate`
+      // -- `1+1`, `location.href`, even reading a counter -- timed out at 5s,
+      // and `Page.handleJavaScriptDialog` answered `{}` (a dialog really was
+      // pending), which unwedged the tab instantly. Across that window the
+      // animation loop stood still for 10 026 ms between two frames 9 ms
+      // apart. The app's own dialog costs the player nothing.
+      //
+      // A NOTICE, not a question: there is nothing to confirm and nothing to
+      // cancel -- pressing either button only puts the box away, and the
+      // handler resumes as it did before. The z-index is the one thing this
+      // site needs: the button is raised from the landing overlay itself
+      // (200), so the notice has to clear it, or the player sees a dialog
+      // they cannot click.
+      openConfirmDialog({
+        title: "Multiplayer unavailable",
+        message: "Backend offline. Multiplayer requires the API.",
+        confirmLabel: "OK",
+        cancelLabel: "Close",
+        zIndex: 220,
+        onConfirm: () => {},
+      });
       return;
     }
     const { createMultiplayerLobby } = await import("@screens/multiplayer/multiplayerLobby");

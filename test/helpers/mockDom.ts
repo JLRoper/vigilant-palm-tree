@@ -271,6 +271,10 @@ export function installDom(opts: InstallDomOptions = {}): MockDomHandles {
     innerHeight: 1000,
     addEventListener: () => {},
     removeEventListener: () => {},
+    // The multiplayer lobby prints a join URL from `window.location.origin`
+    // when it opens, so a suite that drives the landing page's Multiplayer
+    // button needs one or it dies inside the lobby's constructor.
+    location: { origin: "http://localhost" },
   };
   (globalThis as { document: unknown }).document = doc;
   (globalThis as { window: unknown }).window = win;
