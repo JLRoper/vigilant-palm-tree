@@ -1,6 +1,7 @@
 import { HEX_DIRECTIONS, hexDistance } from "@heroes/contracts";
 import type { Axial, BuildingDef, BuildingKind, CastleLevel } from "@heroes/contracts";
-import { districtKey } from "../control";
+import { districtKey, resolveControllingSettlement, type ControllableSettlementLike } from "../control";
+import type { GameMap } from "../map/gameMap";
 
 // District adjacency -- "no floating districts".
 //
@@ -179,4 +180,61 @@ export function districtTerrainProblem(
 /** True when `terrain` is water -- the only terrain a shipyard may stand on. */
 export function isWaterTerrain(terrain: string | undefined): boolean {
   return terrain === "water";
+}
+
+/**
+ * Why the adventure map refuses to open a district on a hex, or null when it
+ * may open. The double-click's own gate (`GameEngine.handleDblClick` ->
+ * `enterDistrictCityView`), lifted out of the manager so a refusal can be
+ * SPEAKING and so the rule can be pinned without a browser.
+ *
+ * Four refusals, each named for the rule it breaks:
+ *   - `impassable_district_terrain` -- mountain / dense forest never host one
+ *     (`isForbiddenDistrictTerrain`).
+ *   - `outside_control_range` -- no settlement's `controlRange` reaches the hex
+ *     (`resolveControllingSettlement` finds nothing).
+ *   - `not_your_settlement` -- only the hex owner's seat may open the grid.
+ *   - `district_not_connected` -- the hex touches neither the settlement nor an
+ *     existing district ("no floating districts", `districtConnectionReason`),
+ *     and holds no district of its own yet.
+ *
+ * Returns null only for a hex `map` has no tile for (off the map): there is no
+ * refusal to speak about, because the pointer could never have been there.
+ */
+export const DISTRICT_ENTRY_REFUSALS = [
+  "outside_control_range",
+  "not_your_settlement",
+  "district_not_connected",
+  "impassable_district_terrain",
+] as const;
+
+export type DistrictEntryRefusal = (typeof DISTRICT_ENTRY_REFUSALS)[number];
+
+export type DistrictEntryDecision =
+  | { ok: true; settlementId: string }
+  | { ok: false; reason: DistrictEntryRefusal };
+
+export function districtEntryDecision<T extends ControllableSettlementLike>(
+  settlements: Iterable<T> | Record<string, T>,
+  localSeat: number,
+  map: GameMap,
+  q: number,
+  r: number,
+): DistrictEntryDecision | null {
+  const terrain = map.get(q, r);
+  if (terrain === undefined) return null;
+  if (isForbiddenDistrictTerrain(terrain)) {
+    return { ok: false, reason: "impassable_district_terrain" };
+  }
+  const controlling = resolveControllingSettlement(settlements, q, r, map.width, map.height);
+  if (!controlling) return { ok: false, reason: "outside_control_range" };
+  if (controlling.ownerId !== localSeat) return { ok: false, reason: "not_your_settlement" };
+  const existing = controlling.districts?.[districtKey(q, r)];
+  // An existing district of the settlement is always openable -- it was
+  // connected when it was founded. A hex with no district yet must touch the
+  // centre or an existing district, exactly as the founding rule requires.
+  if (!districtHasBuildings(existing) && districtConnectionReason(controlling, q, r) !== null) {
+    return { ok: false, reason: "district_not_connected" };
+  }
+  return { ok: true, settlementId: controlling.id };
 }

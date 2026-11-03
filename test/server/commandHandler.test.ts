@@ -2928,3 +2928,82 @@ test("EndTurn without any removal appends no TradeRouteRemoved rows (a fully-pai
   );
   assert.equal(eventRepo.events[0].kind, "TurnEnded");
 });
+
+// ---------------------------------------------------------------------------
+// F3 (playthrough round 2): heroes.troops went stale after a battle.
+// buildPostBattleHeroes wrote only `stacks` for both sides, and the sole
+// battle rewrite of the scalar lived in the LOSER's retreat/surrender path
+// (applyHeroConcession) -- so the winner kept its pre-battle headcount (24)
+// while hero_platoons summed to 15, and heroRepo persisted it while hydrate
+// re-seeded from it. Acceptance value: for EVERY surviving combatant,
+// heroes.<id>.troops === platoonTroopTotal(heroes.<id>.stacks), on the
+// persisted row AND on the API's returned hero.
+// ---------------------------------------------------------------------------
+
+test("a battle's standing WINNER gets its troops scalar rewritten with its survivors (F3)", async () => {
+  const row = makeRow(
+    [
+      // The exact reported shape: the winner walks out with a stale 24 while
+      // its real headcount is 10 and falls to whatever the fight leaves.
+      makeHero("h0", 0, 2, 2, { troops: 24, stacks: [makeSingleEntryPlatoon("hero_unit", 10)] }),
+      makeHero("h1", 1, 3, 2, { troops: 24, stacks: [makeSingleEntryPlatoon("weak_unit", 1)] }),
+    ],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { gameRepo, deps } = makeDeps(row, RESOLVE_BATTLE_UNIT_TYPES);
+
+  const result = await handleCommand(
+    { kind: "ResolveBattle", gameName: "test-game", actor: 0, attackerId: "h0", defenderId: "h1" },
+    deps,
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.attackerVerdict, "stood", "the fixture leaves the attacker the standing winner");
+  const winner = gameRepo.rows["test-game"].heroes.h0;
+  assert.ok(winner);
+  assert.equal(winner.troops, platoonTroopTotal(winner.stacks), "the persisted scalar tracks its stacks");
+  assert.notEqual(winner.troops, 24, "the stale pre-battle 24 is gone");
+  assert.equal(result.attackerHero?.troops, platoonTroopTotal(result.attackerHero?.stacks ?? []), "the API's copy agrees");
+});
+
+// A two-sided profile: a slow grunt-vs-elite matchup leaves BOTH combatants on
+// the map (the outmatched side retreats rather than being wiped), so both scalars
+// get checked. The standing attacker is the one the pre-fix code left stale.
+const TWO_SIDED_UNIT_TYPES: UnitType[] = [
+  { id: "grunt", name: "Grunt", attack: 6, defence: 4, health: 60, speed: 3, description: "", advantageType: "infantry", specialty: "militia", specialtyPriority: 1 },
+  { id: "elite", name: "Elite", attack: 20, defence: 20, health: 90, speed: 5, description: "", advantageType: "infantry", specialty: "militia", specialtyPriority: 1 },
+];
+
+test("BOTH survivors agree with their stacks: the standing winner and the retreating loser (F3)", async () => {
+  const row = makeRow(
+    [
+      makeHero("h0", 0, 2, 2, { troops: 24, stacks: [makeSingleEntryPlatoon("elite", 20)] }),
+      makeHero("h1", 1, 3, 2, { troops: 24, stacks: [makeSingleEntryPlatoon("grunt", 26)] }),
+    ],
+    [makeSettlement("s0", 0, 2, 2)],
+  );
+  const { gameRepo, deps } = makeDeps(row, TWO_SIDED_UNIT_TYPES);
+
+  const result = await handleCommand(
+    { kind: "ResolveBattle", gameName: "test-game", actor: 0, attackerId: "h0", defenderId: "h1" },
+    deps,
+  );
+
+  assert.equal(result.ok, true);
+  const saved = gameRepo.rows["test-game"].heroes;
+  const winner = saved.h0;
+  const loser = saved.h1;
+  assert.ok(winner, "the outmatched defender retreats, so the attacker is not wiped");
+  assert.ok(loser, "a retreat is not a defeat: the loser stays on the map");
+  assert.ok(platoonTroopTotal(winner.stacks) > 0, "the winner kept survivors");
+  assert.notEqual(platoonTroopTotal(winner.stacks), 24, "the fixture's stale scalar differs from the survivors");
+  for (const [label, hero] of [["winner", winner], ["loser", loser]] as const) {
+    assert.equal(hero.troops, platoonTroopTotal(hero.stacks), `${label}: one headcount, not two`);
+    assert.notEqual(hero.troops, 24, `${label}: the stale pre-battle 24 is gone`);
+  }
+  assert.equal(
+    result.attackerHero?.troops,
+    platoonTroopTotal(result.attackerHero?.stacks ?? []),
+    "the API's returned winner agrees with the persisted row",
+  );
+});

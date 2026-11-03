@@ -484,3 +484,122 @@ test("a resolved combat survives save + reload: no marker, no BATTLE resurrectio
   assert.deepEqual(reloaded.state.phase, { kind: "PLAYER_TURN", playerId: 0 }, "phase after combat reload");
   assert.equal(reloaded.state.activePlayerId, 0);
 });
+
+// ---------------------------------------------------------------------------
+// F2 (playthrough round 2): a battle the lobby no longer marks pending must not
+// be resolvable again. A client that re-hydrates a settled battle (a replayed
+// event log, a stale tab) POSTs ResolveBattle for the same pair the server has
+// already adjudicated; without the marker check the handler re-ran the whole
+// adjudication and persisted a SECOND BattleResolved that deleted a hero.
+// Acceptance value: { ok: false, reason: "battle_not_pending" }, zero events,
+// and a byte-identical heroes record.
+// ---------------------------------------------------------------------------
+
+const PHANTOM_COMMAND: Command = {
+  kind: "ResolveBattle",
+  gameName: "test-game",
+  actor: 0,
+  attackerId: "h1",
+  defenderId: "h0",
+};
+
+test("ResolveBattle refuses a defender-seat resolve for a battle the lobby no longer marks pending (F2)", async () => {
+  const { row } = makeDefenderRow();
+  // The phantom's exact shape: the battle is settled and the human is back on
+  // their own turn (active_player_id 0), so the row carries no marker -- the
+  // AI attacker h1 just happens to still be adjacent to the human defender h0.
+  row.active_player_id = 0;
+  const { gameRepo, eventRepo, deps } = makeDeps(row, UNIT_TYPES);
+  const heroesBefore = JSON.stringify(gameRepo.rows["test-game"].heroes);
+
+  const result = await handleCommand(PHANTOM_COMMAND, deps);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "battle_not_pending");
+  assert.equal(eventRepo.events.length, 0, "no second BattleResolved is appended");
+  assert.equal(result.battle, undefined, "no adjudication ran at all");
+  assert.equal(
+    JSON.stringify(gameRepo.rows["test-game"].heroes),
+    heroesBefore,
+    "the refusal leaves the world byte-identical -- the defender is not deleted",
+  );
+  assert.equal(gameRepo.rows["test-game"].heroes.h0 !== undefined, true);
+  assert.equal(lobbyOf(gameRepo).pendingBattle, undefined, "the refusal writes no marker");
+});
+
+test("ResolveBattle refuses a defender-seat resolve whose marker names a different pair, and keeps that offer pending", async () => {
+  const { row } = makeDefenderRow();
+  row.active_player_id = 0;
+  row.lobby = { legacyAutoTrade: false, aiDriver: "server", pendingBattle: { attackerId: "h9", defenderId: "h0", since: 1 } };
+  const { gameRepo, deps } = makeDeps(row, UNIT_TYPES);
+
+  const result = await handleCommand(PHANTOM_COMMAND, deps);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "battle_not_pending", "a marker for another pair is not this pair's authority");
+  assert.deepEqual(
+    lobbyOf(gameRepo).pendingBattle,
+    { attackerId: "h9", defenderId: "h0", since: 1 },
+    "the unrelated pending offer is untouched",
+  );
+});
+
+test("ResolveBattle from the ATTACKER's own seat needs no marker (the AI-vs-AI and human-attacker paths)", async () => {
+  const { row } = makeDefenderRow();
+  const { gameRepo, deps } = makeDeps(row, UNIT_TYPES);
+  assert.equal(lobbyOf(gameRepo).pendingBattle, undefined, "no marker anywhere in this fixture");
+
+  // actor 1 owns the attacker h1 (and is the active seat), exactly like the AI
+  // driver's own AI-vs-AI auto-resolve and a human attacking an adjacent AI
+  // hero. The attacker's own live collision is the authority.
+  const result = await handleCommand(
+    { kind: "ResolveBattle", gameName: "test-game", actor: 1, attackerId: "h1", defenderId: "h0" },
+    deps,
+  );
+
+  assert.equal(result.ok, true, "an attacker-seat resolve is never gated on a marker");
+  assert.equal(result.battle?.winner, "attacker");
+});
+
+test("SubmitBattleResult from the defender's seat without a pending marker is refused too (the same class)", async () => {
+  const { row } = makeDefenderRow();
+  row.active_player_id = 0;
+  const { gameRepo, eventRepo, deps } = makeDeps(row, UNIT_TYPES);
+  const heroesBefore = JSON.stringify(gameRepo.rows["test-game"].heroes);
+
+  const result = await handleCommand(
+    {
+      kind: "SubmitBattleResult",
+      gameName: "test-game",
+      actor: 0,
+      attackerId: "h1",
+      defenderId: "h0",
+      outcome: "attackerWon",
+      attackerStacks: [stack("hero_unit", 10)],
+      defenderStacks: [stack("weak_unit", 1)],
+      rounds: 1,
+      obstacleSeed: 0,
+    },
+    deps,
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "battle_not_pending");
+  assert.equal(eventRepo.events.length, 0);
+  assert.equal(JSON.stringify(gameRepo.rows["test-game"].heroes), heroesBefore);
+});
+
+test("a defender-seat resolve on a BROWSER-driven game needs no marker (the client-local AI tick stamps none)", async () => {
+  const { row } = makeDefenderRow();
+  // No aiDriver flag: the browser runs the AI tick, so the AI's attack reaches
+  // the human defender as a purely client-local BATTLE -- no EnterBattle, no
+  // server-side offer, no marker. The marker authority must not apply here.
+  row.lobby = { legacyAutoTrade: true };
+  row.active_player_id = 0;
+  const { deps } = makeDeps(row, UNIT_TYPES);
+
+  const result = await handleCommand(PHANTOM_COMMAND, deps);
+
+  assert.equal(result.ok, true, "a browser-driven game's defender path is never gated on a marker");
+  assert.equal(result.battle?.winner, "attacker");
+});

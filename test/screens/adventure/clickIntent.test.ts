@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import type { GameMap } from "../../../src/map/gameMap";
 import type { Hero } from "../../../src/entities/hero";
 import { makeHero, makePlayer, makeSettlement, makeState } from "../../charter/_helpers";
-import { clickRejectionToast, coveredWagonAt, foundSettlementRefusalToast, resolveAdventureClick } from "../../../src/screens/adventure/clickIntent";
-import { FOUND_SETTLEMENT_REFUSALS } from "@heroes/engine";
+import { clickRejectionToast, coveredWagonAt, districtEntryRefusalToast, foundSettlementRefusalToast, resolveAdventureClick } from "../../../src/screens/adventure/clickIntent";
+import { DISTRICT_ENTRY_REFUSALS, FOUND_SETTLEMENT_REFUSALS } from "@heroes/engine";
 import { gameModeSettings } from "@heroes/contracts";
 
 function stubHero(id: string, ownerId: number, q: number, r: number, movementRemaining = 10): Hero {
@@ -636,6 +636,45 @@ test("the refusal sentences cover the engine's whole vocabulary, keyed by its ow
   assert.equal(
     foundSettlementRefusalToast("brand_new_failure").message,
     "Founding refused: brand_new_failure",
+    "an unknown code surfaces rather than hiding",
+  );
+});
+
+// F3 (round 2 district-road card): a refused district ENTRY states its reason on
+// the adventure map's refusal toast. The sentences are keyed by the engine's own
+// `DistrictEntryRefusal` vocabulary (`districtEntryDecision`), so a new refusal
+// code is a failing test rather than a silent click, and an unknown code is
+// shown rather than hidden.
+test("F3: every district-entry refusal has a sentence, keyed by the engine's own codes", () => {
+  assert.deepEqual(districtEntryRefusalToast("outside_control_range"), {
+    message: "That hex is outside the settlement's control range",
+    kind: "info",
+  });
+  assert.deepEqual(districtEntryRefusalToast("not_your_settlement"), {
+    message: "That land belongs to another settlement",
+    kind: "info",
+  });
+  assert.deepEqual(districtEntryRefusalToast("district_not_connected"), {
+    message: "A district must touch the settlement or one of its districts",
+    kind: "info",
+  });
+  assert.deepEqual(districtEntryRefusalToast("impassable_district_terrain"), {
+    message: "That ground cannot hold a district",
+    kind: "info",
+  });
+  // Every code the engine can return has a sentence of its own (no code falls
+  // through to the catch-all): the two classes the card named -- out of control
+  // range and not touching the cluster -- are both here.
+  for (const reason of DISTRICT_ENTRY_REFUSALS) {
+    assert.equal(
+      districtEntryRefusalToast(reason).message.includes("District refused:"),
+      false,
+      `${reason} has no sentence`,
+    );
+  }
+  assert.equal(
+    districtEntryRefusalToast("brand_new_refusal").message,
+    "District refused: brand_new_refusal",
     "an unknown code surfaces rather than hiding",
   );
 });
