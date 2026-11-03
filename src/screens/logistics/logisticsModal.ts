@@ -33,6 +33,7 @@ import {
 } from "../../render/assetDescriptors";
 import { showToast } from "../shared/toast";
 import { styleButton, styleInput } from "@screens/shared/panel";
+import { cargoTransferRequest, ownedSettlementAt } from "../shared/cargoTransfer";
 import { openDialog } from "@screens/shared/dialog";
 import { STORAGE_GAUGE_SHEET } from "./storageGaugeAssets";
 import {
@@ -422,6 +423,51 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       if (player) {
         wagonRow("Cargo wagons", heroWagons(hero), playerWagonsUnassigned(player), "cargo");
         wagonRow("Treasury carts", heroTreasuryWagons(hero), playerTreasuryWagonsUnassigned(player), "treasury");
+      }
+      // The one control that calls the declared transferResources action: a
+      // hero standing on its own settlement moves cargo in and out of the
+      // warehouse from here. Until now the action type declared this verb and
+      // nothing in the file ever invoked it.
+      const atSettlement = ownedSettlementAt(state, hero);
+      if (atSettlement) {
+        const cargoRow = document.createElement("div");
+        cargoRow.style.cssText =
+          "display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:3px;";
+        const cargoText = document.createElement("span");
+        cargoText.style.flex = "1";
+        cargoText.textContent = "Cargo at " + atSettlement.name;
+        cargoRow.appendChild(cargoText);
+        const cargoVerbs = [
+          ["deposit", "Deposit cargo"],
+          ["withdraw", "Take cargo"],
+        ] as const;
+        for (const [verb, label] of cargoVerbs) {
+          const request = cargoTransferRequest(hero, atSettlement, verb);
+          const btn = document.createElement("button");
+          btn.textContent = label;
+          styleButton(btn);
+          btn.style.fontSize = "10px";
+          btn.style.padding = "1px 6px";
+          btn.dataset.focus = "hero-cargo-" + verb;
+          if (request.total <= 0) {
+            setUnavailable(
+              btn,
+              verb === "deposit" ? "the hero's wagons are empty" : "nothing to take from the warehouse",
+            );
+          }
+          btn.addEventListener("click", () => {
+            const result = opts.actions.transferResources(
+              hero.id,
+              atSettlement.id,
+              request.direction,
+              request.amounts,
+            );
+            if (!result.ok) rejectionToast("cargo transfer", result.reason);
+            setTimeout(render, 30);
+          });
+          cargoRow.appendChild(btn);
+        }
+        modal.body.appendChild(cargoRow);
       }
     }
 

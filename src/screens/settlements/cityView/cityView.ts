@@ -7,7 +7,7 @@ import { createSkyboxProvider } from "../../../render/skybox";
 import type { Paint2DDep } from "../../../render/scene/paint2d/deps";
 import type { ResourceType } from "../../../map/resourceTiles";
 import type { SpriteProvider } from "../../../render/assets";
-import type { BuildingDef, BuildingKind, FactionId, GameMode, GenerationStyle } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, FactionId, GameMode } from "@heroes/contracts";
 import { buildingFootprint, coversCell } from "../../../core/cityGrid";
 import { districtKey, hasLegacyStaffing, starterCityOnOpen } from "@heroes/engine";
 import {
@@ -306,7 +306,7 @@ export class CityView {
     } else {
       const starter = starterCityOnOpen({
         size: this.size,
-        style: "pixel" as GenerationStyle,
+        style: "pixel",
         existing: buildings,
         factionId,
         mode: this.getGameMode(),

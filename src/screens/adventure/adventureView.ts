@@ -150,7 +150,11 @@ export class AdventureView {
       lastMaxZoomOutHexesWide = next.maxZoomOutHexesWide;
       const vw = this.opts.canvas.clientWidth || window.innerWidth || 1280;
       const vh = this.opts.canvas.clientHeight || window.innerHeight || 800;
-      if (this.opts.camera.clampMinZoom(vw / 2, vh / 2, this.getMinCameraZoom())) {
+      const zoomed = this.opts.camera.clampMinZoom(vw / 2, vh / 2, this.getMinCameraZoom());
+      // A lap of zoom-out changes how much of the map fits, so the pan bounds
+      // move with it: re-clamp after the zoom, not only on the next drag.
+      const snapped = this.clampCamera();
+      if (zoomed || snapped) {
         this.opts.onRedraw();
       }
     });
@@ -159,6 +163,18 @@ export class AdventureView {
   private getMinCameraZoom(): number {
     const vw = this.opts.canvas.clientWidth || window.innerWidth || 1280;
     return computeMinZoomForHexWidth(vw, settings().maxZoomOutHexesWide);
+  }
+
+  /**
+   * Keep the main camera on the map (F3). Every surface that moves it — drag
+   * pan, wheel zoom, minimap click, minimap frame drag, resize and the
+   * zoom-out setting — routes through here, so no path can walk the map off
+   * screen into an empty black viewport. Returns true when it moved the camera.
+   */
+  private clampCamera(): boolean {
+    const vw = this.opts.canvas.clientWidth || window.innerWidth || 1280;
+    const vh = this.opts.canvas.clientHeight || window.innerHeight || 800;
+    return this.opts.camera.clampToMap(vw, vh, this.opts.map.width, this.opts.map.height);
   }
 
   private get state(): GameState {
@@ -391,6 +407,7 @@ export class AdventureView {
     const camera = this.opts.camera;
     camera.x -= dx * camera.zoom;
     camera.y -= dy * camera.zoom;
+    this.clampCamera();
   }
 
   private onMouseMove(e: MouseEvent): void {
@@ -425,6 +442,7 @@ export class AdventureView {
     if (this.drag.isActive()) {
       const { dx, dy } = this.drag.moveTo(e.clientX, e.clientY);
       this.opts.camera.pan(dx, dy);
+      this.clampCamera();
     }
 
     // Ignore pointer updates when hovering over HTML UI overlays.
@@ -759,14 +777,18 @@ export class AdventureView {
       return;
     }
     this.opts.camera.zoomAt(e.clientX, e.clientY, factor, this.getMinCameraZoom());
+    this.clampCamera();
     this.opts.onRedraw();
   }
 
   centerOn(q: number, r: number): void {
     const camera = this.opts.camera;
     const { x: wx, y: wy } = axialToPixel(q, r);
-    camera.x = window.innerWidth / 2 - wx * camera.zoom;
-    camera.y = window.innerHeight / 2 - wy * camera.zoom;
+    const vw = this.opts.canvas.clientWidth || window.innerWidth || 1280;
+    const vh = this.opts.canvas.clientHeight || window.innerHeight || 800;
+    camera.x = vw / 2 - wx * camera.zoom;
+    camera.y = vh / 2 - wy * camera.zoom;
+    this.clampCamera();
   }
 
   centerOnMap(): void {

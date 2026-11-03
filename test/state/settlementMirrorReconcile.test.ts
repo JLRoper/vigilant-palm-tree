@@ -51,7 +51,7 @@ function assertMirrorMatchesState(manager: GameStateManager, id: string): void {
   const authoritative = manager.getState().settlements[id];
   assert.ok(mirror, `mirror holds ${id}`);
   assert.ok(authoritative, `state holds ${id}`);
-  const projected = mirror.toGameState() as Record<string, unknown>;
+  const projected = mirror.toGameState();
   for (const [key, value] of Object.entries(projected)) {
     if (UNMIRRORED.includes(key as keyof SettlementState)) continue;
     assert.deepEqual(
