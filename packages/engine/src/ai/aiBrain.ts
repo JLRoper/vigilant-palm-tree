@@ -1,10 +1,11 @@
 import { Axial, isCoveredWagonId, resolveGameMode } from "@heroes/contracts";
 import { findPath, NEIGHBOR_DIRS, hexDistance } from "../map/pathfinding";
 import { GameMap } from "../map/gameMap";
-import type { BuildingDef, BuildingKind, FactionId, GameState, HeroId, HeroState, SettlementState } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, FactionId, GameState, HeroId, HeroState, SettlementId, SettlementState } from "@heroes/contracts";
 import {
   platoonPower,
   platoonTroopTotal,
+  platoonsHaveTroops,
   settlementStacks,
   unitPower,
   type UnitType,
@@ -14,7 +15,14 @@ import {
   eligibleRecruitSources,
   type RecruitSource,
 } from "../settlement/recruitUnits";
-import { buildingDraftMax } from "../buildingRegistry";
+import {
+  buildingDraftMax,
+  buildingFootprintFromRegistry,
+  buildingPlacementCost,
+  getBuildingEffect,
+  isRecruitBuilding,
+} from "../buildingRegistry";
+import { cityViewSizeFor } from "../settlement/citySpots";
 import { RESOURCES } from "../map/resourceTiles";
 import { computeSettlementRates, generateSettlementName } from "../economy/settlementRates";
 import { evaluateCharterRequirements, validCharterHexes } from "../charter/requirements";
@@ -235,6 +243,321 @@ function recruitSourceBuilding(
 
 function powerPerGold(source: RecruitSource, unitTypes: Record<string, UnitType>): number {
   return unitPower(unitTypes[source.entry.unitTypeId]) / source.entry.goldCost;
+}
+
+// ── The hero's own army: an AI seat's route THROUGH the capital garrison ───
+//
+// `pickGarrisonRecruitment` above spends a seat's gold on the troops standing
+// IN its towns, and `aiDriver` dispatches those into settlement garrisons
+// only. That left the seat with no route past a garrisoned target at all once
+// neutral capitals started garrisoned (settlement/neutralGarrison.ts): the
+// hero's army never grew, and `attackerBeatsGarrison` (1.5x the garrison's
+// power) declined the 168-power capital forever with the 132-power starting
+// army. A player faces the same 1.5x-equivalent gate and gets through it the
+// only way the engine offers: recruit at a settlement (`RecruitUnits` lands in
+// the GARRISON) and `TransferUnits` the recruits onto the hero standing on
+// that settlement's tile. These planners are that same route for the AI.
+//
+// SIZING — the player's realistic force at the turn it can first reach a
+// capital, measured the same way the garrison table was (resolveBattle, real
+// unit catalog, 12 obstacle seeds against the 168-power capital garrison):
+// the player's starting army (216 power) LOSES 12/12, +10 swordsmen (316) wins
+// 12/12, and the +13 swordsmen / 2,600g force the garrison doc calls one
+// turn's recruiting (346) wins 12/12. So 346 is the number that same curve
+// ends at, and it is deliberately BOTH:
+//   * below what a player can field at that turn (it IS the player's number),
+//     so the AI can never be stronger than the player at the same turn, since
+//     it pays the same gold, warehouse and draft-pool prices for every unit;
+//   * above this brain's own gate (1.5 x 168 = 252), which is what makes an
+//     army grown to it ATTACK the capital instead of routing around it.
+export const HERO_ARMY_TARGET_POWER = 346;
+
+// How far from its city a hero will still walk home to collect troops that are
+// waiting there — the same reach style as the settlement bands above.
+const HERO_REFIT_REACH = 14;
+
+export interface HeroArmyRecruitment {
+  heroId: HeroId;
+  settlementId: SettlementId;
+  buildingKind: BuildingKind;
+  gx: number;
+  gy: number;
+  unitTypeId: string;
+  count: number;
+  district?: { q: number; r: number };
+}
+
+/**
+ * The purchases that grow a seat's hero armies toward HERO_ARMY_TARGET_POWER,
+ * taken from the city each hero recruits out of (heroArmyHome: the city it
+ * stands on when that one can recruit, else the nearest of the seat's that
+ * can — a player recruits where the barracks are, wherever the hero happens to
+ * be).
+ *
+ * `RecruitUnits` deposits into that settlement's garrison, and only
+ * `TransferUnits` moves the recruits onto a hero — a command that refuses a
+ * hero anywhere but the settlement's own tile, which is why the hero's walk
+ * home (pickHeroRefitStep) is the other half of this loop. The purchases are
+ * sized to what the hero plus its waiting garrison still lack, priced by the
+ * same shopping rule the garrison planner uses (best power per gold, the same
+ * gold reserve, warehouse and draft-pool limits — one rule for both spenders),
+ * and the caller dispatches a transfer straight after each accepted recruit
+ * that the hero is standing there for.
+ *
+ * Settlers mode is excluded outright: a covered wagon has no army and must
+ * never be given one (the mode's whole premise, pickSettlersWagonAction above).
+ * Pure and deterministic: no clock, no rng, stable tie-breaks.
+ */
+export function pickHeroArmyRecruitment(
+  state: GameState,
+  seat: number,
+  unitTypes: Record<string, UnitType> = {},
+): HeroArmyRecruitment[] {
+  if (resolveGameMode(state.gameMode) === "settlers") return [];
+  const out: HeroArmyRecruitment[] = [];
+  for (const hero of Object.values(state.heroes)) {
+    if (hero.ownerId !== seat) continue;
+    if (isCoveredWagonId(hero.id)) continue;
+    const home = heroArmyHome(state, hero);
+    if (!home) continue;
+    const deficit = heroArmyDeficit(hero, home, unitTypes);
+    if (deficit <= 0) continue;
+    for (const item of garrisonPurchases(
+      home,
+      home.id,
+      deficit,
+      unitTypes,
+      state.players.find((player) => player.id === seat)?.factionId,
+    )) {
+      out.push({ ...item, heroId: hero.id });
+    }
+  }
+  return out;
+}
+
+/**
+ * The seat's city a hero grows its army from: the settlement it is standing on
+ * when that one can recruit at all, else the nearest of its own that can, else
+ * the nearest own settlement. A player recruits where the barracks are; the
+ * hero then walks there to collect (pickHeroRefitStep below), which is why the
+ * city is chosen independently of where the hero happens to be standing.
+ */
+function heroArmyHome(state: GameState, hero: HeroState): SettlementState | null {
+  const owned = Object.values(state.settlements).filter((s) => s.ownerId === hero.ownerId);
+  if (owned.length === 0) return null;
+  const standingOn = owned.find((s) => s.q === hero.q && s.r === hero.r);
+  if (standingOn && eligibleRecruitSources(standingOn).length > 0) return standingOn;
+  const ranked = owned
+    .slice()
+    .sort((a, b) => hexDistance(hero, a) - hexDistance(hero, b) || a.q - b.q || a.r - b.r);
+  return ranked.find((s) => eligibleRecruitSources(s).length > 0) ?? ranked[0];
+}
+
+/**
+ * What the hero's army is still missing: the target, less what it already
+ * carries, less what its city is already holding for it. Counting the waiting
+ * garrison is what keeps the purchases from piling up a second army at home
+ * while the hero is still walking back.
+ */
+function heroArmyDeficit(
+  hero: HeroState,
+  home: SettlementState,
+  unitTypes: Record<string, UnitType>,
+): number {
+  return (
+    HERO_ARMY_TARGET_POWER -
+    platoonPower(hero.stacks, unitTypes) -
+    platoonPower(settlementStacks(home), unitTypes)
+  );
+}
+
+export interface HeroArmyPlacement {
+  settlementId: SettlementId;
+  kind: BuildingKind;
+  gx: number;
+  gy: number;
+}
+
+/**
+ * Extra recruit buildings for the seat's city, when its recruits alone cannot
+ * reach HERO_ARMY_TARGET_POWER.
+ *
+ * This is the half the draft pool makes unavoidable, and it was measured, not
+ * assumed: a seat holds ONE recruit building for its faction on a fresh map, at
+ * `draftMax` 3 units recharged `draftPerDay` per day, so the troop trickle
+ * alone buys about +14 power in 24 rounds (seed 26 medium, ghoul-class units)
+ * or +42 in 24 rounds (seed 12) — far short of the 252 an assault needs. A
+ * player answers that by placing more recruit buildings in the city view, and
+ * this is the same answer through the same `PlaceBuildings` command, paying the
+ * same placement cost, resource cost and build days. Measured with it: capital
+ * reach (346) in ten rounds on the same boards.
+ *
+ * The kind is a recruit building the settlement ALREADY has, so a fresh
+ * placement is always faction-legal and its level-1 recruits are known; the
+ * copies needed are whatever covers the deficit at `draftMax` units per
+ * building. City cells come from the front of the same grid the city view
+ * draws (`cityViewSizeFor`), first fit, skipping every cell an existing
+ * building's footprint covers.
+ */
+export function pickHeroArmyBuildings(
+  state: GameState,
+  seat: number,
+  unitTypes: Record<string, UnitType> = {},
+): HeroArmyPlacement[] {
+  if (resolveGameMode(state.gameMode) === "settlers") return [];
+  const out: HeroArmyPlacement[] = [];
+  for (const hero of Object.values(state.heroes)) {
+    if (hero.ownerId !== seat) continue;
+    if (isCoveredWagonId(hero.id)) continue;
+    const settlement = heroArmyHome(state, hero);
+    if (!settlement) continue;
+    const deficit = heroArmyDeficit(hero, settlement, unitTypes);
+    if (deficit <= 0) continue;
+    if (recruitCapacityPower(settlement, unitTypes) >= deficit) continue;
+    const kind = bestRecruitKindOwned(settlement, unitTypes);
+    if (!kind) continue;
+    const perBuilding = buildingDraftMax(kind) * bestLevelOnePower(kind, unitTypes);
+    if (perBuilding <= 0) continue;
+    let needed = Math.ceil((deficit - recruitCapacityPower(settlement, unitTypes)) / perBuilding);
+    const cells = freeCityCells(settlement, kind, needed);
+    for (const cell of cells) {
+      if (needed <= 0) break;
+      const cost = buildingPlacementCost(kind);
+      if ((cost.gold ?? 0) + GARRISON_GOLD_RESERVE > settlement.gold) break;
+      if ((cost.wood ?? 0) > settlement.warehouse.wood) break;
+      if ((cost.stone ?? 0) > settlement.warehouse.stone) break;
+      if ((cost.iron ?? 0) > settlement.warehouse.iron) break;
+      if ((cost.arcane ?? 0) > settlement.warehouse.arcane) break;
+      out.push({ settlementId: settlement.id, kind, gx: cell.gx, gy: cell.gy });
+      needed -= 1;
+    }
+  }
+  return out;
+}
+
+/** Power the settlement's recruit buildings can still field from their draft pools right now. */
+function recruitCapacityPower(
+  settlement: SettlementState,
+  unitTypes: Record<string, UnitType>,
+): number {
+  let power = 0;
+  for (const source of eligibleRecruitSources(settlement, { unitTypes })) {
+    const building = recruitSourceBuilding(settlement, source);
+    const avail = building
+      ? Math.floor(building.draft?.[source.entry.unitTypeId] ?? buildingDraftMax(building.kind))
+      : 0;
+    if (avail <= 0) continue;
+    power += avail * unitPower(unitTypes[source.entry.unitTypeId]);
+  }
+  return power;
+}
+
+/** The strongest unit a level-1 copy of this kind offers (a fresh placement starts at level 1). */
+function bestLevelOnePower(kind: BuildingKind, unitTypes: Record<string, UnitType>): number {
+  let power = 0;
+  for (const entry of getBuildingEffect(kind).recruits) {
+    if ((entry.minLevel ?? 1) > 1) continue;
+    power = Math.max(power, unitPower(unitTypes[entry.unitTypeId]));
+  }
+  return power;
+}
+
+/** The recruit kind this settlement already holds the AI should copy: best power per gold at level 1. */
+function bestRecruitKindOwned(
+  settlement: SettlementState,
+  unitTypes: Record<string, UnitType>,
+): BuildingKind | null {
+  let best: { kind: BuildingKind; value: number } | null = null;
+  for (const building of settlement.buildings) {
+    if (!isRecruitBuilding(building.kind)) continue;
+    for (const entry of getBuildingEffect(building.kind).recruits) {
+      if ((entry.minLevel ?? 1) > 1 || entry.goldCost <= 0) continue;
+      const value = unitPower(unitTypes[entry.unitTypeId]) / entry.goldCost;
+      if (!best || value > best.value) best = { kind: building.kind, value };
+    }
+  }
+  return best?.kind ?? null;
+}
+
+/** The first `count` footprint-free cells of the settlement's own city grid, in row order. */
+function freeCityCells(
+  settlement: SettlementState,
+  kind: BuildingKind,
+  count: number,
+): Array<{ gx: number; gy: number }> {
+  const grid = cityViewSizeFor(settlement.level);
+  const footprint = buildingFootprintFromRegistry(kind, 1);
+  const occupied = new Set<string>();
+  for (const building of settlement.buildings) {
+    const fp = buildingFootprintFromRegistry(building.kind, building.level);
+    const w = Math.max(1, Math.ceil(building.w ?? fp.w));
+    const h = Math.max(1, Math.ceil(building.h ?? fp.h));
+    for (let dy = 0; dy < h; dy++) {
+      for (let dx = 0; dx < w; dx++) occupied.add(`${building.gx + dx},${building.gy + dy}`);
+    }
+  }
+  const out: Array<{ gx: number; gy: number }> = [];
+  for (let gy = 0; gy + footprint.h <= grid && out.length < count; gy++) {
+    for (let gx = 0; gx + footprint.w <= grid && out.length < count; gx++) {
+      let free = true;
+      for (let dy = 0; dy < footprint.h && free; dy++) {
+        for (let dx = 0; dx < footprint.w && free; dx++) {
+          if (occupied.has(`${gx + dx},${gy + dy}`)) free = false;
+        }
+      }
+      if (free) {
+        out.push({ gx, gy });
+        for (let dy = 0; dy < footprint.h; dy++) {
+          for (let dx = 0; dx < footprint.w; dx++) occupied.add(`${gx + dx},${gy + dy}`);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The step a hero takes toward the friendly city whose garrison is holding
+ * troops for it, or null.
+ *
+ * The collect half of the loop above: recruits land in a settlement garrison,
+ * and only a hero standing on that tile can take them. The errand exists ONLY
+ * while troops are actually waiting (`platoonsHaveTroops`), so a hero with an
+ * empty home city — which is every hero in a game the AI is not growing an
+ * army in — plans exactly as it did before, and `pickAiMove` keeps its
+ * contract. Pure and deterministic: no clock, no rng.
+ */
+export function pickHeroRefitStep(
+  state: GameState,
+  heroId: HeroId,
+  map: GameMap,
+  unitTypes: Record<string, UnitType> = {},
+  blocked: ReadonlySet<string> = new Set<string>(),
+): AiMove | null {
+  if (resolveGameMode(state.gameMode) === "settlers") return null;
+  if (isCoveredWagonId(heroId)) return null;
+  const hero = state.heroes[heroId];
+  if (!hero) return null;
+  if (hero.movementRemaining < 1) return null;
+  if (platoonPower(hero.stacks, unitTypes) >= HERO_ARMY_TARGET_POWER) return null;
+  const homes = Object.values(state.settlements).filter(
+    (s) =>
+      s.ownerId === hero.ownerId &&
+      !(s.q === hero.q && s.r === hero.r) &&
+      platoonsHaveTroops(settlementStacks(s)) &&
+      hexDistance(hero, s) <= HERO_REFIT_REACH,
+  );
+  if (homes.length === 0) return null;
+  homes.sort((a, b) => hexDistance(hero, a) - hexDistance(hero, b) || a.q - b.q || a.r - b.r);
+  const obstacles = new Set<string>(blocked);
+  for (const [otherId, other] of Object.entries(state.heroes)) {
+    if (otherId !== heroId) obstacles.add(`${other.q},${other.r}`);
+  }
+  for (const home of homes) {
+    const step = stepToward(hero, { q: home.q, r: home.r }, map, obstacles);
+    if (step) return step;
+  }
+  return null;
 }
 
 export interface CharterAction {
