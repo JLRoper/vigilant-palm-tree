@@ -52,8 +52,22 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
     inset: "0",
     zIndex: "200",
     display: "flex",
-    alignItems: "center",
+    // Centring that SURVIVES overflow (playthrough finding 20): the card is
+    // centred by its own auto margins, not by `align-items`, and the overlay
+    // itself scrolls. A centred flex item taller than its container spills past
+    // the scroll origin, and nothing can scroll to what is above that origin --
+    // measured at the turnover tip on a 566px-tall viewport, where the Create
+    // Game button sat 43px below the fold, the overlay's scrollTop would not
+    // move, a real click at its centre hit nothing, and the client quietly
+    // quick-started a starter classic game instead of the game the player asked
+    // for. The full-screen form is the app's own chrome on a laptop viewport,
+    // so "it fits" is not an assumption this screen may make.
+    alignItems: "flex-start",
     justifyContent: "center",
+    overflowY: "auto",
+    overflowX: "hidden",
+    padding: "24px 16px",
+    boxSizing: "border-box",
     background:
       "radial-gradient(ellipse at top, #1c2f57 0%, #0d1730 60%, #06091a 100%)",
     fontFamily: "Georgia, 'Times New Roman', serif",
@@ -63,7 +77,11 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
 
   const card = document.createElement("div");
   Object.assign(card.style, {
-    width: "min(560px, 92vw)",
+    // `auto` on both cross-axis margins is what re-centres the card when there
+    // IS room and degrades to "flush to the top, scroll for the rest" when
+    // there is not (auto margins resolve to zero once the item overflows).
+    margin: "auto",
+    width: "min(560px, 100%)",
     padding: "36px 32px 28px",
     background: "rgba(10, 16, 32, 0.78)",
     border: "1px solid rgba(201,162,39,0.55)",
