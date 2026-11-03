@@ -79,6 +79,11 @@ export class EntityMirror {
       case "TradeRouteCreated":
       case "TradeRouteUpdated":
       case "TradeRouteRemoved":
+      // A caravan's own daily tick moves a route's caravan record, not a
+      // mirrored entity: the cart is drawn from the state by
+      // CaravanVisualTracker (src/render/caravanMarkers.ts), which reads the
+      // state, not this mirror.
+      case "CaravanAdvanced":
       case "UnitsRecruited":
       case "UnitsTransferred":
       case "HeroesTraded":

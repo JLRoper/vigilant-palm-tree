@@ -1,6 +1,6 @@
-import { applyEndOfTurnDetailed, endTurn, advanceRound } from "@heroes/engine";
-import type { GameMap, UnitType } from "@heroes/engine";
-import type { AutoTradeTransfer, GameState, TradeRouteId } from "@heroes/contracts";
+import { applyEndOfTurnDetailed, endTurn, advanceRound, endpointOwner, routeOwnerId, sameCaravanRecord } from "@heroes/engine";
+import type { EndpointRecords, GameMap, UnitType } from "@heroes/engine";
+import type { AutoTradeTransfer, CaravanState, GameState, TradeRouteId } from "@heroes/contracts";
 
 // Round advances and weekly-upkeep triggers, per
 // plan/2026-08-16-phase-3-parallel-dev-plan.md's Track 3.A Week 2 port of
@@ -87,4 +87,60 @@ export function removedTradeRouteIds(before: GameState, after: GameState): Trade
   return (before.tradeRoutes ?? [])
     .filter((r) => !afterIds.has(r.id))
     .map((r) => r.id);
+}
+
+/** One route's caravan change over this EndTurn pipeline — the material for one CaravanAdvanced row. */
+export interface CaravanAdvance {
+  routeId: TradeRouteId;
+  /** The route's caravan after the wrap, verbatim (null = home and unloaded). */
+  caravan: CaravanState | null;
+  /** Units (of the route payload's kind) the wrap loaded out of the FROM endpoint. */
+  loaded: number;
+  /** Units the wrap landed on the TO endpoint — 0 for a return, a reroute or a turnaround with cargo aboard. */
+  delivered: number;
+}
+
+// The caravan records this EndTurn pipeline actually moved, per route, for
+// the EndTurn command case to append as CaravanAdvanced rows — the same
+// set-difference derivation as removedTradeRouteIds above, and the reason
+// advanceTradeRoutes needs no event sink of its own: the movement pass stays
+// a pure reducer and the server, which owns the log, derives what to report.
+// A wrap that moved nothing yields no rows, and routes are never ADDED inside
+// the pipeline (createTradeRoute is a command), so a route missing from
+// `after` was removed by desertion and is skipped here — its own
+// TradeRouteRemoved row already reports that.
+//
+// `loaded` is exactly the departure wrap's cargo: a caravan is created from
+// null only by advanceTradeRoutes's load branch, which returns with
+// `cargo: load, pathIndex: 0` and walks nothing that wrap.
+//
+// `delivered` is the cargo that left the caravan on the OUTBOUND leg while
+// the destination was still deliverable — present, and owned by the route
+// owner, in the after-state. That check is what keeps it exact: in
+// advanceTradeRoutes a toDestination cargo only ever shrinks by delivering,
+// and the two ways an outbound leg ends with its cargo intact (a dead hero
+// destination, a destination that changed hands) both flip the cart to
+// toHome with the cargo aboard. Without it, a death-return that also reached
+// home in the same wrap would read as a delivery of the whole load
+// (`{toDestination, cargo 50}` -> null). A homeward leg never reports a
+// delivery: reaching the origin deposits a RETURN, and a lost origin
+// reroutes to the owner's nearest settlement — a target this route-level
+// comparison cannot name, which is why the endpoint stores themselves are
+// left to the TurnEnded resync boundary.
+export function caravanAdvances(before: GameState, after: GameState): CaravanAdvance[] {
+  const routesAfter = new Map((after.tradeRoutes ?? []).map((r) => [r.id, r]));
+  const records: EndpointRecords = { settlements: after.settlements, heroes: after.heroes };
+  const advances: CaravanAdvance[] = [];
+  for (const route of before.tradeRoutes ?? []) {
+    const next = routesAfter.get(route.id);
+    if (!next) continue;
+    const was = route.caravan ?? null;
+    const now = next.caravan ?? null;
+    if (sameCaravanRecord(was, now)) continue;
+    const loaded = was === null ? (now?.cargo ?? 0) : 0;
+    const outboundDelivery = was?.phase === "toDestination" && endpointOwner(next.to, records) === routeOwnerId(next, records);
+    const delivered = outboundDelivery ? was.cargo - (now?.cargo ?? 0) : 0;
+    advances.push({ routeId: route.id, caravan: now, loaded, delivered });
+  }
+  return advances;
 }
