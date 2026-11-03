@@ -10,11 +10,20 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.38.8] - 2026-11-03
+## [0.38.9] - 2026-11-03
+
 seat truth: a seat's own turn
 - End Turn is seat-scoped on both sides (playthrough round 2b, F1): the toolbar offers the control only on the local seat's own turn (`canEndTurnFromSeat`), the command declares the seat that is asking (`EndTurn.clientSeat`, required over HTTP by `parseCommand`), and `endTurnSeatRefusal` refuses a declaration that is not the seat being ended. A browser-driven AI seat's turn, ended by seat 0's client, and the drop policy's own skip keep working.
 - `GET /games/:name`'s `availableSeats` now means what it says (F3): the seats a client could still claim, instead of the falsy keys of `lobby.claimed` (structurally always `[]`). `seatTotal` is the game's seat count, AI seats included (F7).
 - A browser plays the seat it claimed (F2): `loadGame` no longer resets a client that claimed seat 1 back to seat 0. The single-browser hotseat is out of scope, with the drop-policy change it would need named in docs/multiplayer.md (Decision 4).
+
+## [0.38.8] - 2026-11-03
+
+The granular per-building ledger (settlement_buildings) could not hold a district building at all: its unique key was (game_id, settlement_id, gx, gy) and a district's buildings sit on the district's own 5x5 grid, so a district building at (0,0) collided with the main city's (0,0) and no row could be written. The ledger held 11 rows for a town whose state carried 14 buildings, and a sum of its own rows came up short by exactly the districts' output -- 3.12 stone + 3.75 food/day on the playthrough card's Stone mark, against a panel aggregate of 5.88 stone / 26.95 food (playthrough round 2b, finding E8).
+
+Migration 035 adds nullable district_q / district_r to settlement_buildings (NULL = main city, otherwise the district's own hex -- the same "q,r" key districtKey() uses), re-scopes the unique key to include them, and backfills every existing game's district buildings out of its settlements.districts JSONB column, guardedly: initSchema() re-runs every migration on every boot with no error handling, so a malformed districts shape has to be skipped rather than thrown, and a second run has to be a no-op.
+
+settlementRepo writes every building the settlement owns -- main city and every district -- as one row each, and reassembles SettlementState.districts from those rows plus the JSONB column's per-district metadata (q, r, citySpots), falling back to the JSONB buildings array for a district it has no rows for at all (a game whose rows predate 035, or a district the backfill's shape guards skipped) -- the granular-first / JSONB-fallback rule hydrate.ts applies a level up. The panel's rate is unchanged: the same settlementProductionRates() now reads a complete ledger, and a test fails if a district building is dropped from it.
 
 ## [0.38.7] - 2026-11-03
 
