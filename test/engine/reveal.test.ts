@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   HERO_VISION_RANGE,
   mergePlayerReveal,
+  revealForPlayer,
   visionKeysAroundPoints,
   visionKeysForPlayer,
 } from "@heroes/engine";
@@ -128,4 +129,38 @@ test("mergePlayerReveal preserves everything else by reference", () => {
   assert.equal(merged.heroes, state.heroes);
   assert.equal(merged.settlements, state.settlements);
   assert.deepEqual(merged.players[1], state.players[1]);
+});
+
+// revealForPlayer is the ONE uncharted-mode rule: the server applies it and
+// persists the result, the client applies it to its own optimistic state (see
+// test/state/revealMirrorReconcile.test.ts). Its gate is the `revealedTiles`
+// key, which init.ts stamps on the human seats of an uncharted game only.
+
+test("revealForPlayer unions the seat's vision and the walked corridor into its reveal", () => {
+  const base = visionFixture();
+  const uncharted = {
+    ...base,
+    players: base.players.map((p) => (p.id === 0 ? { ...p, revealedTiles: [] as string[] } : p)),
+  };
+  const revealed = revealForPlayer(uncharted, 0, [{ q: 20, r: 20 }]);
+  const keys = revealed.players[0].revealedTiles;
+  assert.ok(keys, "the seat keeps its key");
+  assert.ok(keys!.includes("0,0"), "the seat's own hero ring lands in the reveal");
+  assert.ok(keys!.includes("4,0"), "…out to HERO_VISION_RANGE");
+  assert.ok(keys!.includes("20,20"), "the walked corridor's point is revealed too");
+  assert.equal(keys!.includes("50,50"), false, "another seat's hero is not revealed");
+  assert.deepEqual(revealed.players[1], uncharted.players[1], "other seats untouched");
+});
+
+test("revealForPlayer is a no-op for a seat that maintains no reveal", () => {
+  const classic = visionFixture();
+  assert.equal(revealForPlayer(classic, 0), classic, "a classic game's human seat writes nothing");
+
+  const ai = makeState({
+    players: [{ ...makePlayer(0, "ai", ["h0"], []), revealedTiles: [] as string[] }],
+    heroes: [makeHero("h0", 0, 0, 0)],
+  });
+  assert.equal(revealForPlayer(ai, 0, [{ q: 20, r: 20 }]), ai, "an AI seat is never reveal-stamped");
+
+  assert.equal(revealForPlayer(classic, 99), classic, "an unknown seat is a no-op");
 });
