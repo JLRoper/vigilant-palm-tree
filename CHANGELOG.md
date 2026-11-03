@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.41.0] - 2026-11-03
+
+Per-faction troop upkeep: the three non-human rosters pay their own bill (migration 037)
+
 ## [0.40.1] - 2026-11-03
 
 fix(ui): the native prompt() freezes the renderer too — the asset-upload key comes from the app's own text-input dialog
