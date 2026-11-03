@@ -304,7 +304,8 @@ test("migration 035 gives an existing game's district buildings rows, and re-app
       districtBuildings,
       "the backfill writes one row per district building",
     );
-    const [reloaded] = await createSettlementRepo(pool).loadAllForGame(name);
+    const reloaded = (await createSettlementRepo(pool).loadAllForGame(name)).find((s) => s.id === town.id);
+    assert.ok(reloaded, "the settlement came back from the ledger");
     assert.deepEqual(
       reloaded.districts,
       payload.settlements[town.id].districts,
