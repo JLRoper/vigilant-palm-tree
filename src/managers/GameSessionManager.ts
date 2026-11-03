@@ -4,7 +4,7 @@ import { ViewManager } from "./ViewManager";
 import { UIManager } from "./UIManager";
 import { CURRENT_MAP_GEN_VERSION, GameMap, type MapSize, getOrCreateGameMap, resolveMapSize, resolveSavedMapGenVersion } from "../map/gameMap";
 import { markSaved } from "../state/gameState";
-import { playerHeroId } from "../game/initState";
+import { resolveLoadCameraCenter } from "../game/loadCamera";
 import { CASTLE_COUNT_DEFAULT, defaultCastleSeedFromMapSeed, generateCastles } from "../map/castlePlacement";
 import { loadUnitCatalog } from "../data/unitCatalog";
 import { MAP_SEED } from "@screens/adventure/adventureView";
@@ -78,16 +78,23 @@ export class GameSessionManager {
     this.state.resetAiTurnMemory();
     this.state.replaceState(hydrated);
     this.view.updateMap(map);
-    const center = this.state.getHero(playerHeroId())?.tile ?? { q: 6, r: 5 };
+    // The seat this browser holds, resolved BEFORE the camera: the centre below
+    // keys off it, and a reloaded tab has no in-memory seat for this game yet.
+    const claimed = (loaded as unknown as { lobby?: { claimed?: Record<string, { handle: string }> } }).lobby?.claimed ?? {};
+    const claimedSeat = Number(Object.keys(claimed).find((k) => claimed[k]) ?? "");
+    const hasClaimedSeat = Number.isInteger(claimedSeat) && claimedSeat >= 0;
+    if (hasClaimedSeat) setInMemoryLocalPlayerId(loaded.name, claimedSeat);
+    // F6 (playthrough round 2b): centre on what THIS game actually has -- the
+    // seat's own wagon / commander / settlement. The load path used to key off
+    // `getHero(playerHeroId())` (literally "p0-hero", which no settlers game has
+    // before founding) with the classic castle-less spawn hex {q:6,r:5} as its
+    // fallback, so an unfounded settlers game opened fully fogged with the
+    // player's wagon off screen. Ladder + fallback: src/game/loadCamera.ts.
+    const center = resolveLoadCameraCenter(hydrated, hasClaimedSeat ? claimedSeat : 0, map);
     this.view.centerOn(center.q, center.r);
     this.ui.getToolbar()?.refresh();
     void this.session.logEvent(loaded.name, "load_game", {});
 
-    const claimed = (loaded as unknown as { lobby?: { claimed?: Record<string, { handle: string }> } }).lobby?.claimed ?? {};
-    const claimedSeat = Number(Object.keys(claimed).find((k) => claimed[k]) ?? "");
-    if (Number.isInteger(claimedSeat) && claimedSeat >= 0) {
-      setInMemoryLocalPlayerId(loaded.name, claimedSeat);
-    }
     // Seed the event-cursor poller from the same response the full hydrate
     // above came from (#146), so its first poll asks for events *after* this
     // snapshot instead of replaying the whole log. A row without
