@@ -792,7 +792,7 @@ test("D10: an AI-seat command on a server-driven game is 403 ai_seat_command_for
     const res = await fetch(`${baseUrl}/games/${name}/commands`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind: "EndTurn", actor: 1 }),
+      body: JSON.stringify({ kind: "EndTurn", actor: 1, clientSeat: 0 }),
     });
     assert.equal(res.status, 403, await res.clone().text());
     assert.deepEqual(await res.json(), { error: "ai_seat_command_forbidden" });
@@ -970,7 +970,7 @@ test("D10: the same AI-seat command on an unflagged game keeps today's behavior 
     const res = await fetch(`${baseUrl}/games/${name}/commands`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind: "EndTurn", actor: 1 }),
+      body: JSON.stringify({ kind: "EndTurn", actor: 1, clientSeat: 0 }),
     });
     assert.equal(res.status, 200, await res.clone().text());
     const active = await pool.query<{ active_player_id: number }>(
@@ -983,6 +983,117 @@ test("D10: the same AI-seat command on an unflagged game keeps today's behavior 
   }
 });
 
+// F1 (playthrough round 2b): the End Turn control belongs to the seat that
+// holds the turn, and the command must say which seat is asking
+// (`EndTurn.clientSeat`, required over HTTP by parseCommand). The
+// turn-ownership guard alone is satisfied by naming the ACTIVE seat, which is
+// exactly what a seat-0 client used to do while seat 1 held the turn.
+const TWO_HUMAN_ROUTE_PLAYERS = [
+  { id: 0, faction: "player", name: "P0", color: "#000000", heroIds: [], settlementIds: [] },
+  { id: 1, faction: "player", name: "P1", color: "#222222", heroIds: [], settlementIds: [] },
+];
+
+// A two-human-seat game with both seats claimed handle-only (the anonymous
+// shape a LAN join produces -- no email binding, so the route's actor-vs-seat
+// check has nothing to bind and the handler is the only guard left).
+async function seedTwoHumanGame(name: string, activePlayerId: number): Promise<void> {
+  const { heroId, settlementId } = ids(name);
+  await pool.query(
+    `INSERT INTO games (name, seed, hero_q, hero_r, active_player_id, players, heroes, settlements, map_size, lobby)
+     VALUES ($1, 1, 2, 2, $2, $3::jsonb, $4::jsonb, $5::jsonb, 'small', $6::jsonb)`,
+    [
+      name,
+      activePlayerId,
+      JSON.stringify(TWO_HUMAN_ROUTE_PLAYERS),
+      JSON.stringify({ [heroId]: makeHero(heroId, 0, 2, 2) }),
+      JSON.stringify({ [settlementId]: makeSettlement(settlementId, 0, 2, 2) }),
+      JSON.stringify({
+        seats: 2,
+        humanSlots: 2,
+        claimed: {
+          "0": { handle: "P0", claimedAt: "2026-01-01T00:00:00.000Z" },
+          "1": { handle: "P1", claimedAt: "2026-01-01T00:00:00.000Z" },
+        },
+      }),
+    ],
+  );
+}
+
+async function postEndTurn(name: string, body: Record<string, unknown>): Promise<Response> {
+  return fetch(`${baseUrl}/games/${name}/commands`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ kind: "EndTurn", growthRate: 0.1, ...body }),
+  });
+}
+
+test("F1: seat 0's client cannot end seat 1's turn over HTTP -- the declared seat must be the seat being ended", async () => {
+  const name = uniqueName();
+  await seedTwoHumanGame(name, 1);
+  try {
+    const res = await postEndTurn(name, { actor: 1, clientSeat: 0 });
+    assert.equal(res.status, 403, await res.clone().text());
+    assert.deepEqual(await res.json(), { error: "forbidden_not_your_turn" });
+    const active = await pool.query<{ active_player_id: number }>(
+      `SELECT active_player_id FROM games WHERE name = $1`,
+      [name],
+    );
+    assert.equal(active.rows[0].active_player_id, 1, "seat 1's turn is still seat 1's");
+    const events = await pool.query(
+      `SELECT 1 FROM game_events WHERE kind = 'TurnEnded'
+        AND game_id = (SELECT id FROM games WHERE name = $1)`,
+      [name],
+    );
+    assert.equal(events.rowCount, 0, "no turn ever ended");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("F1: the seat that holds the turn still ends it, and the round advances", async () => {
+  const name = uniqueName();
+  await seedTwoHumanGame(name, 1);
+  try {
+    const res = await postEndTurn(name, { actor: 1, clientSeat: 1 });
+    assert.equal(res.status, 200, await res.clone().text());
+    const active = await pool.query<{ active_player_id: number }>(
+      `SELECT active_player_id FROM games WHERE name = $1`,
+      [name],
+    );
+    assert.equal(active.rows[0].active_player_id, 0, "the round advanced to seat 0");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("F1: an EndTurn that does not say which seat is asking is malformed over HTTP (the internal callers never pass through parseCommand)", async () => {
+  const name = uniqueName();
+  await seedTwoHumanGame(name, 1);
+  try {
+    const res = await postEndTurn(name, { actor: 1 });
+    assert.equal(res.status, 400, await res.clone().text());
+    assert.deepEqual(await res.json(), { error: "invalid command" });
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
+test("F1: seat 0's client may still end a browser-driven AI seat's turn (the legitimate non-active-seat path)", async () => {
+  const name = uniqueName();
+  await seedAiDriverGame(name, { aiDriver: false, activePlayerId: 1 });
+  try {
+    const res = await postEndTurn(name, { actor: 1, clientSeat: 0 });
+    assert.equal(res.status, 200, await res.clone().text());
+    const active = await pool.query<{ active_player_id: number }>(
+      `SELECT active_player_id FROM games WHERE name = $1`,
+      [name],
+    );
+    assert.equal(active.rows[0].active_player_id, 0, "the AI seat's turn ended from seat 0's client");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
 test("D10: a human actor on a server-driven game is accepted", async () => {
   const name = uniqueName();
   await seedAiDriverGame(name, { aiDriver: true, activePlayerId: 0 });
@@ -990,7 +1101,7 @@ test("D10: a human actor on a server-driven game is accepted", async () => {
     const res = await fetch(`${baseUrl}/games/${name}/commands`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind: "EndTurn", actor: 0 }),
+      body: JSON.stringify({ kind: "EndTurn", actor: 0, clientSeat: 0 }),
     });
     assert.equal(res.status, 200, await res.clone().text());
     const active = await pool.query<{ active_player_id: number }>(

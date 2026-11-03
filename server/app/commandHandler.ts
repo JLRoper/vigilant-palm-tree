@@ -116,7 +116,8 @@ export interface GameLobbyFlags {
   // (the API's aiDriver scanner owns those AI seats' turns end-to-end); absent
   // on legacy/lobby games. Mirrors server/routes.ts LobbyState and the client's
   // GameLobbyState. ResolveBattle/SubmitBattleResult read it to scope their
-  // marker authority to games where EnterBattle is the offer protocol.
+  // marker authority, and EndTurn's AI-seat exemption (endTurnSeatRefusal) is
+  // scoped to games this server does not drive.
   aiDriver?: "server";
   // The pending battle offer (EnterBattle's marker): read via readPendingBattle
   // by the battle cases below and cleared when the battle resolves or the
@@ -626,6 +627,44 @@ async function clearPendingBattle(
   await deps.gameRepo.saveLobby(gameName, rest);
 }
 
+// F1 (playthrough round 2b): EndTurn's seat-attribution rule. Returns the
+// refusal reason, or null when the command may proceed.
+//
+// The turn-ownership guard inside handleCommand proves the NAMED seat holds
+// the turn (command.actor === row.active_player_id). That is all it proves:
+// a seat-0 client that named seat 1 satisfied it and ended seat 1's turn, and
+// the live End Turn button offered exactly that. `clientSeat` -- the seat the
+// requesting client says it is playing -- separates the two, and the endpoint
+// requires it (server/http/routes/commands.ts's parseCommand), so the wrong
+// seat's turn cannot be ended over HTTP at all: the request either declares
+// its own seat (and is refused here) or is malformed.
+//
+// The one legitimate mismatch is the AI turn a BROWSER drives
+// (plan/2026-09-29-ai-enemies.md D3: seat 0's client runs the AI seat's turn
+// and ends it through the same hook), so seat 0 may name an AI seat on a game
+// this server does not drive. A server-driven game's AI seats belong to the
+// driver alone -- the route refuses those before the handler (D10), and the
+// exemption below is scoped to unflagged games so it cannot reopen that.
+//
+// Absent clientSeat = an in-process caller acting on the seat's own behalf:
+// dropPolicy's runServerEndTurnForSeat (a disconnected seat's turn) and the
+// AI driver. Both re-validate the seat against the live row themselves and
+// never pass through parseCommand, so they keep the pre-existing rule.
+export function endTurnSeatRefusal(
+  row: { players: Player[]; lobby?: GameLobbyFlags },
+  command: Command,
+): string | null {
+  if (command.kind !== "EndTurn") return null;
+  const clientSeat = command.clientSeat;
+  if (clientSeat === undefined || clientSeat === null) return null;
+  if (clientSeat === command.actor) return null;
+  const actorIsDrivenAiSeat =
+    row.players.some((p) => p.id === command.actor && p.faction === "ai") &&
+    row.lobby?.aiDriver !== "server";
+  if (actorIsDrivenAiSeat && clientSeat === 0) return null;
+  return "forbidden_not_your_turn";
+}
+
 // The central transaction loop: load state via repos -> call the matching
 // @heroes/engine reducer -> persist the delta -> append the resulting
 // event(s). @heroes/engine's reducers (startMove, transferGold, ...) are
@@ -635,6 +674,12 @@ async function clearPendingBattle(
 // already-tested reducers to change shape for Phase 3's convenience.
 export async function handleCommand(command: Command, deps: CommandDeps): Promise<CommandResult> {
   const row = await deps.gameRepo.load(command.gameName);
+  // F1 (playthrough round 2b): who is asking, when the command says. The
+  // turn-ownership guard below proves the NAMED seat holds the turn; it cannot
+  // tell seat 0's client from seat 1's, because naming the active seat was
+  // enough -- which is how a seat-0 client ended seat 1's turn over HTTP.
+  const seatRefusal = endTurnSeatRefusal(row, command);
+  if (seatRefusal) return { ok: false, reason: seatRefusal, events: [] };
 
   // Uncharted mode gate: only games created with lobby.uncharted === true
   // maintain per-player reveal. Absent (pre-flag rows) reads as false, so
