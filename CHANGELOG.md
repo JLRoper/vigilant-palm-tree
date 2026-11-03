@@ -10,16 +10,16 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.38.15] - 2026-11-03
+## [0.39.0] - 2026-11-03
 
-F3 (the camera could lose the map): there was no pan clamp, so repeated drags walked it arbitrarily far off the map and the renderer -- which clamps the tiles it asks about to the map's bounds -- painted nothing. Measured on a 40x30 map at zoom 1 in a 1280x800 viewport: forty `pan(-400,-400)` drags took `mapTilesOnScreen` from 369 to 0 with the camera parked at (-16000,-16000), a black viewport whose only exit was a minimap click. `Camera.clampToMap` now keeps the map's world-pixel extent (measured from the four corner hexes) overlapping the viewport, compared against `viewport/zoom` so it holds at every zoom level, and centres a map that fits entirely. Every surface that moves the camera routes through `AdventureView.clampCamera`: the drag pan, the minimap frame drag, the wheel zoom, `centerOn` (minimap click, load centring, resize, focus-hero/settlement) and the zoom-out setting callback.
-
-F2 (the tile panel lied about what you can see): outside every vision ring the panel read "Unexplored" with no terrain and no move cost, even on hexes the map itself paints as explored ground under the fog veil -- at a dirt hex the scene builder emitted `terrainHex` + `fogHex` (veiled dirt composites to `rgb(37,31,25)`, the card's `(36,31,25)` to rounding) while `describeTile` returned `terrain: null`. "Unexplored" now means NEVER SEEN: `TileInfo.explored` is set from the seat's reveal set (`revealedSetForTilePanel` unions the persisted `revealedTiles` with live vision), and an explored hex reads its terrain label and move cost with a dim "Explored — not in sight" note. Deposits, settlements, heroes, charters and territory stay visibility-gated; classic games carry no reveal list, so there `explored` is false everywhere and the locked two-state fog rule is byte-identical.
-
-F4 (cosmetic, same family): the minimap painted every explored-but-unwatched hex as flat slate, so uncovered ground lost its biome the moment the hero walked away. `minimapCellKind` / `minimapCellFill` give the cell its tier -- visible and explored share the terrain colour (explored under a veil), uncharted stays opaque black, classic fog stays the slate.
-
-`patch`: three presentation/view-layer fixes, no schema or wire-contract change. New tests `test/render/camera.test.ts`, the F2 cases in `test/screens/adventure/tileInfoPanel.test.ts`, the F4 cases in `test/render/minimap.test.ts`; docs/map.md updated.
-
+Cargo a hero picks up on the map can now be delivered: the settlement panel's Warehouse
+section carries a hero-cargo row (**Deposit cargo** / **Take cargo**) whenever a hero of
+yours stands on the settlement's tile, wired to the engine's existing `TransferResources`
+verb -- which until now only the Logistics modal's declared action named, and no control
+ever invoked. The Logistics window's hero block offers the same two buttons, both surfaces
+read one shared direction/amount model (`src/screens/shared/cargoTransfer.ts`), and the hero
+panel's own buttons are renamed **Deposit gold** / **Withdraw gold** because they were always
+gold-only despite the generic label (playthrough finding F-2).
 ## [0.38.14] - 2026-11-03
 
 Copilot's two comments on the landed load path. The browser's own seat is resolved instead of the first claimed one: a remembered seat, then the handle it claimed with, then the server-bound auth email, and NO seat when none of the three identifies the browser (this supersedes #292's `resolveInitialLocalSeat`, whose lowest-claimed-seat fallback was the same first-claim guess merely narrowed). The load promise is returned through the toolbar callback, so a failed load stays observable by the dialog that awaits it.

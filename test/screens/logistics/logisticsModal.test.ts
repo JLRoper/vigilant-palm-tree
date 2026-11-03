@@ -555,3 +555,114 @@ test("Accept all is disabled, with the panel's own refusal reason, when no recom
     await server.close();
   }
 });
+test("the Logistics modal wires its declared transferResources action to a cargo row at the hero's own settlement", { timeout: 90_000 }, async () => {
+  const server = await createServer({
+    root,
+    server: { host: "127.0.0.1", port: 0, open: false },
+    logLevel: "error",
+  });
+  await server.listen();
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage({ viewport: { width: 1000, height: 900 } });
+    await page.route("**/cargo-modal-fixture", (route) => route.fulfill({
+      contentType: "text/html",
+      body: '<!doctype html><html><body style="margin:0"></body></html>',
+    }));
+    await page.addInitScript("window.__name = (fn) => fn");
+    await page.route("**/api/**", (route) => route.abort());
+    await page.goto(`${server.resolvedUrls!.local[0]}cargo-modal-fixture`);
+
+    const facts = await page.evaluate(async () => {
+      const { openLogisticsModal } = await import("/src/screens/logistics/logisticsModal.ts") as typeof import("../../../src/screens/logistics/logisticsModal");
+      const { bus } = await import("/src/core/eventBus.ts") as typeof import("../../../src/core/eventBus");
+      const engine = await import("/packages/engine/src/index.ts") as typeof import("../../../packages/engine/src/index");
+      const state = engine.createInitialState();
+      const settlement = Object.values(state.settlements)[0];
+      const hero = Object.values(state.heroes)[0];
+      settlement.ownerId = hero.ownerId;
+      settlement.level = 1;
+      settlement.gold = 0;
+      settlement.warehouse = { wood: 120, stone: 0, iron: 0, arcane: 0, food: 0 };
+      settlement.citySpots = [];
+      settlement.districts = {};
+      settlement.buildings = [];
+      hero.q = settlement.q;
+      hero.r = settlement.r;
+      hero.name = "Scout";
+      hero.gold = 0;
+      hero.wagons = 5;
+      hero.resources = { wood: 250 };
+      state.selectedHeroId = hero.id;
+      state.tradeRoutes = [];
+
+      const calls: Array<{ heroId: string; settlementId: string; direction: string; amounts: Record<string, number> }> = [];
+      openLogisticsModal({
+        parent: document.body,
+        getState: () => state,
+        actions: {
+          transferResources: (heroId, settlementId, direction, amounts) => {
+            calls.push({ heroId, settlementId, direction, amounts: amounts as Record<string, number> });
+            return { ok: true, reason: "" };
+          },
+          assignWagons: () => ({ ok: true, reason: "" }),
+          buyWagons: () => ({ ok: true, reason: "" }),
+          createTradeRoute: () => ({ ok: true, reason: "" }),
+          updateTradeRoute: () => ({ ok: true, reason: "" }),
+        },
+      });
+      const settle = async (): Promise<void> => {
+        bus.emit({ type: "state:committed" });
+        await new Promise((resolve) => setTimeout(resolve, 60));
+      };
+      const at = () => document.querySelectorAll('[data-focus^="hero-cargo-"]');
+      const depositBtn = () => document.querySelector('[data-focus="hero-cargo-deposit"]') as HTMLButtonElement | null;
+      const withdrawBtn = () => document.querySelector('[data-focus="hero-cargo-withdraw"]') as HTMLButtonElement | null;
+
+      const home = {
+        controls: at().length,
+        label: depositBtn()?.closest("div")?.firstElementChild?.textContent ?? null,
+        depositText: depositBtn()?.textContent ?? null,
+        depositDisabled: depositBtn()?.disabled,
+        takeText: withdrawBtn()?.textContent ?? null,
+      };
+      depositBtn()?.click();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      const offTile = { q: hero.q, r: hero.r };
+      hero.q = offTile.q + 6;
+      await settle();
+      const awayControls = at().length;
+      hero.q = offTile.q;
+      // A full hold cannot take anything: the take direction needs room first.
+      hero.resources = { wood: 0 };
+      await settle();
+      withdrawBtn()?.click();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return { calls, home, awayControls };
+    });
+
+    assert.equal(facts.home.controls, 2, "the modal offers both cargo directions");
+    assert.match(facts.home.label ?? "", /^Cargo at /, "and names the settlement it moves cargo into");
+    assert.equal(facts.home.depositText, "Deposit cargo");
+    assert.equal(facts.home.depositDisabled, false);
+    assert.equal(facts.home.takeText, "Take cargo");
+    assert.deepEqual(facts.calls[0], {
+      heroId: facts.calls[0].heroId,
+      settlementId: facts.calls[0].settlementId,
+      direction: "load",
+      amounts: { wood: 250 },
+    }, "the deposit reaches the declared action as the engine's 'load'");
+    assert.equal(facts.awayControls, 0, "a hero off its own settlement gets no cargo controls");
+    assert.deepEqual(facts.calls[1], {
+      heroId: facts.calls[0].heroId,
+      settlementId: facts.calls[0].settlementId,
+      direction: "unload",
+      amounts: { wood: 120 },
+    }, "and the take reaches it as 'unload'");
+  } finally {
+    await browser?.close().catch(() => {});
+    await server.close();
+  }
+});
