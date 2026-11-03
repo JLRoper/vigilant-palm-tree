@@ -146,13 +146,16 @@ export class GameSessionManager {
     const humanSeatCount = Math.max(1, Math.min(playerCount, opts.humanSeatCount ?? 1));
     const enemyCount = Math.max(0, Math.min(3, Math.floor(opts.enemyCount ?? 0)));
     const totalPlayers = humanSeatCount + enemyCount;
-    // Only the creator's seat (seat 0) takes the picked roster faction; every
-    // other seat — human or AI — stays "human" in v1. Passing no seatFactions
-    // at all (no pick, or the human default) keeps the legacy request shape.
+    // The creator's own pick rides seat 0; every OTHER seat's roster faction is
+    // the server's AI-seat draw from the game seed (init.ts's aiSeatFactionSeed
+    // -> seatFactions.ts), so a single-player game can meet the Ashen Court, the
+    // Ironmark Holds or the Verdant Wild. Sending the pick alone -- rather than
+    // padding the array with "human" -- is deliberate: a "human" filler is an
+    // EXPLICIT entry, and an explicit entry wins, which is exactly how the AI
+    // seats were pinned to "human" before. No pick (or the human default) sends
+    // no seatFactions at all, keeping the legacy request shape.
     const seatFactions: FactionId[] | undefined =
-      opts.factionId && opts.factionId !== "human"
-        ? [opts.factionId, ...Array.from({ length: Math.max(totalPlayers - 1, 0) }, () => "human" as FactionId)]
-        : undefined;
+      opts.factionId && opts.factionId !== "human" ? [opts.factionId] : undefined;
     const effectiveCastleCount = opts.castleCount ?? (2 * totalPlayers);
     const castles = generateCastles(getOrCreateGameMap(opts.seed, opts.mapSize ?? "small", CURRENT_MAP_GEN_VERSION), {
       castleSeed: effectiveCastleSeed,
