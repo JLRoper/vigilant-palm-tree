@@ -1,5 +1,6 @@
 import type { HeroState, SettlementState, WarehouseResource } from "@heroes/contracts";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
+import type { FactionEconomySeat } from "@heroes/engine";
 import { buildingUpkeepRequired, foodRequired, settlementProductionRates } from "@heroes/engine";
 
 // The settlement panel's per-day numbers, as data.
@@ -54,9 +55,10 @@ export function settlementDailyRates(
   settlement: SettlementState,
   seed: number,
   heroes?: Iterable<HeroState> | Record<string, HeroState>,
+  seat?: FactionEconomySeat,
 ): SettlementDailyRates {
   const produced = new Map<WarehouseResource, number>();
-  for (const { resource, perTurn } of settlementProductionRates(settlement, seed, heroes).rates) {
+  for (const { resource, perTurn } of settlementProductionRates(settlement, seed, heroes, seat).rates) {
     produced.set(resource, perTurn);
   }
   // Drains are OWNED settlements only. The consumption step runs inside

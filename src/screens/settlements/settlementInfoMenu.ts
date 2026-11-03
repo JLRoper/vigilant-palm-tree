@@ -549,13 +549,22 @@ export class SettlementInfoMenu {
     this.workforceEl.textContent = hasLegacyStaffing(settlement)
       ? `auto crew · ${autoStaffedCount(settlement)} bldgs (${autoStaffedSlots(settlement)} slots), pool ${pool}`
       : `${assigned}/${pool} assigned · ${Math.max(0, pool - assigned)} idle${assigned > pool ? " · over pool" : ""}`;
-    this.incomeEl.textContent = `${effectiveSettlementIncome(settlement, state.heroes).toLocaleString()}g`;
+    this.incomeEl.textContent = `${effectiveSettlementIncome(
+      settlement,
+      state.heroes,
+      settlement.ownerId === null ? undefined : state.players?.[settlement.ownerId],
+    ).toLocaleString()}g`;
     this.updateTreasuryRow(settlement, state);
     this.moraleEl.textContent = `${Math.round(settlement.morale ?? 100)}%${settlement.autoTrade ? " · auto" : ""}`;
 
     // One pass over the settlement's production and upkeep feeds the top food
     // row and every warehouse row, so the two surfaces cannot disagree.
-    const daily = settlementDailyRates(settlement, state.castleSeed, state.heroes);
+    const daily = settlementDailyRates(
+      settlement,
+      state.castleSeed,
+      state.heroes,
+      settlement.ownerId === null ? undefined : state.players?.[settlement.ownerId],
+    );
     // E2: a store at its cap discards production (addStockClamped drops what
     // does not fit), so its row says so rather than printing a rate that never
     // arrives -- the same amber + tooltip sentence the treasury row carries, on

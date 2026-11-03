@@ -29,6 +29,7 @@ export * from "./buildingModifiers";
 export * from "./control";
 export * from "./reveal";
 export * from "./economy/income";
+export * from "./economy/factionEconomy";
 export * from "./economy/consumption";
 export * from "./economy/troopUpkeep";
 export * from "./economy/caravanUpkeep";

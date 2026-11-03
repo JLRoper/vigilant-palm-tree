@@ -10,6 +10,7 @@ import type {
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
 import { addStockClamped, settlementResourceCap, settlementTreasuryCap, treasuryHeadroom } from "./capacity";
 import { districtSpecialisation, districtSpecialisationScale } from "./districtSpecialisation";
+import { type FactionEconomySeat } from "../economy/factionEconomy";
 import { buildingFallbackGold, isDistrictBlockedByHero, producerTurnOutput, type ProducerResource } from "./producers";
 
 function round2(n: number): number {
@@ -91,6 +92,7 @@ export type DistrictProductionDistrict = Pick<DistrictState, "q" | "r" | "citySp
 export function districtProductionLines(
   district: DistrictProductionDistrict,
   seed: number,
+  seat?: FactionEconomySeat,
 ): DistrictProductionLine[] {
   const lines: DistrictProductionLine[] = [];
   const rawByResource = new Map<ProducerResource, number>();
@@ -99,12 +101,13 @@ export function districtProductionLines(
       b,
       { q: district.q, r: district.r, citySpots: district.citySpots },
       seed,
+      seat,
     );
     if (!output) {
       // The market and the other flat-gold buildings ride the same lines so a
       // caller has one list to walk. Specialisation never touches them: it
       // scales chains, and these are not producers.
-      const fallbackGold = buildingFallbackGold(b);
+      const fallbackGold = buildingFallbackGold(b, seat);
       if (fallbackGold > 0) lines.push({ resource: "gold", amount: fallbackGold });
       continue;
     }
@@ -145,6 +148,7 @@ export function settlementProductionRates(
   },
   seed: number,
   heroes?: Iterable<{ ownerId: PlayerId; q: number; r: number }> | Record<string, { ownerId: PlayerId; q: number; r: number }>,
+  seat?: FactionEconomySeat,
 ): SettlementProductionRates {
   // E1 (playthrough round 2b): these numbers must be the numbers the turn PAYS.
   // The payment loop (`produceSettlementResources` below) adds the tile half in
@@ -164,9 +168,9 @@ export function settlementProductionRates(
   }
   let gold = 0;
   for (const b of settlement.buildings) {
-    const output = producerTurnOutput(b, settlement, seed);
+    const output = producerTurnOutput(b, settlement, seed, seat);
     if (!output) {
-      const fallbackGold = buildingFallbackGold(b);
+      const fallbackGold = buildingFallbackGold(b, seat);
       if (fallbackGold > 0) gold += fallbackGold;
       continue;
     }
@@ -178,7 +182,7 @@ export function settlementProductionRates(
   }
   for (const d of Object.values(settlement.districts ?? {})) {
     if (isDistrictBlockedByHero(settlement.ownerId ?? null, d.q, d.r, heroes)) continue;
-    for (const line of districtProductionLines(d, seed)) {
+    for (const line of districtProductionLines(d, seed, seat)) {
       if (line.resource === "gold") {
         gold += line.amount;
       } else {
@@ -201,9 +205,16 @@ export function produceSettlementResources(
   settlements: Record<SettlementId, SettlementState>,
   seed: number,
   heroes?: Iterable<{ ownerId: PlayerId; q: number; r: number }> | Record<string, { ownerId: PlayerId; q: number; r: number }>,
+  seats?: readonly FactionEconomySeat[],
 ): Record<SettlementId, SettlementState> {
   const newSettlements: Record<SettlementId, SettlementState> = { ...settlements };
   for (const s of Object.values(newSettlements)) {
+    // `seats` is the state's player array (indexed by PlayerId), so each
+    // settlement is produced at ITS OWNER's faction modifier -- the income a
+    // seat collects is that seat's, never the acting seat's. Absent `seats`
+    // (the many engine tests that build a bare settlement) resolves to the
+    // neutral modifier, i.e. exactly the pre-faction numbers.
+    const seat: FactionEconomySeat = s.ownerId === null || s.ownerId === undefined ? undefined : seats?.[s.ownerId];
     const caps = settlementResourceCap(s);
     const treasuryCap = settlementTreasuryCap(s);
     const newWarehouse: Warehouse = { ...s.warehouse };
@@ -212,9 +223,9 @@ export function produceSettlementResources(
     }
     let gold = 0;
     for (const b of s.buildings) {
-      const output = producerTurnOutput(b, s, seed);
+      const output = producerTurnOutput(b, s, seed, seat);
       if (!output) {
-        const fallbackGold = buildingFallbackGold(b);
+        const fallbackGold = buildingFallbackGold(b, seat);
         if (fallbackGold > 0) gold += fallbackGold;
         continue;
       }
@@ -232,7 +243,7 @@ export function produceSettlementResources(
     }
     for (const d of Object.values(s.districts ?? {})) {
       if (isDistrictBlockedByHero(s.ownerId, d.q, d.r, heroes)) continue;
-      for (const line of districtProductionLines(d, seed)) {
+      for (const line of districtProductionLines(d, seed, seat)) {
         if (line.resource === "gold") {
           gold += line.amount;
         } else {

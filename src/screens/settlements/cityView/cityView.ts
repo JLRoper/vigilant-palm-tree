@@ -637,7 +637,13 @@ export class CityView {
     const target = this.openDistrict
       ? { q: this.openDistrict.q, r: this.openDistrict.r, citySpots: this.citySpots }
       : settlement;
-    return producerTurnOutput(building, target, this.mapSeed);
+    // The readout is the owner's own yield, so it carries the owner's faction
+    // economy modifier -- the same one the settlement panel and the end of turn
+    // use (economy/factionEconomy.ts). The city view is already wired to the
+    // seat's faction through `getSettlementFaction` (UIManager).
+    return producerTurnOutput(building, target, this.mapSeed, {
+      factionId: this.getSettlementFaction(settlement.id),
+    });
   }
 
   // ---- Workforce (population-worker distribution, W4 contract) --------------

@@ -23,11 +23,15 @@ export function applyEndOfTurnDetailed(state: GameState, opts?: ApplyEndOfTurnOp
   const playerId = state.activePlayerId;
   // The movement granted here is next used on the following day.
   const newHeroes: Record<HeroId, HeroState> = resetHeroMovement(state.heroes, playerId, state.day + 1);
-  // 1. Produce resources for ALL settlements (tile rates + producer mines)
+  // 1. Produce resources for ALL settlements (tile rates + producer mines).
+  // `state.players` is threaded so each settlement produces at its OWNER's
+  // faction economy modifier (economy/factionEconomy.ts): a seat's economy is
+  // its own, whether the seat is the human player or an AI.
   let newSettlements: Record<SettlementId, SettlementState> = produceSettlementResources(
     state.settlements,
     state.castleSeed,
     state.heroes,
+    state.players,
   );
   // 2. Auto-trade for active player's settlements (legacy gate: absent → on)
   const autoTrade = runAutoTrade(newSettlements, playerId, opts?.legacyAutoTrade ?? true);
