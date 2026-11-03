@@ -10,9 +10,15 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.38.13] - 2026-11-03
+## [0.38.14] - 2026-11-03
 
 Copilot's two comments on the landed load path. The browser's own seat is resolved instead of the first claimed one: a remembered seat, then the handle it claimed with, then the server-bound auth email, and NO seat when none of the three identifies the browser (this supersedes #292's `resolveInitialLocalSeat`, whose lowest-claimed-seat fallback was the same first-claim guess merely narrowed). The load promise is returned through the toolbar callback, so a failed load stays observable by the dialog that awaits it.
+
+## [0.38.13] - 2026-11-03
+
+test:visual tells the truth again
+- Six stale scene baselines are re-baselined to what main actually renders, each pinned to the commit that moved it by running the suite on either side of that commit: the three adventure/charter scenes to `2417ae8` (the hero panel's trade affordance reflows the panel and every row under it) and the three city-view scenes to `beb7854` (the town-hall re-art, which drops the thick flat plinth). No render code changed; the screenshots themselves are the record. `test:visual` is 10/10 green on two consecutive runs (it was 6/10 red on main, unchanged for two rounds).
+- What the suite cannot see, so the next round can plan for it: no scene drives districts, district roads or the Load path. The city-view captures reach the backdrop only, and nothing in the replay set opens the load flow.
 
 ## [0.38.12] - 2026-11-03
 
