@@ -48,22 +48,37 @@ function readUserGamesFromServer(serverGames: Game[]): Array<UserGameEntry & { s
   return sortByLastSeen(out);
 }
 
-function closeAllModals(): void {
-  const overlays = document.body.querySelectorAll("div[style*='z-index: 100']");
-  overlays.forEach((el) => el.remove());
-}
-
 /**
- * A saved game's progress line. It reads the ROUND, not `games.turn`: that
- * column is written once when the game is created and never advances, so a
- * game on round 37 advertised itself as "turn 1" (C-POLISH-1). `round` is the
- * same counter the HUD's Round pill and the End Turn cycle move.
+ * A saved game's progress line, shared by BOTH Load surfaces -- the landing
+ * page's list (homeView) and the in-game toolbar modal. It reads the ROUND,
+ * not `games.turn`: that column is written once when the game is created (by
+ * its DEFAULT 1 -- POST /games' INSERT never names it) and never advances, so
+ * a game on round 37 advertised itself as "turn 1" (C-POLISH-1 on the in-game
+ * list, F4 of playthrough round 2b on the landing one). `round` is the same
+ * counter the HUD's Round pill and the End Turn cycle move.
  */
 export function loadRowProgress(server: Game, lastSeenAt: string): string {
   return `round ${server.round} · ${server.gold}g · seen ${formatTime(lastSeenAt)}`;
 }
 
-function makeLoadRow(entry: UserGameEntry & { server?: Game }, opts: LoadGameModalOptions): HTMLDivElement {
+/**
+ * One row of the Load list. `closeModal` is the owning dialog's own close
+ * (`FloatingPanel.close`: unregister from panelManager, run the dialog's
+ * wrapper teardown, remove the panel root). A successful Open MUST go through
+ * it -- F5 of playthrough round 2b was a modal that stayed on screen over the
+ * loaded game with its row stuck on "Loading…", because the old teardown swept
+ * `document.body` for `div[style*='z-index: 100']` (the battle arena's layer)
+ * while `openDialog` mounts its wrapper at z-index 300: the selector matched
+ * nothing, so the panel stayed registered in panelManager AND its fullscreen
+ * `rgba(0,0,0,0.6)` backdrop kept swallowing every later click on the map.
+ * Closing the panel we actually opened is the only teardown that removes the
+ * overlay and the panelManager entry together.
+ */
+function makeLoadRow(
+  entry: UserGameEntry & { server?: Game },
+  opts: LoadGameModalOptions,
+  closeModal: () => void,
+): HTMLDivElement {
   const row = document.createElement("div");
   row.style.display = "flex";
   row.style.alignItems = "center";
@@ -107,7 +122,9 @@ function makeLoadRow(entry: UserGameEntry & { server?: Game }, opts: LoadGameMod
       try {
         const game = await api.getGame(entry.name);
         await opts.onLoad(game);
-        closeAllModals();
+        // After this the row (and the button still reading "Loading…") is
+        // detached with the dialog's wrapper, so nothing is left to reset.
+        closeModal();
       } catch (err) {
         open.disabled = false;
         open.textContent = originalLabel ?? "Open";
@@ -140,6 +157,10 @@ export async function openLoadGameModal(opts: LoadGameModalOptions): Promise<voi
     console.error("[toolbar] listGames failed:", e);
   }
 
+  // The dialog is built BEFORE its rows so every row's Open can close THIS
+  // panel (see makeLoadRow). Its content is mounted once the list is built.
+  const modal = openDialog(document.body, "Load Game", 420);
+
   const content = document.createElement("div");
   content.style.fontFamily = panelTheme.font;
   content.style.fontSize = panelTheme.fontSize;
@@ -165,7 +186,7 @@ export async function openLoadGameModal(opts: LoadGameModalOptions): Promise<voi
     list.style.border = "1px solid rgba(255,255,255,0.1)";
     list.style.borderRadius = "3px";
     for (const entry of userGames) {
-      list.appendChild(makeLoadRow(entry, opts));
+      list.appendChild(makeLoadRow(entry, opts, () => modal.close()));
     }
     content.appendChild(list);
   }
@@ -176,7 +197,6 @@ export async function openLoadGameModal(opts: LoadGameModalOptions): Promise<voi
   const close = document.createElement("button");
   close.textContent = "Close";
   styleButton(close);
-  const modal = openDialog(document.body, "Load Game", 420);
   close.addEventListener("click", () => modal.close());
   closeRow.appendChild(close);
   content.appendChild(closeRow);

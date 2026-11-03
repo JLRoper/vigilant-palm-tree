@@ -10,6 +10,14 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.38.9] - 2026-11-03
+
+The Load Game surfaces: three fixes, from playthrough round 2b.
+
+- **fix(home): the landing Load list reads the round, not the frozen `games.turn`.** The `games.turn` column is written once at creation (its DEFAULT 1 is the only writer) and never advances, so the landing page's Load list called a round-4 save "turn 1" while the in-game Load modal showed the real round. Both surfaces now render one shared progress line, and the column's legacy role is documented at both type sites.
+- **fix(load-modal): the in-game Load modal closes after a successful Open.** Its teardown swept a `z-index: 100` layer no dialog sits on (`openDialog` mounts its wrapper at 300), so a successful load left the modal over the game with its row stuck on "Loading…", its fullscreen backdrop eating every later click, and the panel still registered with the panel manager. The row now closes the dialog it was opened with.
+- **fix(load): loading an unfounded settlers game centres the camera on the seat's own unit.** The load path keyed off the literal hero id `p0-hero` with the classic castle-less spawn hex (6,5) as its fallback, so a settlers game with nothing founded opened fully fogged with the player's wagon off screen. The camera now resolves the local seat's wagon / commander / settlement, and the genuine nothing-to-centre-on case falls back to the map centre — documented, not a classic-game constant.
+
 ## [0.38.8] - 2026-11-03
 
 The granular per-building ledger (settlement_buildings) could not hold a district building at all: its unique key was (game_id, settlement_id, gx, gy) and a district's buildings sit on the district's own 5x5 grid, so a district building at (0,0) collided with the main city's (0,0) and no row could be written. The ledger held 11 rows for a town whose state carried 14 buildings, and a sum of its own rows came up short by exactly the districts' output -- 3.12 stone + 3.75 food/day on the playthrough card's Stone mark, against a panel aggregate of 5.88 stone / 26.95 food (playthrough round 2b, finding E8).
