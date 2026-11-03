@@ -611,6 +611,23 @@ async function run(): Promise<void> {
     // real City Design flow (double-click the conquered hex -> build palette ->
     // click a cell), the same path test/districts.e2e.ts drives, so the sprite
     // and the road layout are the real ones, not an injected fixture.
+    //
+    // WHAT THIS SCENE SEES, AND WHAT IT ONLY RECORDS (measured, not assumed --
+    // github/main c4d8ed3, 0.40.2, 2026-11-03).
+    //  * The district sprite is a real test: `districtTierForCount` reading 2
+    //    for a 1-building district moves this capture 18,158 px = 1.773%, FAIL.
+    //  * The road host fails too -- but only through the tile-info panel's
+    //    move-cost line. Deleting the whole network (`settlementRoadNetwork`
+    //    returning no routes and no segments) moves the capture 5,510 px =
+    //    0.538%, FAIL; 4,669 px of that is the panel's cost text (a roaded hex
+    //    is cheaper to enter, so the number changes) and only 841 px = 0.082%
+    //    is the road artwork itself. At ROAD_WIDTH_BASE 0.55 px ..
+    //    ROAD_WIDTH_MAX 1.5 px the band is under one screen pixel per segment
+    //    even at maximum zoom (docs/settlements.md "Map visualisation"), so a
+    //    pure road-art change -- colour, width, a re-route at the same cost --
+    //    is 6x short of the 5,120 px a 0.5% budget over 1,024,000 px needs and
+    //    CANNOT turn this red. The road needs a scoped capture over the band,
+    //    or the engine-level road-network tests, to be measured on its own.
     await withPageRetry(context, "district-map", async (page) => {
       await dismissHomeAndCreateGame(page, `${GAME_NAME}-district-map`, SEED);
       await selectHero(page);
@@ -650,6 +667,9 @@ async function run(): Promise<void> {
     // The city surface for a district: its own 5x5 City Design grid with real
     // buildings placed, distinct from the settlement city-view captures above
     // (which open a fresh, un-districted settlement).
+    // Proven to fail (2026-11-03, github/main c4d8ed3): `buildCityScene`
+    // dropping a district's buildings moves this capture 10,633 px = 1.038%,
+    // FAIL; restored, 0.000%.
     await withPageRetry(context, "district-city-view", async (page) => {
       await dismissHomeAndCreateGame(page, `${GAME_NAME}-district-city-view`, SEED);
       await selectHero(page);
@@ -692,6 +712,11 @@ async function run(): Promise<void> {
       // clamp slack is half the map-extent minus viewport difference -- under
       // 64 px per axis). A regression that frames something else instead is
       // hundreds of px out, as the map-centre perturbation below shows.
+      // Proven to fail (2026-11-03, github/main c4d8ed3), tolerance in place:
+      // `resolveLoadCameraCenter` -> `mapCentre(map)` reads off by 180.1,72.0;
+      // -> the classic spawn constant {q:6,r:5} reads off by 80.5,32.0. Both
+      // RED, both restored. The x axis is what discriminates on this fixture:
+      // the clamp and a wrong target both read 32.0 on y.
       const LOAD_CENTRE_TOLERANCE_PX = 64;
       const centred = await page.evaluate(() => {
         const d = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
