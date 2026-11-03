@@ -110,7 +110,18 @@ async function newPage(context: BrowserContext, urlSuffix = ""): Promise<Page> {
   // "Failed to fetch" console warning (and can kill the page's own New Game
   // round-trip when it lands later). One load, no in-flight aborts.
   await page.addInitScript(() => {
-    try { localStorage.clear(); } catch {}
+    try {
+      // Clear the boot cache ONCE per tab. The load-path scene reloads the page
+      // mid-scene, and the landing Load list is built from the userGames cache
+      // in localStorage (homeView's readLoadEntries) -- wiping it on the reload
+      // would leave the modal empty and the scene could not reach the Load path
+      // at all. sessionStorage survives a reload but not a new tab, so every
+      // fresh page still boots clean, exactly as the unconditional clear did.
+      if (!sessionStorage.getItem("__visualStorageCleared")) {
+        localStorage.clear();
+        sessionStorage.setItem("__visualStorageCleared", "1");
+      }
+    } catch {}
   });
   await waitForApiHealth(API_URL);
   // waitUntil "load", not "networkidle": once a session boots, its SSE event stream (/events/stream) holds a pending request forever, so networkidle can never fire.
@@ -214,13 +225,18 @@ async function withPageRetry<T>(
 
 // ── Adventure overview + charter phases + city view (one scene per page) ──
 
-async function selectHeroAndHover(page: Page): Promise<void> {
+async function selectHero(page: Page): Promise<{ id: string; q: number; r: number }> {
   const heroes = await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getHeroes());
   const playerHero = heroes.find((h: any) => h.ownerId === 0);
   if (!playerHero) throw new Error("no player hero in fixed game");
 
   await page.evaluate((id) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.setSelectedHero(id), playerHero.id);
   await wait(300);
+  return playerHero;
+}
+
+async function selectHeroAndHover(page: Page): Promise<void> {
+  await selectHero(page);
 
   // Hover a distant tile to draw the path overlay + trail (same technique as
   // test/proposedPath.test.ts), then screenshot: terrain, fog, decorations,
@@ -285,6 +301,192 @@ async function openCityAtHomeSettlement(page: Page): Promise<void> {
   await wait(150);
   await page.mouse.dblclick(coords.x, coords.y);
   await wait(600);
+}
+
+// ── Districts: the map surface (district sprite + settlement road network)
+// and the district's own 5x5 City Design grid ───────────────────────────────
+// Every settlement city-view capture above opens a FRESH, un-districted
+// settlement, so none of them can notice a change to a district's map sprite
+// (adventureScene's DistrictNode -> districtSpriteKey/variant/tier), the
+// settlement road network (buildSettlementRoadNode -> paintSettlementRoad,
+// which only emits when a settlement HAS districts), or the district grid's
+// building sprites. These scenes place a real district through the real
+// command path and capture the surfaces it lands on.
+
+const DIRS: Array<[number, number]> = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+
+interface SettlementSnap { id: string; q: number; r: number; level: number; ownerId: number | null; }
+
+async function playerHomeSettlement(page: Page): Promise<SettlementSnap> {
+  const settlements = await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getSettlements());
+  const home = settlements.find((s: any) => s.ownerId === 0);
+  if (!home) throw new Error("no player-owned settlement in fixed game");
+  return home as SettlementSnap;
+}
+
+/** The controlled, passable, non-settlement hex a district opens on. */
+async function districtHex(page: Page, q: number, r: number): Promise<{ q: number; r: number }> {
+  const hex = await page.evaluate(({ q, r, dirs }) => {
+    const d = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
+    const centers = new Set(d.getSettlements().map((s) => `${s.q},${s.r}`));
+    for (const [dq, dr] of dirs) {
+      const tq = q + dq, tr = r + dr;
+      if (centers.has(`${tq},${tr}`) || !d.isPassable(tq, tr)) continue;
+      return { q: tq, r: tr };
+    }
+    return null;
+  }, { q, r, dirs: DIRS });
+  if (!hex) throw new Error(`no controlled passable hex adjacent to (${q},${r})`);
+  return hex;
+}
+
+async function screenForHex(page: Page, q: number, r: number): Promise<{ x: number; y: number }> {
+  const px = await page.evaluate(({ q, r }) => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.screenFor(q, r), { q, r });
+  const rect = await page.evaluate(() => {
+    const cv = document.querySelector("canvas") as HTMLCanvasElement;
+    const b = cv.getBoundingClientRect();
+    return { left: b.left, top: b.top, width: b.width, height: b.height };
+  });
+  // Refuse rather than click chrome: a hex that maps off the canvas means the
+  // camera is not framing the fixture, and the scene would mis-measure silently.
+  if (px.x < rect.left || px.x > rect.left + rect.width || px.y < rect.top || px.y > rect.top + rect.height) {
+    throw new Error(`hex (${q},${r}) maps to (${px.x.toFixed(1)},${px.y.toFixed(1)}), outside the canvas ${JSON.stringify(rect)}`);
+  }
+  return px;
+}
+
+/** Double-click a controlled hex to open its district in the City Design view. */
+async function openDistrict(page: Page, q: number, r: number): Promise<void> {
+  const px = await screenForHex(page, q, r);
+  await page.mouse.move(px.x, px.y);
+  await wait(150);
+  await page.mouse.click(px.x, px.y);
+  await wait(150);
+  await page.mouse.dblclick(px.x, px.y);
+  await wait(900);
+  const open = await page.evaluate(() => document.body.textContent!.includes("City Design"));
+  if (!open) throw new Error(`double-click on (${q},${r}) did not open a district City Design view`);
+  await wait(300);
+}
+
+async function closeCityView(page: Page): Promise<void> {
+  await page.locator("button", { hasText: "Back" }).first().click();
+  await wait(600);
+}
+
+/** Cell centre in CLIENT coordinates -- the space handleBuildingClick reads. */
+async function districtCellScreen(page: Page, gx: number, gy: number, size = 5): Promise<{ x: number; y: number }> {
+  return page.evaluate(async ({ gx, gy, size }) => {
+    // Non-literal specifiers on purpose: these are Vite dev-server module URLs
+    // resolved in the page at runtime, not modules TS can resolve from here.
+    const gridPath = "/src/core/cityGrid.ts";
+    const railPath = "/src/screens/shared/panelRail.ts";
+    const grid: any = await import(/* @vite-ignore */ gridPath);
+    const rail: any = await import(/* @vite-ignore */ railPath);
+    const layout = grid.cityLayout(size, window.innerWidth, window.innerHeight, rail.toolbarHeight());
+    const c = grid.cellToScreen(gx, gy, layout.gridOrigin);
+    return { x: layout.screenOrigin.x + c.x * layout.tileScale, y: layout.screenOrigin.y + c.y * layout.tileScale };
+  }, { gx, gy, size });
+}
+
+/** Every controlled, passable, non-settlement hex adjacent to a settlement. */
+async function districtHexes(page: Page, q: number, r: number): Promise<Array<{ q: number; r: number }>> {
+  return page.evaluate(({ q, r, dirs }) => {
+    const d = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
+    const centers = new Set(d.getSettlements().map((s) => `${s.q},${s.r}`));
+    const out: Array<{ q: number; r: number }> = [];
+    for (const [dq, dr] of dirs) {
+      const tq = q + dq, tr = r + dr;
+      if (centers.has(`${tq},${tr}`) || !d.isPassable(tq, tr)) continue;
+      out.push({ q: tq, r: tr });
+    }
+    return out;
+  }, { q, r, dirs: DIRS });
+}
+
+/** How many of a settlement's districts actually hold a building (a road anchor). */
+async function districtsWithBuildings(page: Page, settlementId: string): Promise<number> {
+  return page.evaluate((sid) => {
+    const gs = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getState() as any;
+    const list = Array.isArray(gs.settlements) ? gs.settlements : Object.values(gs.settlements);
+    const s = list.find((x: any) => x.id === sid) as any;
+    const districts = s?.districts ?? {};
+    return Object.values(districts).filter((d: any) => (d.buildings?.length ?? 0) > 0).length;
+  }, settlementId);
+}
+
+/** Zoom the adventure camera in on a hex (wheel up; the camera clamps zoom at 3). */
+async function zoomInAt(page: Page, q: number, r: number, notches = 20): Promise<void> {
+  const px = await screenForHex(page, q, r);
+  await page.mouse.move(px.x, px.y);
+  await wait(150);
+  for (let i = 0; i < notches; i++) {
+    await page.mouse.wheel(0, -120);
+    await wait(50);
+  }
+  await wait(400);
+}
+
+/** Open the district build palette (the 'b' toggle); it stays open across placements. */
+async function openDistrictPalette(page: Page): Promise<void> {
+  await page.keyboard.press("b");
+  await wait(600);
+}
+
+/**
+ * Toasts are transient (a 6 s auto-dismiss, src/screens/shared/toast.ts) and
+ * overlap the canvas region an element screenshot paints, so a leftover one
+ * makes a capture depend on the clock between the last click and the grab.
+ * They are not part of the surface under test -- clear them before a capture.
+ */
+async function clearToasts(page: Page): Promise<void> {
+  await page.evaluate(() => document.getElementById("toast-container")?.remove());
+  await wait(200);
+}
+
+/** Pick a district palette row by its text suffix, then click a grid cell. Returns false when the row is unaffordable. */
+async function placeDistrictBuilding(page: Page, label: string, gx: number, gy: number): Promise<boolean> {
+  const status = await page.evaluate((lbl) => {
+    const rows = [...document.querySelectorAll("button")].filter((b) => b.title && b.title.length > 0);
+    const btn = rows.find((b) => (b.textContent || "").trim().endsWith(lbl));
+    if (!btn) return "missing";
+    if ((btn as HTMLButtonElement).disabled) return "disabled";
+    btn.setAttribute("data-visual-palette", "1");
+    return "ok";
+  }, label);
+  if (status === "missing") throw new Error(`district palette row ending with "${label}" not found`);
+  if (status === "disabled") return false;
+  await page.locator('[data-visual-palette="1"]').click();
+  await wait(400);
+  const cell = await districtCellScreen(page, gx, gy);
+  await page.mouse.move(cell.x, cell.y);
+  await wait(200);
+  await page.mouse.click(cell.x, cell.y);
+  await wait(1000);
+  return true;
+}
+
+/** The app boots to the home overlay and never auto-rejoins, so this is the only reload path. */
+async function loadGameFromHome(page: Page, name: string): Promise<void> {
+  await page.locator("button", { hasText: "Load Game" }).last().click();
+  await wait(700);
+  const tagged = await page.evaluate((gameName) => {
+    const rows = [...document.querySelectorAll("div")].filter((d) => {
+      const t = (d.textContent || "").trim();
+      // The row's progress line reads the ROUND (games.turn is frozen at
+      // creation), and only a row the server still owns has an Open button.
+      return t.startsWith(gameName) && /round \d+/.test(t) && d.querySelector("button");
+    });
+    const row = rows[rows.length - 1];
+    if (!row) return false;
+    const open = [...row.querySelectorAll("button")].find((b) => /Open/.test(b.textContent || ""));
+    if (!open) return false;
+    open.setAttribute("data-visual-load-open", "1");
+    return true;
+  }, name);
+  if (!tagged) throw new Error(`no Load Game row for "${name}"`);
+  await page.locator('[data-visual-load-open="1"]').click();
+  await wait(2500);
 }
 
 // ── Battle arena: three captures per plan/2026-09-29-arena-unit-sprites.md ──
@@ -391,6 +593,103 @@ async function run(): Promise<void> {
       await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.settings.update({ cityBackdrop: "diorama" }));
       await wait(300);
       await captureAndCompare("city-view-diorama", page);
+    });
+
+    // ── District surfaces ────────────────────────────────────────────────
+    // The map surface: a settlement that HAS a district, so the district
+    // sprite AND the settlement road network both render. Placed through the
+    // real City Design flow (double-click the conquered hex -> build palette ->
+    // click a cell), the same path test/districts.e2e.ts drives, so the sprite
+    // and the road layout are the real ones, not an injected fixture.
+    await withPageRetry(context, "district-map", async (page) => {
+      await dismissHomeAndCreateGame(page, `${GAME_NAME}-district-map`, SEED);
+      await selectHero(page);
+      const home = await playerHomeSettlement(page);
+      // A district can only be founded touching the settlement (an L1
+      // settlement's control range is 1), so the six adjacent passable hexes
+      // are the whole of the network's first ring. Settle every one of them so
+      // the map really has a district road NETWORK to draw, not one edge.
+      const hexes = await districtHexes(page, home.q, home.r);
+      let settled = 0;
+      for (const hex of hexes) {
+        await openDistrict(page, hex.q, hex.r);
+        await openDistrictPalette(page);
+        const placed = await placeDistrictBuilding(page, "Farmhouse", 2, 2);
+        await closeCityView(page);
+        // A district the settlement cannot afford to settle is not a district
+        // (nothing is persisted until the first building lands), so stop rather
+        // than open-and-abandon the rest.
+        if (!placed) break;
+        settled += 1;
+      }
+      if (settled !== (await districtsWithBuildings(page, home.id)) || settled < 2) {
+        throw new Error(`district-map fixture settled ${settled} district(s); the scene needs a settlement that HAS districts`);
+      }
+      // Zoom the camera to its maximum on the settled tile: at gameplay zoom
+      // the district art and especially its hairline road network are far too
+      // small to measure through a whole-canvas diff (the road is under one
+      // screen pixel, see docs/settlements.md "Map visualisation"). Do NOT
+      // hover: a path overlay is drawn after the district layer and could
+      // cover the very surface this scene exists to pin.
+      await selectHero(page);
+      await zoomInAt(page, home.q, home.r);
+      await clearToasts(page);
+      await captureAndCompare("district-map", page);
+    });
+
+    // The city surface for a district: its own 5x5 City Design grid with real
+    // buildings placed, distinct from the settlement city-view captures above
+    // (which open a fresh, un-districted settlement).
+    await withPageRetry(context, "district-city-view", async (page) => {
+      await dismissHomeAndCreateGame(page, `${GAME_NAME}-district-city-view`, SEED);
+      await selectHero(page);
+      const home = await playerHomeSettlement(page);
+      const hex = await districtHex(page, home.q, home.r);
+      await openDistrict(page, hex.q, hex.r);
+      await openDistrictPalette(page);
+      await placeDistrictBuilding(page, "House", 2, 2);
+      await placeDistrictBuilding(page, "Farm Field (2×2)", 0, 0);
+      await wait(300);
+      await clearToasts(page);
+      await captureAndCompare("district-city-view", page);
+    });
+
+    // ── The Load path ────────────────────────────────────────────────────
+    // Nothing else in the suite ever reloads the page, so the whole load chain
+    // (landing Load list -> Open -> GameSessionManager.loadGame ->
+    // resolveLoadCameraCenter -> re-render) is uncovered by the ten existing
+    // scenes. This scene drives it and pins the loaded view.
+    await withPageRetry(context, "load-path-adventure", async (page) => {
+      const name = `${GAME_NAME}-load-path`;
+      await dismissHomeAndCreateGame(page, name, SEED);
+      await page.reload({ waitUntil: "load" });
+      await page.waitForFunction(
+        () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug != null,
+        null,
+        { timeout: 20_000 },
+      );
+      await page.locator("button", { hasText: "New Game" }).last().waitFor({ state: "visible", timeout: 20_000 });
+      await wait(300);
+      await loadGameFromHome(page, name);
+      const loaded = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName ?? null);
+      if (loaded !== name) throw new Error(`Load path did not open the game: activeGameName=${loaded}`);
+      // The load camera's contract (src/game/loadCamera.ts): a loaded game opens
+      // centred on the seat's hero. Assert it so a camera regression cannot pass
+      // as a mere pixel difference.
+      const centred = await page.evaluate(() => {
+        const d = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
+        const hero = d.getHeroes().find((h) => h.ownerId === 0);
+        if (!hero) return null;
+        const p = d.screenFor(hero.q, hero.r);
+        return { q: hero.q, r: hero.r, dx: Math.abs(p.x - window.innerWidth / 2), dy: Math.abs(p.y - window.innerHeight / 2) };
+      });
+      if (!centred) throw new Error("no player hero after the Load path");
+      if (centred.dx > 2 || centred.dy > 2) {
+        throw new Error(`Load path did not centre on the seat hero (${centred.q},${centred.r}): off by ${centred.dx.toFixed(1)},${centred.dy.toFixed(1)}`);
+      }
+      await selectHeroAndHover(page);
+      await clearToasts(page);
+      await captureAndCompare("load-path-adventure", page);
     });
 
     await runBattleArenaScene(context, "battle-arena-legacy", "/?paint=legacy");

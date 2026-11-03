@@ -10,6 +10,14 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.38.14] - 2026-11-03
+
+test:visual sees districts, district roads' host and the Load path
+
+- Three new scenes, shaped exactly like the ten (same runner, Chromium, 0.5% threshold, never port 5173): `district-map` settles every affordable hex of the L1 settlement's ring through the real City Design flow and captures the map at maximum camera zoom, so the district sprites and the road network that only renders once a settlement HAS districts are both on screen; `district-city-view` captures the district's own 5x5 grid with real buildings placed from the real palette; `load-path-adventure` is the suite's first scene to RELOAD the page and drive the landing Load list (Open -> loadGame -> the loaded view), and asserts the load camera's own contract (the seat hero at the viewport centre). test:visual is 13/13 green on two consecutive runs.
+- Each new scene is proven not blind, one surface per scene: `districtTierForCount` off by one turns `district-map` red at 1.773%; removing the district's buildings from cityScene turns `district-city-view` red at 1.038%; `resolveLoadCameraCenter` returning the map centre and the Load row's own `round` line changed each turn `load-path-adventure` red alone (the camera assert names the offset; the row assert names the missing row).
+- Measured, not assumed: the district ROAD band still cannot be pinned by a whole-canvas 0.5% diff. Repainting ROAD_SURFACE moves 55 px at gameplay zoom and 861 px at maximum zoom with a settled district ring, against the 5,120 px the 0.5% budget needs. The band is 0.55-1.5 px wide, under one screen pixel at every gameplay zoom (docs/settlements.md "Map visualisation"), so this is recorded as a measured limitation rather than a covered surface.
+
 ## [0.38.13] - 2026-11-03
 
 test:visual tells the truth again
