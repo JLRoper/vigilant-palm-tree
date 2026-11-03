@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.9] - 2026-11-03
+
+load never substitutes a starter game for a failed or empty load
+
 ## [0.39.8] - 2026-11-03
 
 A fresh database's first boot tags mage, warhound, giant eagle and eagle prince as human instead of leaving them neutral: migration 006 backfilled rows that 015/020 had not inserted yet, so the recruit gate refused them until a second boot. test:unit against a brand-new PGDATABASE is green on the first run.
