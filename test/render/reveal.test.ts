@@ -32,3 +32,26 @@ test("resetReveal clears the accumulator back to an empty fresh set", () => {
   assert.ok(!fresh.has("1,2"), "pre-reset seed did not survive");
   assert.ok(!fresh.has("3,4"), "pre-reset accumulation did not survive");
 });
+
+test("the drawn set follows the CURRENT persisted reveal, not the one at load (F1)", () => {
+  resetReveal();
+  const atLoad = ["1,2"];
+  const first = revealTilesFor("game-c", atLoad, new Set(["3,4"]));
+  assert.ok(first.has("1,2"));
+
+  // The seat's mirror grows after a move (the TurnController reconciles it from
+  // the same engine rule the server persists). The drawn set must pick the new
+  // key up immediately -- keeping a copy of the reveal taken on the first frame
+  // is the compensating path the staleness hid behind.
+  const grown = ["1,2", "9,9"];
+  const next = revealTilesFor("game-c", grown, new Set(["3,4"]));
+  assert.ok(next.has("9,9"), "a key the mirror gained after load is drawn");
+
+  // And the drawn set is exactly mirror ∪ this session's vision: nothing here
+  // remembers a key the mirror no longer carries, because the union is not a
+  // second source of truth about the game.
+  const shrunk = ["1,2"];
+  const after = revealTilesFor("game-c", shrunk, new Set(["3,4"]));
+  assert.equal(after.has("9,9"), false, "the drawn set is mirror ∪ session vision, nothing else");
+  assert.ok(after.has("1,2") && after.has("3,4"));
+});
