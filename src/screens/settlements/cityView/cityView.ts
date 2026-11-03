@@ -12,6 +12,8 @@ import { buildingFootprint, coversCell } from "../../../core/cityGrid";
 import { districtKey, hasLegacyStaffing, starterCityOnOpen } from "@heroes/engine";
 import {
   assignedWorkersExplicit,
+  autoStaffedCount,
+  autoStaffedSlots,
   buildingMaxWorkers,
   canAssignWorkers,
   isProducerKind,
@@ -68,12 +70,19 @@ export type WorkforceBuildingRole = "producer" | "market" | "recruiter" | "upgra
 /** Live staffing snapshot for the workforce panel (district-true: each entry
  * carries its OWN building's district coords, null for main-settlement ones).
  * legacy = the whole live settlement (main + ALL districts) still has buildings
- * without an explicit workers count: the first assignment normalizes them, so
- * stepper/drag targets compute against the post-normalization base 0. */
+ * without an explicit workers count, i.e. running on the auto crew; `autoSlots`
+ * is what that crew is worth in worker slots and `autoStaffed` how many
+ * buildings are on it, so the panel can state the auto crew instead of hiding
+ * it. An assignment writes ONLY the building it addresses (C-MAJOR-2), so every
+ * other building keeps the staffing it already had. */
 export interface WorkforceSnapshot {
   pool: number;
   assigned: number;
   legacy: boolean;
+  /** Worker slots the settlement's auto-staffed buildings occupy (0 when none). */
+  autoSlots: number;
+  /** How many of the settlement's buildings run on the auto crew. */
+  autoStaffed: number;
   buildings: Array<{
     gx: number;
     gy: number;
@@ -717,6 +726,8 @@ export class CityView {
       pool: totals.pool,
       assigned: totals.assigned,
       legacy: live ? hasLegacyStaffing(live) : false,
+      autoSlots: live ? autoStaffedSlots(live) : 0,
+      autoStaffed: live ? autoStaffedCount(live) : 0,
       buildings,
     };
   }
