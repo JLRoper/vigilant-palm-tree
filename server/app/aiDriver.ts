@@ -3,6 +3,7 @@ import type { Command, GameState, HeroBattleVerdict, HeroId, Platoon, Player, Se
 import {
   AI_RETREAT_STRENGTH_RATIO,
   GARRISON_BACKOFF_ROUNDS,
+  HERO_ARMY_TARGET_POWER,
   SETTLEMENT_BATTLE_MIN_RETREAT_ROUND,
   detectAdjacentEnemy,
   evaluateTradeNeeds,
@@ -14,8 +15,12 @@ import {
   pickAiMove,
   pickCharterAction,
   pickGarrisonRecruitment,
+  pickHeroArmyBuildings,
+  pickHeroArmyRecruitment,
+  pickHeroRefitStep,
   pickSettlersWagonAction,
   platoonsHaveTroops,
+  platoonPower,
   platoonTroopTotal,
   readPendingBattle,
   resolveBattle,
@@ -199,6 +204,14 @@ interface GameDriverMemory {
   rng: () => number;
   garrisonBackoff: Map<HeroId, Map<SettlementId, number>>;
   recruitedTurns: Set<string>;
+  /**
+   * `${round}:${seat}` keys already served by the hero-army section (the
+   * recruits that grow the seat's hero army, the transfers that put those
+   * recruits on the hero, and the recruit buildings that make enough of them
+   * draftable). The recruitedTurns pattern: once per round+seat keeps a
+   * budget-interrupted pass from re-planning the same purchases on every scan.
+   */
+  armyTurns: Set<string>;
   /** `${round}:${seat}` keys already served by the trade-route auto-accept (Phase 5, the recruitedTurns pattern). */
   tradeRouteTurns: Set<string>;
   /**
@@ -518,6 +531,7 @@ function syncMemory(gameName: string, gameId: number): GameDriverMemory {
     rng: () => 0,
     garrisonBackoff: new Map(),
     recruitedTurns: new Set(),
+    armyTurns: new Set(),
     tradeRouteTurns: new Set(),
     charterTurns: new Set(),
     battleOffers: new Set(),
@@ -536,6 +550,10 @@ function streamFor(mem: GameDriverMemory, seed: number, round: number, seat: num
     for (const entry of mem.recruitedTurns) {
       const entryRound = Number(entry.slice(0, entry.indexOf(":")));
       if (Number.isInteger(entryRound) && entryRound < round) mem.recruitedTurns.delete(entry);
+    }
+    for (const entry of mem.armyTurns) {
+      const entryRound = Number(entry.slice(0, entry.indexOf(":")));
+      if (Number.isInteger(entryRound) && entryRound < round) mem.armyTurns.delete(entry);
     }
     for (const entry of mem.tradeRouteTurns) {
       const entryRound = Number(entry.slice(0, entry.indexOf(":")));
@@ -729,6 +747,55 @@ async function runWalkInGates(
   return { gate: "captured" };
 }
 
+// Collect on arrival: everything standing in the garrison of the settlement
+// the hero is ON belongs on the hero — the second half of the recruit loop
+// (RecruitUnits deposits into a settlement garrison; TransferUnits is the only
+// way onto an army, and it refuses a hero anywhere but the settlement's own
+// tile). Called from the army section (once per round+seat, for a hero already
+// standing at home) and from the sweep after a move, so a hero that walks home
+// mid-turn takes its reinforcements in the SAME turn instead of bouncing in
+// and out of its own tile waiting for the next pass. Skipped once the hero is
+// at HERO_ARMY_TARGET_POWER: past the target the city's garrison is the city's
+// own defence, not the hero's next meal. Settlers mode and covered wagons are
+// excluded -- no army in the mode, none on a wagon.
+async function runHeroCollect(
+  ctx: PassContext,
+  state: GameState,
+  heroId: HeroId,
+): Promise<{ collected: number } | { stop: "turn_lost" | "budget" | "deadline" }> {
+  const hero = state.heroes[heroId];
+  if (!hero) return { collected: 0 };
+  if (isCoveredWagonId(heroId)) return { collected: 0 };
+  if (resolveGameMode(state.gameMode) === "settlers") return { collected: 0 };
+  if (platoonPower(hero.stacks, ctx.catalog) >= HERO_ARMY_TARGET_POWER) return { collected: 0 };
+  const settlement = Object.values(state.settlements).find(
+    (s) => s.ownerId === hero.ownerId && s.q === hero.q && s.r === hero.r,
+  );
+  if (!settlement) return { collected: 0 };
+  let collected = 0;
+  for (const entry of settlementStacks(settlement).flatMap((p) => p.entries)) {
+    const moved = await dispatch(ctx, {
+      kind: "TransferUnits",
+      gameName: ctx.gameName,
+      actor: ctx.seat,
+      heroId,
+      settlementId: settlement.id,
+      direction: "toHero",
+      unitTypeId: entry.unitTypeId,
+      count: entry.count,
+    });
+    if ("stop" in moved) return moved;
+    if (!moved.outcome.ok) {
+      console.info(
+        `[aiDriver] "${ctx.gameName}" collect-on-arrival rejected (${moved.outcome.reason}): ${entry.unitTypeId} x${entry.count} -> ${heroId} @ ${settlement.id}`,
+      );
+      continue;
+    }
+    collected += entry.count;
+  }
+  return { collected };
+}
+
 async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutcome> {
   const gameName = candidate.name;
   let snap = await cfg.loadGame(gameName);
@@ -823,6 +890,112 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
         console.info(
           `[aiDriver] "${gameName}" garrison recruit rejected (${recruited.outcome.reason}): ${item.unitTypeId} x${item.count} @ ${item.settlementId}`,
         );
+      }
+    }
+  }
+
+  // Hero army growth (2026-11-03: the neutral-capital garrison's other half).
+  // The seat's HERO armies are grown the only way the engine allows — recruit
+  // at a settlement (RecruitUnits lands in its garrison), then TransferUnits
+  // the recruits onto the hero standing on that tile — and the city's recruit
+  // CAPACITY is grown the way a player grows it (PlaceBuildings) when the draft
+  // pools cannot cover the deficit. Sized by the brain's
+  // HERO_ARMY_TARGET_POWER, which is the player's own realistic assault force.
+  // Without this the seat's hero army never grew at all: a 132-power army
+  // declined a 168-power neutral capital every round (attackerBeatsGarrison,
+  // 1.5x) and the seat had no route to one, while a player had two.
+  // One pass per round+seat (the recruitedTurns guard); every rejection is
+  // logged and tolerated, exhaustion breaks out like the sections above.
+  const armyKey = `${snap.state.round}:${seat}`;
+  if (!mem.armyTurns.has(armyKey)) {
+    mem.armyTurns.add(armyKey);
+    const armySnap = await cfg.loadGame(gameName);
+    if (!armySnap) {
+      memory.delete(gameName);
+      return "game_gone";
+    }
+    if (!aiStillActive(armySnap.state, seat)) return "turn_lost";
+    if (armySnap.gameId !== mem.gameId) return "turn_lost";
+    const placements = pickHeroArmyBuildings(armySnap.state, seat, catalog);
+    const bySettlement = new Map<SettlementId, typeof placements>();
+    for (const placement of placements) {
+      const list = bySettlement.get(placement.settlementId) ?? [];
+      list.push(placement);
+      bySettlement.set(placement.settlementId, list);
+    }
+    // The full resulting array, exactly as the city view's cart commits it:
+    // brand-new placements carry no construction timer (the handler stamps
+    // buildDays) and the buildings already standing keep their own state.
+    for (const [settlementId, list] of bySettlement) {
+      const settlement = armySnap.state.settlements[settlementId];
+      if (!settlement) continue;
+      const built = await dispatch(ctx, {
+        kind: "PlaceBuildings",
+        gameName,
+        actor: seat,
+        settlementId,
+        buildings: [
+          ...settlement.buildings,
+          ...list.map((p) => ({ kind: p.kind, gx: p.gx, gy: p.gy, level: 1 })),
+        ],
+      });
+      if ("stop" in built) {
+        if (built.stop === "turn_lost") return "turn_lost";
+        exhausted = built.stop;
+        break;
+      }
+      if (!built.outcome.ok) {
+        console.info(
+          `[aiDriver] "${gameName}" hero-army buildings rejected (${built.outcome.reason}): ${list
+            .map((p) => `${p.kind}@${p.gx},${p.gy}`)
+            .join(" ")} @ ${settlementId}`,
+        );
+      }
+    }
+    if (exhausted === null) {
+      for (const item of pickHeroArmyRecruitment(armySnap.state, seat, catalog)) {
+        const recruited = await dispatch(ctx, {
+          kind: "RecruitUnits",
+          gameName,
+          actor: seat,
+          settlementId: item.settlementId,
+          buildingKind: item.buildingKind,
+          gx: item.gx,
+          gy: item.gy,
+          unitTypeId: item.unitTypeId,
+          count: item.count,
+          ...(item.district ? { district: item.district } : {}),
+        });
+        if ("stop" in recruited) {
+          if (recruited.stop === "turn_lost") return "turn_lost";
+          exhausted = recruited.stop;
+          break;
+        }
+        if (!recruited.outcome.ok) {
+          console.info(
+            `[aiDriver] "${gameName}" hero-army recruit rejected (${recruited.outcome.reason}): ${item.unitTypeId} x${item.count} @ ${item.settlementId} for ${item.heroId}`,
+          );
+        }
+      }
+    }
+    // Then hand the hero whatever is standing in its city: a hero that was
+    // ALREADY home takes its reinforcements here; one still walking back takes
+    // them through the sweep's collect-on-arrival the moment it arrives, so
+    // neither path needs the other's timing.
+    if (exhausted === null) {
+      const fresh = await cfg.loadGame(gameName);
+      if (!fresh) {
+        memory.delete(gameName);
+        return "game_gone";
+      }
+      if (!aiStillActive(fresh.state, seat)) return "turn_lost";
+      for (const heroId of fresh.state.players.find((p) => p.id === seat)?.heroIds ?? []) {
+        const collected = await runHeroCollect(ctx, fresh.state, heroId);
+        if ("stop" in collected) {
+          if (collected.stop === "turn_lost") return "turn_lost";
+          exhausted = collected.stop;
+          break;
+        }
       }
     }
   }
@@ -978,6 +1151,21 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
         }
         const hero = snap.state.heroes[heroId];
         if (!hero) break;
+        // Collect on arrival (runHeroCollect): reinforcements waiting in the
+        // city the hero is standing on move onto it here, in the middle of the
+        // sweep, so walking home to refit finishes in the same turn instead of
+        // ping-ponging between the city tile and the hex beside it until the
+        // next pass's army section runs.
+        const collect = await runHeroCollect(ctx, snap.state, heroId);
+        if ("stop" in collect) {
+          if (collect.stop === "turn_lost") return "turn_lost";
+          exhausted = collect.stop;
+          break sweep;
+        }
+        if (collect.collected > 0) {
+          movedThisSweep += 1;
+          continue;
+        }
         const map = getOrCreateGameMap(snap.seed, snap.mapSize, snap.mapGenVersion);
         syncSettlementRoads(map, Object.values(snap.state.settlements));
         // Settlers mode (SETTLERS-PLAN.md §4 W5): the seat's only entity is a
@@ -1102,14 +1290,22 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
           continue;
         }
         syncSettlementRoads(map, Object.values(snap.state.settlements));
-        const move = pickAiMove(
-          snap.state,
-          heroId,
-          map,
-          mem.rng,
-          catalog,
-          activeBackoffExclusions(mem, heroId, snap.state.round),
-        );
+        // The refit errand (brain: pickHeroRefitStep): a hero under its army
+        // target whose own city is holding troops walks home to collect them —
+        // the collect half of the army section above, which recruits into the
+        // city's garrison. Null whenever no friendly city holds any troops,
+        // which is every hero in a game that section never recruited for, so a
+        // hero's ordinary plan is unchanged until there is something to fetch.
+        const move =
+          pickHeroRefitStep(snap.state, heroId, map, catalog) ??
+          pickAiMove(
+            snap.state,
+            heroId,
+            map,
+            mem.rng,
+            catalog,
+            activeBackoffExclusions(mem, heroId, snap.state.round),
+          );
         if (!move) break;
         const moved = await dispatch(ctx, {
           kind: "MoveHero",

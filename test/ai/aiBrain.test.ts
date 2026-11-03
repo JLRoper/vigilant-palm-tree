@@ -994,3 +994,171 @@ test("on an epic (120x90) grass map with no targets in reach, pickAiMove returns
   assert.equal(move!.cost, 1);
   assert.equal(rng.draws(), 2);
 });
+import { pickHeroArmyBuildings, pickHeroArmyRecruitment, pickHeroRefitStep, HERO_ARMY_TARGET_POWER } from "../../src/ai/aiBrain";
+import { platoonPower } from "@heroes/engine";
+
+// The hero-army planners (packages/engine/src/ai/aiBrain.ts): the AI seat's own
+// route to an assault force. `RecruitUnits` lands recruits in a settlement's
+// GARRISON and only `TransferUnits` moves them onto a hero standing on that
+// tile, so "hero army growth" is these two planners plus the refit walk that
+// brings the hero home to collect. Sized from HERO_ARMY_TARGET_POWER, the
+// player's own realistic force at the turn it can first reach a capital — the
+// same curve the neutral capital's 168-power garrison was chosen against.
+
+const ARMY_UNITS: Record<string, UnitType> = {
+  peasant: { id: "peasant", name: "Peasant", attack: 1, defence: 1, health: 2, speed: 2, description: "", advantageType: "infantry", specialty: "", specialtyPriority: 1, tier: 1 },
+  swordsman: { id: "swordsman", name: "Swordsman", attack: 4, defence: 6, health: 10, speed: 3, description: "", advantageType: "infantry", specialty: "", specialtyPriority: 1, tier: 2 },
+  ghoul: { id: "ghoul", name: "Ghoul", attack: 2, defence: 1, health: 3, speed: 3, description: "", advantageType: "infantry", specialty: "", specialtyPriority: 1, tier: 1 },
+};
+
+function armyBuilding(kind: BuildingKind, gx = 2, gy = 2, level = 1) {
+  return { gx, gy, kind, level, style: "classic" as const };
+}
+
+function armyGrassMap(width: number, height: number): GameMap {
+  const rows: TileRow[] = [];
+  for (let r = 0; r < height; r++) {
+    for (let q = 0; q < width; q++) rows.push({ q, r, terrain: "grass", resource: null });
+  }
+  return GameMap.fromTiles(rows);
+}
+
+function stateWith(heroes: ReturnType<typeof makeHero>[], settlements: ReturnType<typeof makeSettlement>[]) {
+  return makeState({
+    heroes,
+    settlements,
+    activePlayerId: 1,
+    phase: { kind: "AI_TURN", playerId: 1 },
+  });
+}
+
+test("a hero under the army target recruits from its own city, sized to the deficit", () => {
+  const home = makeSettlement("s-home", 1, 20, 14, {
+    gold: 5000,
+    warehouse: emptyWarehouse({ wood: 500, stone: 500 }),
+    buildings: [armyBuilding("barracks", 2, 2)],
+  });
+  const state = stateWith([makeHero("h1", 1, 20, 14, { stacks: [] })], [home]);
+
+  const plan = pickHeroArmyRecruitment(state, 1, ARMY_UNITS);
+
+  assert.equal(plan.length, 1, "one recruit item for the one recruit source");
+  assert.equal(plan[0].heroId, "h1", "the purchase names the hero it is for (the transfer's target)");
+  assert.equal(plan[0].settlementId, "s-home");
+  assert.equal(plan[0].unitTypeId, "swordsman");
+  assert.equal(plan[0].count, 3, "the barracks' draft pool caps the order at 3");
+});
+
+test("a hero with a waiting garrison is not over-bought: what the city already holds counts against the deficit", () => {
+  const home = makeSettlement("s-home", 1, 20, 14, {
+    gold: 5000,
+    warehouse: emptyWarehouse({ wood: 500, stone: 500 }),
+    buildings: [armyBuilding("barracks", 2, 2)],
+  });
+  // 34 swordsmen at 10 power each = 340 of the 346 target: only 6 power is
+  // still missing, which is one unit -- not another full 3-unit order.
+  home.stacks = [{ entries: [{ unitTypeId: "swordsman", count: 34 }] }];
+  const state = stateWith([makeHero("h1", 1, 20, 14, { stacks: [] })], [home]);
+
+  const plan = pickHeroArmyRecruitment(state, 1, ARMY_UNITS);
+
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0].count, 1, "the order is the remaining deficit, not the whole target again");
+
+  home.stacks = [{ entries: [{ unitTypeId: "swordsman", count: 35 }] }];
+  const covered = stateWith([makeHero("h1", 1, 20, 14, { stacks: [] })], [home]);
+  assert.deepEqual(
+    pickHeroArmyRecruitment(covered, 1, ARMY_UNITS),
+    [],
+    "3200 of troops waiting at home is already the whole force: nothing more is bought",
+  );
+});
+
+test("an army at the target plans nothing, and settlers mode never plans an army at all", () => {
+  const home = makeSettlement("s-home", 1, 20, 14, {
+    gold: 5000,
+    buildings: [armyBuilding("barracks", 2, 2)],
+  });
+  const big = Array.from({ length: Math.ceil(HERO_ARMY_TARGET_POWER / 10) }, () => ({
+    entries: [{ unitTypeId: "swordsman", count: 1 }],
+  }));
+  const atTarget = stateWith([makeHero("h1", 1, 20, 14, { stacks: big })], [home]);
+  assert.ok(platoonPower(atTarget.heroes.h1.stacks, ARMY_UNITS) >= HERO_ARMY_TARGET_POWER);
+  assert.deepEqual(pickHeroArmyRecruitment(atTarget, 1, ARMY_UNITS), []);
+  assert.deepEqual(pickHeroArmyBuildings(atTarget, 1, ARMY_UNITS), []);
+
+  const settlers = stateWith([makeHero("h1", 1, 20, 14, { stacks: [] })], [home]);
+  (settlers as { gameMode?: string }).gameMode = "settlers";
+  assert.deepEqual(pickHeroArmyRecruitment(settlers, 1, ARMY_UNITS), [], "a covered wagon is never given an army");
+  assert.deepEqual(pickHeroArmyBuildings(settlers, 1, ARMY_UNITS), []);
+  assert.equal(pickHeroRefitStep(settlers, "h1", armyGrassMap(8, 8), ARMY_UNITS), null);
+});
+
+test("a city whose draft cannot cover the deficit gets more recruit buildings, on free city cells", () => {
+  const home = makeSettlement("s-home", 1, 20, 14, {
+    level: 1,
+    gold: 5000,
+    warehouse: emptyWarehouse({ wood: 500, stone: 500 }),
+    buildings: [armyBuilding("barracks", 2, 2)],
+  });
+  const state = stateWith([makeHero("h1", 1, 20, 14, { stacks: [] })], [home]);
+
+  const plan = pickHeroArmyBuildings(state, 1, ARMY_UNITS);
+
+  assert.ok(plan.length > 1, "one building's 3-unit draft cannot reach the target");
+  assert.ok(plan.every((p) => p.kind === "barracks"), "the seat copies the recruit kind its own city already has");
+  assert.ok(plan.every((p) => p.gx >= 0 && p.gx < 5 && p.gy >= 0 && p.gy < 5), "a level-1 city grid is 5x5");
+  const cells = new Set(plan.map((p) => `${p.gx},${p.gy}`));
+  assert.equal(cells.size, plan.length, "no two placements share a cell");
+  assert.ok(!cells.has("2,2"), "the cell the existing barracks stands on is never re-used");
+  const perBuilding = platoonPower([{ entries: [{ unitTypeId: "swordsman", count: 3 }] }], ARMY_UNITS);
+  assert.ok(
+    plan.length * perBuilding + perBuilding >= HERO_ARMY_TARGET_POWER,
+    "the copies + the standing barracks are enough draft to cover the deficit",
+  );
+});
+
+test("a hero whose city can already field the deficit places nothing", () => {
+  const home = makeSettlement("s-home", 1, 20, 14, {
+    level: 3,
+    gold: 5000,
+    warehouse: emptyWarehouse({ wood: 500, stone: 500 }),
+    buildings: [armyBuilding("barracks", 2, 2)],
+  });
+  // Everything drafted, nothing left to buy: 3 x 10-power swordsmen in hand.
+  home.stacks = [
+    { entries: [{ unitTypeId: "swordsman", count: 34 }] },
+  ];
+  const state = stateWith([makeHero("h1", 1, 20, 14, { stacks: [] })], [home]);
+
+  assert.deepEqual(pickHeroArmyBuildings(state, 1, ARMY_UNITS), []);
+});
+
+test("refit: the hero steps toward the city holding its troops, and does nothing when none wait", () => {
+  const map = armyGrassMap(10, 10);
+  const home = makeSettlement("s-home", 1, 6, 2);
+  home.stacks = [{ entries: [{ unitTypeId: "swordsman", count: 2 }] }];
+  const hero = makeHero("h1", 1, 2, 2, { stacks: [] });
+
+  const step = pickHeroRefitStep(stateWith([hero], [home]), "h1", map, ARMY_UNITS);
+
+  assert.ok(step, "troops waiting at home is the whole reason to walk there");
+  assert.equal(step.toTile.q, 3, "one hex step, toward the city at (6,2)");
+  assert.equal(step.toTile.r, 2);
+
+  const empty = makeSettlement("s-home", 1, 6, 2);
+  assert.equal(
+    pickHeroRefitStep(stateWith([hero], [empty]), "h1", map, ARMY_UNITS),
+    null,
+    "no waiting troops, no errand: an ordinary plan is untouched",
+  );
+});
+
+test("refit: an enemy-held city is never a destination (only the seat's own garrisons are collected)", () => {
+  const map = armyGrassMap(10, 10);
+  const foreign = makeSettlement("s-theirs", 0, 6, 2);
+  foreign.stacks = [{ entries: [{ unitTypeId: "swordsman", count: 2 }] }];
+  const hero = makeHero("h1", 1, 2, 2, { stacks: [] });
+
+  assert.equal(pickHeroRefitStep(stateWith([hero], [foreign]), "h1", map, ARMY_UNITS), null);
+});

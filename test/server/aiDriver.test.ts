@@ -2,12 +2,18 @@ import { test, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   GameMap,
+  HERO_ARMY_TARGET_POWER,
+  depositIntoGarrison,
   mulberry32,
   normalizePlatoons,
   pickAiMove,
   pickCharterAction,
   pickGarrisonRecruitment,
+  pickHeroArmyRecruitment,
+  platoonPower,
+  removeUnitsByType,
   resolveBattle,
+  settlementStacks,
   evaluateTradeNeeds,
   buyWagons,
   computeSettlementRates,
@@ -401,6 +407,20 @@ function commandsOfKind<K extends Command["kind"]>(commands: Command[], kind: K)
   return commands.filter((c): c is Extract<Command, { kind: K }> => c.kind === kind);
 }
 
+/**
+ * The RecruitUnits items one pass plans for the seat: the settlement-garrison
+ * section's (pickGarrisonRecruitment) plus the hero-army section's
+ * (pickHeroArmyRecruitment) — both are RecruitUnits, so a pin that counts the
+ * section's dispatches has to count both. The hero-army ones have their own
+ * pins in the "hero army growth" block at the end of this file.
+ */
+function plannedRecruitItems(world: AiDriverGameSnapshot): number {
+  return (
+    pickGarrisonRecruitment(world.state, 1, CATALOG).length +
+    pickHeroArmyRecruitment(world.state, 1, CATALOG).length
+  );
+}
+
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 test("constants match the plan values (D3/D12)", () => {
@@ -663,52 +683,52 @@ function recruitWorld(gameId?: number): AiDriverGameSnapshot {
 
 test("D13 recruitment runs once per round+seat", async () => {
   const world = recruitWorld();
-  const expected = pickGarrisonRecruitment(world.state, 1, CATALOG);
+  const expected = plannedRecruitItems(world);
   const harness = installHarness(world);
 
   await scanOnce();
-  assert.equal(commandsOfKind(harness.commands, "RecruitUnits").length, expected.length, "one dispatch per planned item");
+  assert.equal(commandsOfKind(harness.commands, "RecruitUnits").length, expected, "one dispatch per planned item");
   assert.equal(harness.endTurns.length, 1, "the turn still completes");
 
   await scanOnce();
   assert.equal(
     commandsOfKind(harness.commands, "RecruitUnits").length,
-    expected.length,
+    expected,
     "the guard blocks a second recruitment in the same round+seat",
   );
 });
 
 test("D13 per-item rejection is tolerated and the turn still ends", async () => {
   const world = recruitWorld();
-  const expected = pickGarrisonRecruitment(world.state, 1, CATALOG);
+  const expected = plannedRecruitItems(world);
   const harness = installHarness(world, {
     override: (command) => (command.kind === "RecruitUnits" ? { ok: false, reason: "garrison_full" } : undefined),
   });
 
   await scanOnce();
-  assert.equal(commandsOfKind(harness.commands, "RecruitUnits").length, expected.length, "every item was still dispatched");
+  assert.equal(commandsOfKind(harness.commands, "RecruitUnits").length, expected, "every item was still dispatched");
   assert.equal(harness.endTurns.length, 1, "the turn still completes after rejected recruits");
   assert.equal(harness.audits.length, 0, "a tolerated recruit rejection is not a turn-skipping audit");
 });
 
 test("game-recreate invalidation: same name with a new numeric id resets the recruit guard", async () => {
   const world = recruitWorld(1);
-  const expected = pickGarrisonRecruitment(world.state, 1, CATALOG);
+  const expected = plannedRecruitItems(world);
   const harness = installHarness(world);
 
   await scanOnce();
-  assert.equal(commandsOfKind(harness.commands, "RecruitUnits").length, expected.length);
+  assert.equal(commandsOfKind(harness.commands, "RecruitUnits").length, expected);
 
   world.gameId = 2; // POST /games ON CONFLICT(name) resurrection with a new id
   await scanOnce();
   assert.equal(
     commandsOfKind(harness.commands, "RecruitUnits").length,
-    expected.length * 2,
+    expected * 2,
     "the id mismatch reset the per-game memory, so the guard re-arms in the same round",
   );
 
   await scanOnce();
-  assert.equal(commandsOfKind(harness.commands, "RecruitUnits").length, expected.length * 2, "the new memory's guard holds again");
+  assert.equal(commandsOfKind(harness.commands, "RecruitUnits").length, expected * 2, "the new memory's guard holds again");
 });
 
 // ── Phase 5: trade-route auto-accept ───────────────────────────────────────
@@ -1926,7 +1946,11 @@ test("B3 founding: the gate pass dispatches exactly one StartCharter per hero pe
   // Ordering: the recruit and trade-route sections of the SAME pass run
   // first -- their commands spend the same warehouse/purse the charter gate
   // reads, so founding behind them is what makes the gate honest.
-  assert.equal(commandsOfKind(harness.commands, "RecruitUnits").length, 1, "the recruit fixture fires one item");
+  assert.equal(
+    commandsOfKind(harness.commands, "RecruitUnits").length,
+    plannedRecruitItems(world),
+    "the garrison section's item plus the hero-army section's (both RecruitUnits)",
+  );
   assert.equal(commandsOfKind(harness.commands, "BuyWagons").length, 1, "the trade section buys the suggested wagon");
   assert.equal(commandsOfKind(harness.commands, "CreateTradeRoute").length, 1, "the trade section accepts the recommendation");
   for (const earlier of ["RecruitUnits", "BuyWagons", "CreateTradeRoute"] as const) {
@@ -2183,7 +2207,11 @@ test("B3 re-hydrate: a same-pass BuyWagons that drains the founding warehouse pr
 
   assert.equal(commandsOfKind(harness.commands, "BuyWagons").length, 1, "the trade-route section bought the wagon out of s-a");
   assert.equal(commandsOfKind(harness.commands, "CreateTradeRoute").length, 1, "and accepted the recommendation");
-  assert.equal(commandsOfKind(harness.commands, "RecruitUnits").length, 1, "the recruit section ran too");
+  assert.equal(
+    commandsOfKind(harness.commands, "RecruitUnits").length,
+    plannedRecruitItems(world),
+    "the recruit section ran too",
+  );
   assert.equal(
     world.state.settlements["s-a"].warehouse.wood,
     CHARTER_WAREHOUSE_COST.wood - WAGON_COST.wood,
@@ -2466,8 +2494,30 @@ test("W5 classic: the AI's decisions and command stream are byte-identical to th
 
   await scanOnce();
 
+  // The hero-army section is a DELIBERATE addition to the classic stream: this
+  // fixture's seat owns a city with a barracks and its hero stands on it, so
+  // the seat now buys its hero troops and the city more recruit buildings
+  // (pinned in the "hero army growth" block at the end of this file). Those
+  // commands ride between the garrison recruit and the trade section, so the
+  // byte-identity pin watches the stream with exactly that block removed --
+  // the W5 claim it was written for (the settlers feature did not disturb the
+  // recruit -> trade -> charter -> travel -> EndTurn order) still holds, and
+  // the addition is asserted right here beside it.
+  const withoutBuildings = harness.commands.filter((c) => c.kind !== "PlaceBuildings");
+  const tradeStart = withoutBuildings.findIndex((c) => c.kind === "BuyWagons");
+  assert.ok(tradeStart > 0, "the classic stream still contains its trade section");
+  const beforeTrade = withoutBuildings.slice(0, tradeStart);
+  const heroArmyItems = beforeTrade.filter((c) => c.kind === "RecruitUnits").slice(1);
+  assert.equal(heroArmyItems.length, 1, "the hero-army section adds exactly one purchase");
+  assert.equal(heroArmyItems[0].unitTypeId, "swordsman");
+  assert.equal(commandsOfKind(harness.commands, "PlaceBuildings").length, 1, "and one capacity commit");
+  const comparable = [
+    ...beforeTrade.filter((c) => c.kind === "RecruitUnits").slice(0, 1),
+    ...withoutBuildings.slice(tradeStart),
+  ];
+
   assert.equal(
-    JSON.stringify(harness.commands),
+    JSON.stringify(comparable),
     CLASSIC_STREAM_FIXTURE,
     "the classic stream is byte-identical (recruit -> trade -> charter -> charter travel -> EndTurn)",
   );
@@ -2608,4 +2658,150 @@ test("default watchdog SQL: a stale-beat foreign row is adopted via the real CAS
     await cleanupRow(fresh);
     await cleanupRow(stale);
   }
+});
+// ── Hero army growth: the neutral-capital garrison's other half ─────────────
+//
+// The seat's hero stands ON its own city, and that city holds a barracks: the
+// driver must recruit toward HERO_ARMY_TARGET_POWER, land the recruits in the
+// city's garrison, and transfer them onto the hero — the only route the engine
+// offers from a settlement's recruit buildings to a hero's army (RecruitUnits
+// deposits into the garrison; TransferUnits is what moves troops onto a hero),
+// and exactly the route a player takes by hand in the settlement panel.
+//
+// Before this section existed, nothing in either driver ever grew a hero's
+// army, so an AI seat's force was frozen at its starting 132 power while a
+// neutral capital's garrison sits at 168 — a target `attackerBeatsGarrison`
+// (1.5x = 252) never admits. These pins fail on that tree: no RecruitUnits for
+// the hero, no TransferUnits, and a hero army that never changes.
+
+/** A hero army plan for the seat, from a city that can recruit. */
+function heroArmyWorld(opts?: { wagon?: boolean }): AiDriverGameSnapshot {
+  const home = makeSettlement("s-home", 1, 20, 14, {
+    gold: 5000,
+    warehouse: emptyWarehouse({ wood: 500, stone: 500 }),
+    buildings: [{ gx: 2, gy: 2, kind: "barracks", level: 1, style: "classic" }],
+  });
+  const heroId = opts?.wagon ? coveredWagonIdFor(1) : "h1";
+  const world = aiTurnWorld([makeHero(heroId, 1, 20, 14, { movementRemaining: 0, stacks: [] })], {
+    settlements: [home],
+  });
+  if (opts?.wagon) (world.state as { gameMode?: string }).gameMode = "settlers";
+  return world;
+}
+
+/**
+ * Emulates the three handlers' narrow effects on the scripted world: recruits
+ * land in the settlement garrison, a toHero transfer moves them onto the hero,
+ * and a building commit replaces the settlement's array.
+ */
+function armyCommandEffects(world: AiDriverGameSnapshot) {
+  return (command: Command): AiDriverCommandOutcome | undefined => {
+    if (command.kind === "RecruitUnits") {
+      const settlement = world.state.settlements[command.settlementId];
+      if (!settlement) return { ok: false, reason: "no_settlement" };
+      const deposit = depositIntoGarrison(settlementStacks(settlement), command.unitTypeId, command.count);
+      if (!deposit.ok) return { ok: false, reason: "garrison_full" };
+      settlement.stacks = deposit.stacks;
+      settlement.gold -= 200 * command.count;
+      return { ok: true };
+    }
+    if (command.kind === "TransferUnits") {
+      const settlement = world.state.settlements[command.settlementId];
+      const hero = world.state.heroes[command.heroId];
+      if (!settlement || !hero) return { ok: false, reason: "no_settlement" };
+      if (settlement.q !== hero.q || settlement.r !== hero.r) return { ok: false, reason: "hero_not_at_settlement" };
+      const deposit = depositIntoGarrison(hero.stacks, command.unitTypeId, command.count);
+      if (!deposit.ok) return { ok: false, reason: "platoon_full" };
+      hero.stacks = deposit.stacks;
+      settlement.stacks = removeUnitsByType(settlementStacks(settlement), command.unitTypeId, command.count);
+      return { ok: true };
+    }
+    if (command.kind === "PlaceBuildings") {
+      const settlement = world.state.settlements[command.settlementId];
+      if (!settlement) return { ok: false, reason: "no_settlement" };
+      settlement.buildings = command.buildings.map((b) => ({ ...b }));
+      return { ok: true };
+    }
+    return undefined;
+  };
+}
+
+test("the AI grows its hero army: recruit into the city, then transfer onto the hero", async () => {
+  const world = heroArmyWorld();
+  const harness = installHarness(world, { override: armyCommandEffects(world) });
+  const hero = world.state.heroes["h1"];
+  assert.equal(platoonPower(hero.stacks, CATALOG), 0, "the hero starts with no army at all");
+
+  await scanOnce();
+
+  const recruits = commandsOfKind(harness.commands, "RecruitUnits").filter((c) => c.settlementId === "s-home");
+  assert.ok(recruits.length > 0, "the hero's city was recruited from");
+  assert.equal(recruits[0].unitTypeId, "swordsman", "the barracks' own unit, bought by the same power-per-gold rule the garrison planner uses");
+
+  const transfers = commandsOfKind(harness.commands, "TransferUnits");
+  assert.equal(transfers.length, 1, "the recruits are handed to the hero standing on the tile");
+  assert.equal(transfers[0].direction, "toHero");
+  assert.equal(transfers[0].heroId, "h1");
+  assert.equal(transfers[0].unitTypeId, "swordsman");
+
+  assert.ok(
+    platoonPower(hero.stacks, CATALOG) > 0,
+    "the hero's army actually grew -- the whole point of the section",
+  );
+  assert.equal(
+    platoonPower(hero.stacks, CATALOG) < HERO_ARMY_TARGET_POWER,
+    true,
+    "one round's draft is only a step: the target is reached over several turns",
+  );
+  assert.deepEqual(
+    settlementStacks(world.state.settlements["s-home"]).flatMap((p) => p.entries),
+    [],
+    "the garrison is handed over, not duplicated",
+  );
+
+  const commandsSoFar = harness.commands.length;
+  await scanOnce();
+  assert.equal(
+    commandsOfKind(harness.commands, "RecruitUnits").length,
+    recruits.length,
+    "the once-per-round+seat guard holds: no second purchase in the same round",
+  );
+  assert.ok(harness.commands.length > commandsSoFar, "the second pass still drove the turn");
+});
+
+test("the army section grows the city's recruit capacity when one building's draft cannot reach the target", async () => {
+  const world = heroArmyWorld();
+  const harness = installHarness(world, { override: armyCommandEffects(world) });
+
+  await scanOnce();
+
+  const placed = commandsOfKind(harness.commands, "PlaceBuildings");
+  assert.equal(placed.length, 1, "one cart commit, exactly like the city view's");
+  assert.ok(placed[0].buildings.length > 1, "more than the one building already standing");
+  assert.equal(
+    placed[0].buildings.filter((b) => b.kind === "barracks").length > 1,
+    true,
+    "copies of the recruit kind the city already has (so the placement is always faction-legal)",
+  );
+  assert.equal(
+    placed[0].buildings.some((b) => b.kind === "townHall" && b.gx === 2 && b.gy === 2),
+    false,
+    "the existing buildings are round-tripped, not invented",
+  );
+});
+
+test("settlers mode never recruits an army: a covered wagon is given no troops", async () => {
+  const world = heroArmyWorld({ wagon: true });
+  const harness = installHarness(world, { override: armyCommandEffects(world) });
+
+  await scanOnce();
+
+  assert.equal(commandsOfKind(harness.commands, "RecruitUnits").length, 0);
+  assert.equal(commandsOfKind(harness.commands, "TransferUnits").length, 0);
+  assert.equal(commandsOfKind(harness.commands, "PlaceBuildings").length, 0);
+  assert.deepEqual(
+    world.state.heroes[coveredWagonIdFor(1)].stacks,
+    [],
+    "the bare-wilderness invariant: a wagon founds, it never fights",
+  );
 });
