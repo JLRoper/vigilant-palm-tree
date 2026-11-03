@@ -11,7 +11,7 @@ New Game supports **1–4 human players**, **0–3 AI enemies**, and eight map s
 - **Classic** — a castle, a commander and a town per seat; expand by **chartering** new settlements (the long-standing rules).
 - **Settlers** — bare wilderness: no castle and no town for anyone, not even neutral ones. Every seat starts with **one covered wagon** carrying a starting stockpile. A wagon **founds** a settlement where it stands, and the wagon **becomes that settlement's first hero** — so founding widens your territory without spending your explorer.
 
-The form opens on the mode you last created a game with (a stored preference; picking a mode for one game does not change it), and the mode is fixed for that game's lifetime.
+The form opens on the stored preference — Settings → **New game** → *Default mode for a new game*, kept in this browser; picking a mode for one game does not change it — and the mode is fixed for that game's lifetime.
 
 ## Move and Found Settlements
 
