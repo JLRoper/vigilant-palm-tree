@@ -140,6 +140,24 @@ test("impassable and unreachable targets return null without crashing", () => {
   assert.equal(move, null, "enemy on impassable terrain, unreachable settlement, impassable wander targets -> null");
 });
 
+test("a settlement anywhere on the board is a target: the settlement band spans the whole map (36x27)", () => {
+  const map = grassMap(36, 27);
+  const hero = makeHero("h1", 1, 5, 24);
+  const far = makeSettlement("s-far", null, 5, 5);
+  const state = aiTurnState([hero], [far]);
+
+  const move = pickAiMove(state, "h1", map, () => 0.999);
+
+  assert.equal(hexDistance({ q: hero.q, r: hero.r }, { q: far.q, r: far.r }), 19, "the fixture settlement is 19 hexes away");
+  assert.ok(move, "a settlement on the board must produce a move");
+  assert.deepEqual(
+    move!.toTile,
+    { q: 5, r: 23 },
+    "the step closes on the settlement 19 hexes away instead of taking a wander step",
+  );
+  assert.equal(move!.cost, 1);
+});
+
 test("a hero with no movement left returns null", () => {
   const map = grassMap(8, 8);
   const state = aiTurnState([
