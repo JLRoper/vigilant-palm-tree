@@ -108,28 +108,48 @@ export class Castle {
     };
   }
 
+  /**
+   * Push a freshly-read SettlementState into this wrapper *in place*.
+   *
+   * Every field `fromGameState` reads, copied onto the same instance. The
+   * wrapper is a projection that long-lived holders alias -- `EntityMirror`
+   * stores these exact objects (`syncWith`), and the render/UI paths read
+   * them for the owner colour, the territory outline, the control range and
+   * the district door -- so a refresh must never allocate a replacement: the
+   * aliases would keep pointing at the retired object. `Hero.syncFromState`
+   * exists for the same reason; the settlement side had no equivalent, which
+   * is how a captured castle kept its pre-capture owner for the rest of the
+   * session (playthrough round 2, F4).
+   */
+  syncFromState(s: SettlementState): void {
+    this.id = s.id;
+    this.tile = { q: s.q, r: s.r };
+    this.level = s.level;
+    this.ownerId = s.ownerId ?? null;
+    this.name = s.name ?? s.id;
+    this.population = s.population ?? 0;
+    this.goldTax = s.goldTax ?? 0;
+    this.resourceRates = s.resourceRates ?? {};
+    this.foundedOnResource = s.foundedOnResource ?? null;
+    this.gold = s.gold ?? 0;
+    this.warehouse = s.warehouse ?? emptyWarehouse();
+    this.citySpots = s.citySpots ?? [];
+    this.cityMines = s.cityMines ?? [];
+    this.morale = s.morale ?? 100;
+    this.autoTrade = s.autoTrade ?? true;
+    this.castleVariant = s.castleVariant ?? 0;
+    this.buildings = s.buildings ?? [];
+    this.upgrade = s.upgrade ?? undefined;
+    this.districts = s.districts && Object.keys(s.districts).length > 0 ? s.districts : undefined;
+  }
+
   static fromGameState(s: SettlementState): Castle {
-    return new Castle(
-      s.id,
-      { q: s.q, r: s.r },
-      s.level,
-      s.ownerId ?? null,
-      s.name ?? s.id,
-      s.population ?? 0,
-      s.goldTax ?? 0,
-      s.resourceRates ?? {},
-      s.foundedOnResource ?? null,
-      s.gold ?? 0,
-      s.warehouse ?? emptyWarehouse(),
-      s.citySpots ?? [],
-      s.cityMines ?? [],
-      s.morale ?? 100,
-      s.autoTrade ?? true,
-      s.castleVariant ?? 0,
-      s.buildings ?? [],
-      s.upgrade ?? undefined,
-      s.districts && Object.keys(s.districts).length > 0 ? s.districts : undefined,
-    );
+    // Construct with placeholder values, then run the one field-copy routine:
+    // a second hand-written mapping here is exactly the kind of parallel writer
+    // that drifts from the reconcile path.
+    const castle = new Castle(s.id, { q: s.q, r: s.r }, s.level, s.ownerId ?? null, s.name ?? s.id, 0, 0, {}, null);
+    castle.syncFromState(s);
+    return castle;
   }
 }
 
