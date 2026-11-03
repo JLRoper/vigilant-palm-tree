@@ -1,0 +1,13 @@
+Isometric pixel art game asset for a medieval city-builder, matching the FIRST attached image exactly in style: the same chunky pixel size (large visible pixels, no fine-grained noise), the same thick dark-brown outline around every shape, the same warm brown/tan palette with slate-grey roofs, the same lighting from the upper left, a square 1:1 canvas, one single centred asset. The SECOND attached image is a neighbouring building of the same set - match its palette and grain as well.
+
+The FIRST attached image is the settlement's level-1 TOWN CENTRE (a stone corner tower with a slate turret and a timber-framed hall with a tiled roof). This asset is the LEVEL 3 upgrade of that same building - the grandest form, unmistakably the settlement's civic landmark - so it must still read as the same family, just at its finest.
+
+KEEP THE FIRST IMAGE'S GROUND EXACTLY AS IT IS. Its lot is a flat isometric diamond of sandy ground with darker speckles, cobblestones and grass tufts: keep the diamond's four corners, keep the sand filled edge to edge, keep the 2-pixel dark-brown outline along its two lower edges, and change nothing about the ground. Do NOT add any vertical face, side wall, thickness, rim, kerb, platform, pedestal or soil slab under the sand - not even 3 pixels of it - and no cast shadow under the lot.
+
+Subject: the LEVEL 3 town centre - a full two-storey stone hall with a tall central bell tower carrying a brass bell under a slender slate spire, and two round corner turrets with conical slate roofs. Tall arched stone-mullioned windows with leaded panes on both storeys, a wide arcaded entrance with a flight of stone steps, carved double doors on iron hinges, carved stone corbels and a coat-of-arms shield over the door, painted banners hanging from the towers, a stone chimney, and rows of individual roof tiles on the steep tiled roof. The walled front courtyard holds a small stone fountain, a wooden bench, two barrels, a stack of crates, a hay bale, cobblestones and grass tufts on the sand.
+
+The building stands ON the flat lot: its lowest edge rests on the sand with no gap, nothing floats above the ground, and nothing is cut off by the bottom edge of the canvas.
+
+Rich detail everywhere: separate roof tiles, weathered stone joints, carved stonework, plank grain, iron hinges and studs, cloth banners, individual cobblestones. Crisp pixel-art shading, no anti-aliasing halos, no text, no watermark, no border, no scenery.
+
+Background: plain uniform solid light-gray (#c8c8c8) with absolutely no checkerboard pattern anywhere on the canvas.
