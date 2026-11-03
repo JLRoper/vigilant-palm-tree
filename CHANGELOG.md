@@ -10,9 +10,16 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.38.12] - 2026-11-03
+
+Copilot's two comments on the landed load path. The browser's own seat is resolved instead of the first claimed one: a remembered seat, then the handle it claimed with, then the server-bound auth email, and NO seat when none of the three identifies the browser (this supersedes #292's `resolveInitialLocalSeat`, whose lowest-claimed-seat fallback was the same first-claim guess merely narrowed). The load promise is returned through the toolbar callback, so a failed load stays observable by the dialog that awaits it.
+
 ## [0.38.11] - 2026-11-03
 
-Copilot's two comments on the landed load path: the browser's own seat is resolved instead of the first claimed one, and the load promise is returned through the toolbar callback so a failed load stays observable
+seat truth: a seat's own turn
+- End Turn is seat-scoped on both sides (playthrough round 2b, F1): the toolbar offers the control only on the local seat's own turn (`canEndTurnFromSeat`), the command declares the seat that is asking (`EndTurn.clientSeat`, required over HTTP by `parseCommand`), and `endTurnSeatRefusal` refuses a declaration that is not the seat being ended. A browser-driven AI seat's turn, ended by seat 0's client, and the drop policy's own skip keep working.
+- `GET /games/:name`'s `availableSeats` now means what it says (F3): the seats a client could still claim, instead of the falsy keys of `lobby.claimed` (structurally always `[]`). `seatTotal` is the game's seat count, AI seats included (F7).
+- A browser plays the seat it claimed (F2): `loadGame` no longer resets a client that claimed seat 1 back to seat 0. The single-browser hotseat is out of scope, with the drop-policy change it would need named in docs/multiplayer.md (Decision 4).
 
 ## [0.38.10] - 2026-11-03
 

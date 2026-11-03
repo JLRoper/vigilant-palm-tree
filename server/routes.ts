@@ -277,12 +277,28 @@ router.get("/games/:name", async (req, res) => {
   }
   const row = r.rows[0];
   const claimed = row.lobby?.claimed ?? {};
-  const availableSeats = Object.keys(claimed)
-    .map((k) => Number(k))
-    .filter((n) => Number.isInteger(n))
-    .filter((n) => !claimed[String(n)])
-    .sort((a, b) => a - b);
-  const seatTotal = row.lobby?.seats ?? row.players.length;
+  // F3 (playthrough round 2b): this used to enumerate the keys PRESENT in
+  // `claimed` and keep the falsy ones -- but an unclaimed seat is simply
+  // ABSENT from that map, and the claim writer only ever stores an object, so
+  // the list was structurally always empty (it answered [] even on a game with
+  // every seat free). The field now means what it says: the seats a client
+  // could still claim. `lobby.seats` is the lobby's own human-seat count (the
+  // value claim/start validate against -- AI seats are combatants, not lobby
+  // seats, docs/multiplayer.md), and a started lobby takes no fresh claim at
+  // all (the claim route 409s lobby_already_started), so it offers none.
+  const lobbySeats = row.lobby?.seats ?? row.players.length;
+  const aiSeats = new Set(
+    row.players.filter((p) => p.faction === "ai").map((p) => p.id),
+  );
+  const availableSeats = row.lobby?.startedAt
+    ? []
+    : Array.from({ length: lobbySeats }, (_, i) => i)
+        .filter((i) => !claimed[String(i)] && !aiSeats.has(i));
+  // seatTotal is the game's seat count -- every seat in `players`, AI
+  // combatant seats included (a 1-human + 1-AI game is a 2-seat game). It used
+  // to report `lobby.seats`, which excludes AI seats by design, so it read 1
+  // for that game (playthrough round 2b, F7).
+  const seatTotal = row.players.length;
   // In-flight charters ride the payload (C-BLOCKER-1): a charter's state lives
   // in its own `charters` table with no JSONB column behind it, so without this
   // the client hydrated `activeCharters: []` on every load while
