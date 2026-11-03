@@ -13,6 +13,7 @@ import { liveSettlementUpkeepUnfed } from "@screens/shared/heroUpkeepCost";
 import { RESOURCE_PILE_BUBBLY_SPRITES, settlementBannerUrl } from "../../render/assetDescriptors";
 import { bankRejectionMessage, bankRowModel, treasuryRowModel, type BankGoldDirection, type BankRowModel } from "./bankRows";
 import { TREASURY_CAP_AMBER, treasuryCapBlockerMessage, treasuryCapBlocksGold, treasuryCapMessage, treasuryCapped } from "./treasuryCap";
+import { warehouseCapMessage, warehouseResourceCapped } from "./warehouseCap";
 import { dailyRateTitle, foodBalanceTitle, formatDailyRate, populationCapTitle, resourceLabel, settlementDailyRates } from "./panelRates";
 import type { HorseVariant } from "../../state/settings";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
@@ -488,10 +489,20 @@ export class SettlementInfoMenu {
     // One pass over the settlement's production and upkeep feeds the top food
     // row and every warehouse row, so the two surfaces cannot disagree.
     const daily = settlementDailyRates(settlement, state.castleSeed, state.heroes);
+    // E2: a store at its cap discards production (addStockClamped drops what
+    // does not fit), so its row says so rather than printing a rate that never
+    // arrives -- the same amber + tooltip sentence the treasury row carries, on
+    // the same ownership rule (an opponent's full store is not this player's
+    // problem).
+    const owned = settlement.ownerId !== null && settlement.ownerId === state.activePlayerId;
     const food = daily.food;
+    const foodCapped = owned && warehouseResourceCapped(settlement, "food");
     this.foodEl.textContent = `${food.stock.toLocaleString()} ${formatDailyRate(food.net)}`;
-    this.foodEl.style.color = food.net < 0 ? TREASURY_CAP_AMBER : "";
-    this.foodEl.title = foodBalanceTitle(food, settlement.population);
+    this.foodEl.style.color = foodCapped || food.net < 0 ? TREASURY_CAP_AMBER : "";
+    const foodTitle = foodBalanceTitle(food, settlement.population);
+    this.foodEl.title = foodCapped
+      ? `${foodTitle} ${warehouseCapMessage(settlement, "food", food.produced)}`
+      : foodTitle;
 
     this.updateUpkeep(settlement, state.day);
 
@@ -499,8 +510,12 @@ export class SettlementInfoMenu {
       this.warehouseEls[row.resource].textContent = row.stock.toLocaleString();
       const rateEl = this.warehouseRateEls[row.resource];
       rateEl.textContent = formatDailyRate(row.net);
-      rateEl.style.color = row.net < 0 ? TREASURY_CAP_AMBER : "";
-      rateEl.title = dailyRateTitle(row);
+      const capped = owned && warehouseResourceCapped(settlement, row.resource);
+      rateEl.style.color = capped || row.net < 0 ? TREASURY_CAP_AMBER : "";
+      const rateTitle = dailyRateTitle(row);
+      rateEl.title = capped
+        ? `${rateTitle} ${warehouseCapMessage(settlement, row.resource, row.produced)}`
+        : rateTitle;
     }
 
     let showRecruit = false;
