@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.11] - 2026-11-03
+
+the settings panel's eight slider rows are built by one labelled-slider-row helper that constructs each row's name line and its slider together, so a row can no longer be built without its name -- the round-4 F1 defect was one row doing exactly that while the others were fixed around it. No behaviour change: the rendered panel is byte-identical before and after, and the settings suite pins the shape (27 checks, was 26).
+
 ## [0.39.10] - 2026-11-03
 
 the four skybox-only settings rows now state the backdrop they need
