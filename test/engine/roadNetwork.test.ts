@@ -53,6 +53,11 @@ function district(
   return { q, r, citySpots: [], buildings };
 }
 
+/** A district holding one shipyard -- the only building that may stand on water. */
+function shipyard(q: number, r: number): DistrictState {
+  return { q, r, citySpots: [], buildings: [{ gx: 1, gy: 0, kind: "shipyard", level: 1 }] };
+}
+
 function settlement(districts: Record<string, DistrictState>): SettlementDistrictLike {
   return { id: "s1", level: 2, tile: CENTER, districts };
 }
@@ -195,12 +200,67 @@ test("every edge is laid once, even when routes overlap", () => {
 });
 
 test("a district the network cannot reach on foot gets no road", () => {
+  // Water is not walkable and a barracks is not a harbour: a district sitting on
+  // water with no shipyard is not a legal district, so nothing links it. (The
+  // harbour case below is the one over-water exception.)
   const map = grassMap(9, 9, { "5,4": "water" });
   const { routes, segments } = settlementRoadNetwork(
     settlement({ "5,4": district(5, 4, [4, 4, 4, 4, 4]) }),
     map,
   );
   assert.deepEqual(routes, [], "a water district is a harbour, not a road end");
+  assert.deepEqual(segments, []);
+});
+
+// F4 (round 2 district-road card): a shipyard district on water used to get no
+// road and no explanation. It is a legal district (the shipyard is the one
+// building that may stand on water), so it now joins the network by a single
+// pier edge to the node it was founded against -- drawn in the same two-tone
+// hairline as every land road, so the harbour no longer looks disconnected from
+// its own settlement.
+test("F4: a shipyard water district joins the network by a pier across the water", () => {
+  const map = grassMap(9, 9, { "5,4": "water" });
+  const { routes, segments } = settlementRoadNetwork(settlement({ "5,4": shipyard(5, 4) }), map);
+
+  assert.deepEqual(routes.map((r) => r.districtKey), ["5,4"], "the harbour is part of the network");
+  assert.deepEqual(routes[0].tiles, [CENTER, { q: 5, r: 4 }], "one pier edge, walkable or not");
+  assert.equal(routes[0].roads, 20, "a fully staffed harbour draws the full band");
+  assert.deepEqual(segments, [
+    { key: "4,4|5,4", from: CENTER, to: { q: 5, r: 4 }, strands: 20 },
+  ]);
+});
+
+test("F4: a harbour bridges a strait -- the land district behind it gets its landing edge", () => {
+  const map = grassMap(9, 9, { "5,4": "water" });
+  const { routes, segments } = settlementRoadNetwork(
+    settlement({ "5,4": shipyard(5, 4), "6,4": district(6, 4, [4, 4, 4, 4, 4]) }),
+    map,
+  );
+
+  assert.deepEqual(routes.map((r) => r.districtKey), ["5,4", "6,4"]);
+  assert.deepEqual(
+    routes[1].tiles,
+    [{ q: 5, r: 4 }, { q: 6, r: 4 }],
+    "the land district lands off the harbour, not the castle",
+  );
+  assert.deepEqual(
+    segments.map((s) => [s.from, s.to]),
+    [
+      [CENTER, { q: 5, r: 4 }],
+      [{ q: 5, r: 4 }, { q: 6, r: 4 }],
+    ],
+  );
+});
+
+test("F4: a district walled off with no harbour adjacent still gets no road", () => {
+  // A harbour only bridges water; a district no node can walk to and no
+  // harbour touches keeps its silence rather than inventing a causeway.
+  const map = grassMap(9, 9, { "5,4": "mountain" });
+  const { routes, segments } = settlementRoadNetwork(
+    settlement({ "5,4": district(5, 4, [4, 4, 4, 4, 4]) }),
+    map,
+  );
+  assert.deepEqual(routes, []);
   assert.deepEqual(segments, []);
 });
 
