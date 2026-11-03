@@ -74,6 +74,24 @@ test("hud: no path preview means no Path segment", () => {
   assert.match(h.context.textContent ?? "", /Movement 7\/7/);
 });
 
+// The toolbar is the panel's sibling: it renders the SAME movement price through
+// the same ONE rule (`formatMoveCost`). Before it, the toolbar used a bare
+// `.toFixed(1)`, so a whole-point price read "Path 6.0/7" while the movement pill
+// beside it read "Movement 7/7"; and a roaded forest's 1.2 * 0.75 arrived as
+// 0.8999999999999999, which `.toFixed(1)` happened to hide only because it had
+// been written to round. Both halves are pinned here so neither can drift.
+test("hud: the path readout renders a whole-point price whole, like the movement pill beside it", () => {
+  const h = render(economyState(), { costToSplit: 6, totalCost: 6, destinationReachable: true });
+  assert.match(h.context.textContent ?? "", /Movement 7\/7 · Path 6\/7/);
+});
+
+test("hud: the path readout renders a roaded hex's discounted price as one exact decimal", () => {
+  const roadedForest = 1.2 * 0.75;
+  const h = render(economyState(), { costToSplit: roadedForest, totalCost: roadedForest, destinationReachable: true });
+  assert.match(h.context.textContent ?? "", /Movement 7\/7 · Path 0\.9\/7/);
+  assert.doesNotMatch(h.context.textContent ?? "", /0\.8999999/);
+});
+
 test("hud: last saved rides the context segment (the smoke suite reads #hud for it)", () => {
   const h = render(economyState(), null, "2026-10-11T12:00:00Z");
   assert.match(h.context.textContent ?? "", /^Movement 7\/7 · Last saved /);
