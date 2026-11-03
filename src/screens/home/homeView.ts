@@ -1,5 +1,5 @@
 import { api, type Game } from "../../io/api";
-import { forgetGame, listUserGames, rememberGame, type UserGameEntry } from "../../io/userGames";
+import { forgetGame, mergeLoadList, type UserGameEntry } from "../../io/userGames";
 import {
   checkSession,
   clearAuth,
@@ -15,7 +15,7 @@ import { openConfirmDialog } from "@screens/shared/confirmDialog";
 // The Load Game progress line is ONE function for both Load surfaces (this
 // landing list and the in-game toolbar modal). It reads the ROUND; see
 // loadRowProgress for why `games.turn` must not be rendered.
-import { loadRowProgress } from "@screens/shared/loadGameModal";
+import { LOAD_LIST_EMPTY, LOAD_LIST_UNREACHABLE, loadRowProgress } from "@screens/shared/loadGameModal";
 import type { MapSize } from "../../map/gameMap";
 import { openSettingsMenu } from "./settingsMenu";
 import { createNewGameScreen } from "./newGameScreen";
@@ -269,7 +269,11 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
             uncharted: values.uncharted,
             gameMode: values.gameMode,
           });
-          rememberGameEntry(values.name);
+          // The cache is written by SessionManager.adopt() with the REAL game
+          // id when the load/creation resolves -- this used to add a second,
+          // invented id (`Date.now() & 0xffff`), which could never match a
+          // server row and rendered the player's own game as "(missing)".
+
           screen.destroy();
           newGameScreenHandle = null;
           hide();
@@ -310,13 +314,16 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
   }
 
   async function openLoadModal(): Promise<void> {
-    let serverGames: Game[] = [];
+    // `null` = the list could not be READ. That is not an empty account, and
+    // must not render as one (see LOAD_LIST_UNREACHABLE).
+    let serverGames: Game[] | null = null;
     try {
       serverGames = await api.listGames();
     } catch (e) {
       console.error("[home] listGames failed:", e);
+      serverGames = null;
     }
-    const userGames = readLoadEntries(serverGames);
+    const userGames = mergeLoadList(serverGames);
     const modal = openDialog(document.body, "Load Game", 420);
 
     const content = document.createElement("div");
@@ -329,7 +336,9 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
 
     function showEmptyState(): void {
       const empty = document.createElement("div");
-      empty.textContent = "No saved games yet — start a new game to begin.";
+      // "No saved games yet" is a claim about the ACCOUNT: only say it when the
+      // server was read and holds none.
+      empty.textContent = serverGames === null ? LOAD_LIST_UNREACHABLE : LOAD_LIST_EMPTY;
       empty.style.opacity = "0.7";
       empty.style.padding = "6px 0";
       content.appendChild(empty);
@@ -338,6 +347,14 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
     if (userGames.length === 0) {
       showEmptyState();
     } else {
+      if (serverGames === null) {
+        const warn = document.createElement("div");
+        warn.textContent = LOAD_LIST_UNREACHABLE;
+        warn.style.opacity = "0.8";
+        warn.style.fontSize = "11px";
+        warn.style.padding = "4px 0";
+        content.appendChild(warn);
+      }
       const list = document.createElement("div");
       list.style.maxHeight = "320px";
       list.style.overflowY = "auto";
@@ -369,23 +386,6 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
     content.appendChild(closeRow);
 
     modal.setContent(content);
-  }
-
-  function readLoadEntries(serverGames: Game[]): Array<UserGameEntry & { server?: Game }> {
-    const cache = listUserGames();
-    const byId = new Map<number, Game>();
-    for (const g of serverGames) byId.set(g.id, g);
-    const out: Array<UserGameEntry & { server?: Game }> = [];
-    for (const entry of cache) {
-      const server = byId.get(entry.id);
-      if (server) {
-        out.push({ ...entry, server });
-        byId.delete(entry.id);
-      } else {
-        out.push({ ...entry });
-      }
-    }
-    return out.sort((a, b) => (a.lastSeenAt < b.lastSeenAt ? 1 : -1));
   }
 
   function makeLoadRow(
@@ -433,7 +433,6 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
         if (!serverGame) return;
         try {
           await opts.onLoadGame(serverGame);
-          rememberGameEntry(serverGame.name);
           onLoaded();
           hide();
           opts.onEnterGame();
@@ -616,12 +615,6 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
       authState = null;
       refreshAuthUi();
     }
-  }
-
-  function rememberGameEntry(name: string): void {
-    const known = listUserGames().find((g) => g.name === name);
-    if (known) return;
-    rememberGame(Date.now() & 0xffff, name);
   }
 
   function show(): void {

@@ -1,6 +1,6 @@
 import type { Game } from "../../io/api";
 import { api } from "../../io/api";
-import { forgetGame, listUserGames, type UserGameEntry } from "../../io/userGames";
+import { forgetGame, mergeLoadList, type UserGameEntry } from "../../io/userGames";
 import { panelTheme, styleButton } from "./panel";
 import { openDialog } from "./dialog";
 
@@ -19,10 +19,6 @@ export interface LoadGameModalOptions {
   onForget?: (id: number) => void;
 }
 
-function sortByLastSeen<T extends { lastSeenAt: string }>(items: T[]): T[] {
-  return [...items].sort((a, b) => (a.lastSeenAt < b.lastSeenAt ? 1 : -1));
-}
-
 function formatTime(iso: string): string {
   try {
     return new Date(iso).toLocaleString();
@@ -31,27 +27,16 @@ function formatTime(iso: string): string {
   }
 }
 
-function readUserGamesFromCacheOnly(): UserGameEntry[] {
-  return sortByLastSeen(listUserGames());
-}
-
-function readUserGamesFromServer(serverGames: Game[]): Array<UserGameEntry & { server?: Game }> {
-  const cache = listUserGames();
-  const byId = new Map<number, Game>();
-  for (const g of serverGames) byId.set(g.id, g);
-  const out: Array<UserGameEntry & { server?: Game }> = [];
-  for (const entry of cache) {
-    const server = byId.get(entry.id);
-    if (server) {
-      out.push({ ...entry, server });
-      byId.delete(entry.id);
-    } else {
-      out.push({ ...entry });
-    }
-  }
-  return sortByLastSeen(out);
-}
-
+/**
+ * What a Load surface says when it has no rows to show. Both Load surfaces use
+ * these exact strings (the landing list imports them), because the whole point
+ * of the finding is that a list's WORDS must be true: "no saved games yet" is a
+ * claim about the account, and it is only sayable when the server was actually
+ * read and actually holds none. An unreadable list is not an empty account.
+ */
+export const LOAD_LIST_EMPTY = "No saved games yet — start a new game to begin.";
+export const LOAD_LIST_UNREACHABLE =
+  "Could not reach the server, so your saved games cannot be listed. Nothing was loaded or started — reopen this dialog when the server is back.";
 /**
  * A saved game's progress line, shared by BOTH Load surfaces -- the landing
  * page's list (homeView) and the in-game toolbar modal. It reads the ROUND,
@@ -154,11 +139,16 @@ function makeLoadRow(
 }
 
 export async function openLoadGameModal(opts: LoadGameModalOptions): Promise<void> {
-  let serverGames: Game[] = [];
-  try {
-    serverGames = await api.listGames();
-  } catch (e) {
-    console.error("[toolbar] listGames failed:", e);
+  // `null` means the list could not be READ, which is not the same as a list
+  // that came back empty: the two must never render the same words.
+  let serverGames: Game[] | null = null;
+  if (opts.backendOk()) {
+    try {
+      serverGames = await api.listGames();
+    } catch (e) {
+      console.error("[toolbar] listGames failed:", e);
+      serverGames = null;
+    }
   }
 
   // The dialog is built BEFORE its rows so every row's Open can close THIS
@@ -173,17 +163,27 @@ export async function openLoadGameModal(opts: LoadGameModalOptions): Promise<voi
   content.style.flexDirection = "column";
   content.style.gap = "10px";
 
-  const userGames = opts.backendOk()
-    ? readUserGamesFromServer(serverGames)
-    : readUserGamesFromCacheOnly();
+  const userGames = mergeLoadList(serverGames);
 
   if (userGames.length === 0) {
     const empty = document.createElement("div");
-    empty.textContent = "No saved games yet — start a new game to begin.";
+    // Only say "no saved games yet" when the server was read and holds none.
+    empty.textContent = serverGames === null ? LOAD_LIST_UNREACHABLE : LOAD_LIST_EMPTY;
     empty.style.opacity = "0.7";
     empty.style.padding = "6px 0";
     content.appendChild(empty);
   } else {
+    // The list can be complete OR partial. When it is partial (server
+    // unreadable) the rows are the cache's memory, and the dialog says so
+    // instead of presenting a possibly-stale list as the account's games.
+    if (serverGames === null) {
+      const warn = document.createElement("div");
+      warn.textContent = LOAD_LIST_UNREACHABLE;
+      warn.style.opacity = "0.8";
+      warn.style.fontSize = "11px";
+      warn.style.padding = "4px 0";
+      content.appendChild(warn);
+    }
     const list = document.createElement("div");
     list.style.maxHeight = "320px";
     list.style.overflowY = "auto";

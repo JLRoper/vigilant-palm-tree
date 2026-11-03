@@ -562,10 +562,17 @@ async function run() {
     await page.evaluate(() => localStorage.clear());
     await page.reload({ waitUntil: "load" });
 
-    // Wait for client initialization, with stronger diagnostics on timeout
+    // Wait for client initialization, with stronger diagnostics on timeout.
+    //
+    // A reload with the profile CLEARED (`localStorage.clear()` above is exactly
+    // the lost-profile state) no longer starts a game on the player's behalf:
+    // that silent substitution is the load-path bug, and
+    // test/loadSilentSubstitute.e2e.ts pins its absence. So the game is opened
+    // the way a player opens it -- from Load Game -- and the list must still
+    // offer it even though this browser remembers nothing.
     try {
       await page.waitForFunction(
-        () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
+        () => !!(window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug,
         null,
         { timeout: 60_000 }
       );
@@ -593,6 +600,37 @@ async function run() {
       throw err;
     }
 
+    const bootCreates = await ctx.get(`${API_URL}/api/games`);
+    const gamesAtBoot = (await bootCreates.json()) as Array<{ name: string }>;
+    const starterOnServer = gamesAtBoot.find((g) => g.name.startsWith("starter-"));
+    if (!starterOnServer) {
+      throw new Error(`boot on an empty account must have created its starter game; server holds ${JSON.stringify(gamesAtBoot.map((g) => g.name))}`);
+    }
+
+    await page.locator("button", { hasText: /^Load Game$/ }).last().click();
+    const openButtons = page.locator("button:visible", { hasText: /^Open$/ });
+    await openButtons.first().waitFor({ timeout: 10_000 });
+    const openCount = await openButtons.count();
+    let openedStarter = false;
+    for (let i = 0; i < openCount; i++) {
+      const rowText = await openButtons
+        .nth(i)
+        .evaluate((b: HTMLElement) => b.closest("div")?.parentElement?.textContent ?? "");
+      if (rowText.includes(starterOnServer.name)) {
+        await openButtons.nth(i).click({ timeout: 10_000 });
+        openedStarter = true;
+        break;
+      }
+    }
+    if (!openedStarter) {
+      throw new Error(`home Load Game modal did not list the starter game the server holds (${starterOnServer.name}), ${openCount} row(s) offered`);
+    }
+    await page.waitForFunction(
+      () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
+      null,
+      { timeout: 30_000 }
+    );
+
     const spawnInfo = await page.evaluate(() => {
       const dbg = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug;
       const heroes = dbg?.getHeroes?.() ?? [];
@@ -612,24 +650,7 @@ async function run() {
     if (typeof bootName !== "string" || !bootName.startsWith("starter-")) {
       throw new Error(`Expected starter game, got activeGameName=${bootName}`);
     }
-    await page.locator("button", { hasText: /^Load Game$/ }).last().click();
-    const openButtons = page.locator("button:visible", { hasText: /^Open$/ });
-    await openButtons.first().waitFor({ timeout: 10_000 });
-    const openCount = await openButtons.count();
-    let openedStarter = false;
-    for (let i = 0; i < openCount; i++) {
-      const rowText = await openButtons
-        .nth(i)
-        .evaluate((b: HTMLElement) => b.closest("div")?.parentElement?.textContent ?? "");
-      if (rowText.includes(bootName)) {
-        await openButtons.nth(i).click({ timeout: 10_000 });
-        openedStarter = true;
-        break;
-      }
-    }
-    if (!openedStarter) {
-      throw new Error(`home Load Game modal did not list active starter game ${bootName}`);
-    }
+    console.log(`>> starter opened from Load Game (nothing was started for us): ${bootName}`);
     await page.waitForFunction(
       () => {
         const overlay = Array.from(document.querySelectorAll("div")).find(
