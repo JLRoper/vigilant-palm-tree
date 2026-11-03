@@ -34,6 +34,33 @@ test("palette: an open palette recovers when the treasury refills, with no re-op
   assert.doesNotMatch(restored.title, /Not enough/);
 });
 
+test("palette: an unaffordable row is DISABLED, not merely dimmed", () => {
+  // Playthrough finding 17: every unaffordable row was dimmed and inert
+  // (`renderBuildList` sets opacity 0.5 + the title, and the click handler
+  // returns early) but stayed a focusable, ENABLED button
+  // (`button.disabled === false`) -- so a keyboard or AT user is told the row
+  // is actionable and then nothing happens.
+  const { placer, body } = openPlacer();
+  assert.equal(rowFor(body, "House").disabled, false, "an affordable row is enabled");
+
+  placer.setAffordability(BROKE);
+  assert.equal(rowFor(body, "House").disabled, true, "an unaffordable row is disabled while it says why");
+
+  // The same row is enabled again by the reading that covers it -- the disabled
+  // flag rides the snapshot, exactly as the dimming and the title do.
+  placer.setAffordability({ gold: RICH.gold, warehouse: { ...RICH.warehouse } });
+  assert.equal(rowFor(body, "House").disabled, false, "and enabled again once the treasury covers it");
+});
+
+test("palette: a structural refusal is disabled too, not only a treasury one", () => {
+  // The flag is the entry status's `disabled`, not "unaffordable": a second
+  // town hall is refused for a reason no treasury can change.
+  const { body } = openPlacer([{ gx: 0, gy: 0, kind: "townHall", level: 1, w: 2, h: 2 }]);
+  const row = rowFor(body, "Town Hall");
+  assert.match(row.title, /already exists/, "the row still explains the rule");
+  assert.equal(row.disabled, true, "and the rule is stated by the control's own state, not only by its colour");
+});
+
 test("palette: the affordability re-render keeps the list where the viewer left it", () => {
   const { placer, body } = openPlacer();
   const before = buildListWrap(body);
