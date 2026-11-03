@@ -31,7 +31,7 @@ import { SessionManager } from "./SessionManager";
 import { GameStateManager } from "./GameStateManager";
 import { ViewManager } from "./ViewManager";
 import type { MapInfo } from "@screens/home/settingsMenu";
-import type { DistrictState, FactionId, BuildingKind, GameMode } from "@heroes/contracts";
+import type { DistrictState, FactionId, BuildingKind, GameMode, WarehouseResource } from "@heroes/contracts";
 
 type ToolbarCallbacks = {
   onNew: (opts: { name: string; seed: number; castleSeed?: number; castleCount?: number; mapSize?: MapSize; enemyCount?: number; factionId?: FactionId; uncharted?: boolean; gameMode?: GameMode }) => void;
@@ -252,6 +252,8 @@ export class UIManager {
         this.gameStateManager.replaceState(tc.getState());
         return result;
       },
+      onTransferCargo: (heroId, settlementId, direction, amounts) =>
+        this.transferCargoFor(heroId, settlementId, direction, amounts),
     });
   }
 
@@ -715,6 +717,24 @@ export class UIManager {
     );
   }
 
+  /**
+   * One hero-cargo transfer, shared by the settlement panel's Warehouse row and
+   * the Logistics modal's (the modal's declared transferResources action had no
+   * caller at all until this existed).
+   */
+  private transferCargoFor(
+    heroId: string,
+    settlementId: string,
+    direction: "load" | "unload",
+    amounts: Partial<Record<WarehouseResource, number>>,
+  ): { ok: boolean; reason: string } {
+    if (!this.gameStateManager) return { ok: false, reason: "no_settlement" };
+    const tc = this.gameStateManager.getTurnController();
+    const result = tc.transferResources(heroId, settlementId, direction, amounts);
+    if (result.ok) this.gameStateManager.replaceState(tc.getState());
+    return result;
+  }
+
   /** One garrison transfer, shared by the settlement panel and the recruitment panel. */
   private transferUnitsFor(
     heroId: string,
@@ -941,11 +961,8 @@ export class UIManager {
       parent: document.body,
       getState: () => stateManager.getState(),
       actions: {
-        transferResources: (heroId, settlementId, direction, amounts) => {
-          const result = tc().transferResources(heroId, settlementId, direction, amounts);
-          if (result.ok) stateManager.replaceState(tc().getState());
-          return result;
-        },
+        transferResources: (heroId, settlementId, direction, amounts) =>
+          this.transferCargoFor(heroId, settlementId, direction, amounts),
         assignWagons: (heroId, delta, slot) => {
           const result = tc().assignWagons(heroId, delta, slot);
           if (result.ok) stateManager.replaceState(tc().getState());

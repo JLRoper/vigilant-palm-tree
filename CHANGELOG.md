@@ -10,6 +10,16 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.0] - 2026-11-03
+
+Cargo a hero picks up on the map can now be delivered: the settlement panel's Warehouse
+section carries a hero-cargo row (**Deposit cargo** / **Take cargo**) whenever a hero of
+yours stands on the settlement's tile, wired to the engine's existing `TransferResources`
+verb -- which until now only the Logistics modal's declared action named, and no control
+ever invoked. The Logistics window's hero block offers the same two buttons, both surfaces
+read one shared direction/amount model (`src/screens/shared/cargoTransfer.ts`), and the hero
+panel's own buttons are renamed **Deposit gold** / **Withdraw gold** because they were always
+gold-only despite the generic label (playthrough finding F-2).
 ## [0.38.14] - 2026-11-03
 
 Copilot's two comments on the landed load path. The browser's own seat is resolved instead of the first claimed one: a remembered seat, then the handle it claimed with, then the server-bound auth email, and NO seat when none of the three identifies the browser (this supersedes #292's `resolveInitialLocalSeat`, whose lowest-claimed-seat fallback was the same first-claim guess merely narrowed). The load promise is returned through the toolbar callback, so a failed load stays observable by the dialog that awaits it.
