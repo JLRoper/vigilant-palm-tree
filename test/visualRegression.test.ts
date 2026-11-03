@@ -694,6 +694,33 @@ async function run(): Promise<void> {
     //    is 6x short of the 5,120 px a 0.5% budget over 1,024,000 px needs and
     //    CANNOT turn this red. The road needs a scoped capture over the band,
     //    or the engine-level road-network tests, to be measured on its own.
+    //
+    // MEASURED AS OF 2026-11-03 (the road study, stage B+C) -- and with the
+    // number in, the note above stops being a guess. The band is no longer
+    // 0.55-1.5 px: it is now a 1.55-2.50 px body under a 1.0 px-per-side
+    // casing, i.e. 3.55-4.50 px total, painted per tile from the tile's edge
+    // mask rather than as one bowed curve per segment -- and the geometry is a
+    // different shape, not just a wider one. This scene at the OLD width
+    // measures 0.000% (0/1,024,000 px) on the merge base, and at the NEW width
+    // measures 0.237% (2,426/1,024,000 px): so the whole road landing moves
+    // 2,426 px, which is 47.4% of the 5,120 px a 0.5% budget allows, with 52.6%
+    // of the budget still free. The old note's "841 px, 6x short, CANNOT turn
+    // this red" is therefore now wrong in both directions: the art no longer
+    // CANNOT move this scene, but it still does not turn it red. The baseline
+    // was deliberately NOT re-cut -- both runs below 0.5% -- and the two-sided
+    // measurement is the proof. (Both runs used this worktree's private DB
+    // `game_poc_roadgraph`; the only red scene in either run is
+    // `district-city-view`, at an identical 35,368 px on both sides, i.e.
+    // pre-existing drift that this landing neither causes nor fixes.)
+    //
+    // So DO NOT treat a district-map diff as drift if this scene goes red on a
+    // road change; measure the road's own contribution (delete the network and
+    // diff, as the note above did) before deciding whether to re-cut the
+    // baseline, and justify the churn in the PR description if you do. The
+    // lesson the old note records still stands, and now has the arithmetic to
+    // back it: 2,426 px of a 1,024,000 px whole-canvas capture is 0.24%, which
+    // is a weak instrument for a ground layer -- road work still wants the
+    // engine-level tests plus a scoped capture.
     await withPageRetry(context, "district-map", async (page) => {
       await dismissHomeAndCreateGame(page, `${GAME_NAME}-district-map`, SEED);
       await selectHero(page);
@@ -736,6 +763,16 @@ async function run(): Promise<void> {
     // Proven to fail (2026-11-03, github/main c4d8ed3): `buildCityScene`
     // dropping a district's buildings moves this capture 10,633 px = 1.038%,
     // FAIL; restored, 0.000%.
+    //
+    // The first building is a Farmhouse, not a House, since 2026-11-03: CITY P6
+    // (#344) tripled the House's placementCost.gold to 300, exactly the 300 a
+    // classic settlement founds with (packages/engine/src/init.ts), so the
+    // Farm Field below could not be placed any more -- measured on
+    // github/main 17fd1ca, the Farm Field row came back disabled ("need 120,
+    // have 0"), `placeDistrictBuilding` returned false, and the capture quietly
+    // lost the 2x2 producer this scene exists to pin (35,368 px = 3.454%,
+    // budget 0.5%). Both placements are asserted now so the next price move
+    // fails loudly at the scene instead of moving the baseline.
     await withPageRetry(context, "district-city-view", async (page) => {
       await dismissHomeAndCreateGame(page, `${GAME_NAME}-district-city-view`, SEED);
       await selectHero(page);
@@ -743,8 +780,12 @@ async function run(): Promise<void> {
       const hex = await districtHex(page, home.q, home.r);
       await openDistrict(page, hex.q, hex.r);
       await openDistrictPalette(page);
-      await placeDistrictBuilding(page, "House", 2, 2);
-      await placeDistrictBuilding(page, "Farm Field (2×2)", 0, 0);
+      if (!(await placeDistrictBuilding(page, "Farmhouse", 2, 2))) {
+        throw new Error("district-city-view: the centre Farmhouse row was unaffordable -- the fixture no longer builds what this capture pins");
+      }
+      if (!(await placeDistrictBuilding(page, "Farm Field (2×2)", 0, 0))) {
+        throw new Error("district-city-view: the 2x2 Farm Field row was unaffordable -- the fixture no longer builds what this capture pins");
+      }
       await wait(300);
       await clearToasts(page);
       await captureAndCompare("district-city-view", page);

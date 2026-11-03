@@ -10,6 +10,7 @@ import type { BuildingDef } from "@heroes/contracts";
 import { isCoveredWagonId } from "@heroes/contracts";
 import { controlledPositions, findPath, isDistrictBlockedByHero, resolveControllingSettlement, settlementRoadNetwork, territoryBoundaryEdges, NEIGHBOR_DIRS, type RoadNetwork } from "@heroes/engine";
 import type { EntityMirror } from "../entityMirror";
+import { roadEdgeIndex } from "../roadGraph";
 import type {
   SceneNode,
   HeroNode,
@@ -484,19 +485,44 @@ function buildSettlementRoadNode(
 ): SettlementRoadNode | null {
   if (!castle.districts || Object.keys(castle.districts).length === 0) return null;
   const own = castle.ownerId === viewPlayerId;
-  const segments: SettlementRoadNode["segments"] = [];
+
+  // The engine's network is a list of edges; a road is drawn per TILE, so group
+  // them: each visible edge sets its own bit on the tile it leaves and the
+  // opposite bit on the tile it reaches. Deriving the mask AFTER the fog gate
+  // keeps the gate's meaning exactly -- an edge neither of whose ends is in
+  // vision contributes no bits, so half a road never appears out of the fog.
+  const tiles = new Map<string, { q: number; r: number; x: number; y: number; mask: number; strands: number[] }>();
+  const tileFor = (q: number, r: number) => {
+    const key = `${q},${r}`;
+    let tile = tiles.get(key);
+    if (!tile) {
+      const world = axialToPixel(q, r);
+      tile = { q, r, x: world.x, y: world.y, mask: 0, strands: [0, 0, 0, 0, 0, 0] };
+      tiles.set(key, tile);
+    }
+    return tile;
+  };
+
   for (const segment of roadNetworkFor(castle, map).segments) {
     if (!own && (!isVisible(visible, segment.from.q, segment.from.r) || !isVisible(visible, segment.to.q, segment.to.r))) {
       continue;
     }
-    segments.push({
-      strands: segment.strands,
-      from: axialToPixel(segment.from.q, segment.from.r),
-      to: axialToPixel(segment.to.q, segment.to.r),
-    });
+    const edge = roadEdgeIndex(segment.from, segment.to);
+    // The network only ever emits adjacent pairs, so this cannot fire; guard
+    // anyway rather than masking the wrong side of a tile if that changes.
+    if (edge < 0) continue;
+    const opposite = (edge + 3) % 6;
+    const tracks = Math.max(1, Math.floor(segment.strands));
+    const from = tileFor(segment.from.q, segment.from.r);
+    const to = tileFor(segment.to.q, segment.to.r);
+    from.mask |= 1 << edge;
+    to.mask |= 1 << opposite;
+    if (tracks > from.strands[edge]) from.strands[edge] = tracks;
+    if (tracks > to.strands[opposite]) to.strands[opposite] = tracks;
   }
-  if (segments.length === 0) return null;
-  return { kind: "settlementRoad", settlementId: castle.id, segments };
+
+  if (tiles.size === 0) return null;
+  return { kind: "settlementRoad", settlementId: castle.id, tiles: [...tiles.values()] };
 }
 
 interface TerritoryCoord {

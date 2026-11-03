@@ -12,6 +12,7 @@ import {
   CARGO_TRANSFER_REFUSALS,
   cargoTransferRefusalMessage,
   cargoTransferRequest,
+  cargoTransferTitle,
   ownedSettlementAt,
 } from "../../../src/screens/shared/cargoTransfer";
 
@@ -109,4 +110,56 @@ test("every refusal the verb can produce reads as a sentence", () => {
   }
   assert.equal(cargoTransferRefusalMessage("nothing_transferred"), "nothing moved — the wagons are empty, or there is no room");
   assert.equal(cargoTransferRefusalMessage("some_new_code"), "some new code", "an unknown code shows itself");
+});
+
+// ── The button's own sentence, in every state of it ──
+//
+// `source > 0` with `total === 0` is the distinction this model exists to make
+// (line 82 above), and BOTH surfaces now read the ONE function that makes it.
+// Before this they drifted: the settlement panel's row said "The warehouse is
+// full" while the Logistics modal told a hero carrying cargo into a capped
+// warehouse that its wagons were empty.
+test("cargoTransferTitle: a live button names what it will move", () => {
+  const deposit = cargoState({ carried: WOOD_CARGO, stored: 120 });
+  assert.equal(
+    cargoTransferTitle("deposit", cargoTransferRequest(deposit.heroes.h0, deposit.settlements.s0, "deposit")),
+    "Move 250 of the hero's cargo into the warehouse",
+  );
+
+  const withdraw = cargoState({ carried: 0, stored: 120 });
+  assert.equal(
+    cargoTransferTitle("withdraw", cargoTransferRequest(withdraw.heroes.h0, withdraw.settlements.s0, "withdraw")),
+    "Take 120 out of the warehouse into the hero's cargo",
+  );
+});
+
+test("cargoTransferTitle: a dead button names the side that is FULL, never the one that is not", () => {
+  const cap = settlementResourceCap(makeSettlement("s0", 0, 2, 2)).wood;
+
+  // The hero carries cargo; the WAREHOUSE is at its cap.
+  const capped = cargoState({ carried: WOOD_CARGO, stored: cap });
+  const cappedDeposit = cargoTransferRequest(capped.heroes.h0, capped.settlements.s0, "deposit");
+  assert.equal(cappedDeposit.total, 0);
+  assert.equal(cappedDeposit.source, WOOD_CARGO, "the hero IS carrying cargo");
+  assert.equal(cargoTransferTitle("deposit", cappedDeposit), "The warehouse is full");
+
+  // The warehouse has stock; the HOLD is full.
+  const heroCap = heroResourceCap({ ...makeHero("h0", 0, 2, 2), wagons: 5, resources: { wood: 250 } } as never).wood;
+  const holdFull = cargoState({ carried: heroCap, stored: 400 });
+  const holdFullWithdraw = cargoTransferRequest(holdFull.heroes.h0, holdFull.settlements.s0, "withdraw");
+  assert.equal(holdFullWithdraw.total, 0);
+  assert.equal(holdFullWithdraw.source, 400, "the warehouse HAS stock");
+  assert.equal(cargoTransferTitle("withdraw", holdFullWithdraw), "The hero's wagons are full");
+});
+
+test("cargoTransferTitle: a genuinely empty source keeps its own sentence", () => {
+  const nothing = cargoState({ carried: 0, stored: 0 });
+  assert.equal(
+    cargoTransferTitle("deposit", cargoTransferRequest(nothing.heroes.h0, nothing.settlements.s0, "deposit")),
+    "The hero's wagons are empty",
+  );
+  assert.equal(
+    cargoTransferTitle("withdraw", cargoTransferRequest(nothing.heroes.h0, nothing.settlements.s0, "withdraw")),
+    "The warehouse is empty",
+  );
 });

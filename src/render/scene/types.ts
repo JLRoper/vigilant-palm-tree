@@ -175,14 +175,34 @@ export interface DistrictNode {
  * One settlement's district road network, drawn under every entity layer.
  * Purely decorative -- a road carries no movement cost; it shows how the
  * settlement's districts reach the settlement's own tile, one track per 5
- * points of a district's workforce. Each entry is a single edge between two
- * adjacent hexes, so a route re-using an existing trunk merges into it rather
- * than double-drawing the same ground.
+ * points of a district's workforce.
+ *
+ * The node carries the network as a GRAPH PER TILE, not as a list of edges:
+ * each tile's 6-bit `mask` says which of its six sides a road continues
+ * through (bit `i` is the side facing the engine's neighbour `i`, the
+ * NEIGHBOR_DIRS order), and `strands` carries that side's track count. The
+ * tile grouping is what lets one tile draw its own junction -- a branch is not
+ * a drawn piece, it is what one tile's geometry does when three of its sides
+ * are set -- and it is also what makes two tiles meet tangentially at the edge
+ * they share, since both compute the same perpendicular exit there
+ * (../scene/roadGraph.ts).
  */
+export interface SettlementRoadTile {
+  q: number;
+  r: number;
+  /** World-space tile centre. */
+  x: number;
+  y: number;
+  /** 6-bit edge mask; bit `i` = a road crosses the side facing neighbour `i`. */
+  mask: number;
+  /** Track count per edge index, the width carrier; 0 where there is no road. */
+  strands: readonly number[];
+}
+
 export interface SettlementRoadNode {
   kind: "settlementRoad";
   settlementId: string;
-  segments: Array<{ strands: number; from: WorldPoint; to: WorldPoint }>;
+  tiles: SettlementRoadTile[];
 }
 
 export interface TerritoryOutlineEdgeNode {

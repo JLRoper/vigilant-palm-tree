@@ -970,10 +970,19 @@ test("district roads: a staffed district emits one road node, on the ground belo
   const roads = nodesOfKind<SettlementRoadNode>(nodes, "settlementRoad");
   assert.equal(roads.length, 1);
   assert.equal(roads[0].settlementId, castle.id);
-  assert.equal(roads[0].segments.length, 1, "one edge joins the district to the settlement");
-  assert.deepEqual(roads[0].segments[0].from, axialToPixel(4, 4));
-  assert.deepEqual(roads[0].segments[0].to, axialToPixel(5, 4));
-  assert.equal(roads[0].segments[0].strands, 3, "2 of 8 job slots staffed is 12.5% workforce, rounded to 3 roads");
+  // One edge between the settlement tile and the district tile, carried as one
+  // mask bit on each end.
+  assert.equal(roads[0].tiles.length, 2, "the two tiles the edge joins");
+  const at = (q: number, r: number) => roads[0].tiles.find((t) => t.q === q && t.r === r);
+  const home = at(4, 4);
+  const district = at(5, 4);
+  assert.ok(home && district, "both ends of the edge are present");
+  assert.deepEqual({ x: home.x, y: home.y }, axialToPixel(4, 4), "a tile carries its world centre");
+  assert.deepEqual({ x: district.x, y: district.y }, axialToPixel(5, 4));
+  assert.equal(home.mask, 0b000001, "the settlement tile's road leaves through its E side");
+  assert.equal(district.mask, 0b001000, "and the district's arrives through its W side");
+  assert.equal(home.strands[0], 3, "2 of 8 job slots staffed is 12.5% workforce, rounded to 3 roads");
+  assert.equal(district.strands[3], 3);
 
   assert.ok(
     nodes.findIndex((n) => n.kind === "settlementRoad") < nodes.findIndex((n) => n.kind === "castle"),
@@ -1046,8 +1055,10 @@ test("district roads: the cached layout follows the workforce, not the settlemen
       "settlementRoad",
     );
 
-  assert.equal(build()[0].segments[0].strands, 3, "same map, same settlement id: the cached layout answers");
+  const strandsAt = (road: SettlementRoadNode): number =>
+    road.tiles.find((t) => t.q === 4 && t.r === 4)?.strands[0] ?? -1;
+  assert.equal(strandsAt(build()[0]), 3, "same map, same settlement id: the cached layout answers");
 
   castle.districts = { "5,4": barracksDistrict(5, 4, [4, 4]) };
-  assert.equal(build()[0].segments[0].strands, 20, "a fully staffed district re-computes instead of serving the stale network");
+  assert.equal(strandsAt(build()[0]), 20, "a fully staffed district re-computes instead of serving the stale network");
 });
