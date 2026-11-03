@@ -1,6 +1,6 @@
 # Event System
 
-<!-- docs:verified 2026-10-17 -->
+<!-- docs:verified 2026-11-03 -->
 
 **Status:** Describes the current implemented event system: Postgres-backed event log, LISTEN/NOTIFY → SSE, client ingestion, event bus, and consumers. Companion to [module documentation](./module-documentation-and-relationships.md) and the [render spec](../src/render/docs/technical-spec.md).
 
@@ -282,6 +282,8 @@ The poll route (`GET /games/:name/events`) is a pull transport, not a push consu
 | 7 | `src/screens/shared/firstTurnHint.ts:143` | `state:committed` | One-time first-turn onboarding hint. | `localStorage` latch (`heroesJs.firstTurnHint.v1`) + active-game gate (`hasActiveGame`); pointer-events:none panel. Attached from GameEngine.ts:236. |
 | 8 | `src/screens/debug/networkMap.ts:201` | `mp:topologyUpdated` | Dev network-topology graph redraw. | Dev tool; unsubscribes on close. |
 | 9 | `src/debug/eventLog.ts:133` | `bus.onAny` (whitelist) + hook capture | Dev 500-entry ring buffer. `DEFAULT_BUS_EVENT_TYPES` whitelist (10 kinds): `state:committed`, `hero:moved`, `settlement:captured`, `battle:resolved`, `turn:ended`, `phase:changed`, `round:changed`, `day:changed`, `economy:goldChanged`, `economy:warehouseChanged`. `wrapHooks` also captures every `hooks.logEvent` call (source `hook`), which is how `battle_started` is staged for `onBattleResolved`. Consumed by `devConsole` and `debugCommands`. | Dev only (`attachEventLog`, GameEngine.ts:110). |
+
+Reconcile-on-commit (subscriber 1) is not the whole story for the `Hero`/`Castle` wrapper collections: `GameStateManager.update()` (`src/managers/GameStateManager.ts`) also reconciles both — `syncHeroVisualsToState()` + `rebuildSettlementsFromState()` — whenever the TurnController's state object identity changes *between* commits. A local command mutates the controller's state directly (`TurnController.commit()`) and deliberately never emits `state:committed`, because that would snap every hero; without the per-frame pass the `Castle` wrappers kept a walk-in capture's pre-capture owner — and every other mirrored field (buildings, auto-trade, level) — for the rest of the session (playthrough round 2, F4). Both reconciles are identity-preserving (`Castle.syncFromState` in `src/entities/settlement.ts`, `Hero.syncFromState`): `EntityMirror.syncWith` and the vision/territory caches alias those exact instances, so a refresh must mutate in place, never reallocate.
 
 ### 7.4 Signal disposition — every `GameEvent` type
 

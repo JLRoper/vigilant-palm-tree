@@ -139,10 +139,37 @@ export class GameStateManager {
     this.heroes = next;
   }
 
+  /**
+   * Reconcile the Castle mirror against the authoritative settlements map.
+   *
+   * Identity-preserving, exactly like its hero sibling above: a surviving
+   * settlement keeps its `Castle` instance and has the new state pushed into
+   * it, so the aliases the render and UI layers hold (`EntityMirror.syncWith`
+   * stores these very objects, and the territory/vision caches, the tile
+   * panel and the district door all read them) follow the state instead of
+   * being left behind. Only a genuinely new id allocates; a vanished id drops
+   * out.
+   *
+   * Before this was identity-preserving AND wired to the per-frame diff, the
+   * only writers were wholesale state replacement -- boot, load, and the
+   * `state:committed` listener -- which a TurnController command never emits
+   * (deliberately: it would snap every hero). So a walk-in capture (or any
+   * local command with a settlement effect: recruit, building placement,
+   * town-hall upgrade) updated the state and left the wrapper holding the
+   * pre-command owner/buildings for the rest of the session. Playthrough
+   * round 2 measured it as F4: `getSettlements()` reported a captured castle's
+   * old owner forever while `getState()`/`getGameState()` were already right.
+   */
   rebuildSettlementsFromState(): void {
     const next: Record<string, Castle> = {};
     for (const [id, s] of Object.entries(this.gameState.settlements)) {
-      next[id] = Castle.fromGameState(s);
+      const existing = this.settlements[id];
+      if (existing) {
+        existing.syncFromState(s);
+        next[id] = existing;
+      } else {
+        next[id] = Castle.fromGameState(s);
+      }
     }
     this.settlements = next;
   }
@@ -188,6 +215,14 @@ export class GameStateManager {
       if (nextState !== this.gameState || heroFinishedMove) {
         this.gameState = nextState;
         this.syncHeroVisualsToState();
+        // The settlement half of the same reconciliation. A TurnController
+        // command mutates the controller's state directly (commit()/
+        // requestMove) without emitting state:committed, so the commit-wired
+        // rebuild never ran and the Castle wrappers kept whatever the last
+        // wholesale rebuild handed them -- a captured settlement stayed on its
+        // pre-capture owner (F4), a locally placed building never appeared.
+        // Same identity diff, same fix as the hero line above.
+        this.rebuildSettlementsFromState();
         this.caravanTracker.syncFromState(nextState, this.gameMap);
         changed = true;
       }

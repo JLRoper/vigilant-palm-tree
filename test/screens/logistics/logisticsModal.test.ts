@@ -446,3 +446,112 @@ test("logistics routes stay compact with one floating, accessible tooltip", { ti
     await server.close();
   }
 });
+
+test("Accept all is disabled, with the panel's own refusal reason, when no recommendation can be accepted", { timeout: 90_000 }, async () => {
+  const server = await createServer({
+    root,
+    server: { host: "127.0.0.1", port: 0, open: false },
+    logLevel: "error",
+  });
+  await server.listen();
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage({ viewport: { width: 1000, height: 900 } });
+    await page.route("**/logistics-needs-fixture", (route) => route.fulfill({
+      contentType: "text/html",
+      body: '<!doctype html><html><body style="margin:0"></body></html>',
+    }));
+    await page.addInitScript("window.__name = (fn) => fn");
+    await page.route("**/api/**", (route) => route.abort());
+    await page.goto(`${server.resolvedUrls!.local[0]}logistics-needs-fixture`);
+    // One recommended route (food into a low settlement, sourced from a
+    // richer sibling) with an EMPTY unassigned-wagon pool: the impossible
+    // action this test measures. The unit catalog is aborted, so the
+    // recommendation must come from the pure settlement food-need path.
+    const fixture = await page.evaluate(async () => {
+      const modalPath = "/src/screens/logistics/logisticsModal.ts";
+      const enginePath = "/packages/engine/src/index.ts";
+      const { openLogisticsModal } = await import(modalPath) as typeof import("../../../src/screens/logistics/logisticsModal");
+      const { createInitialState } = await import(enginePath) as typeof import("../../../packages/engine/src/index");
+      const state = createInitialState();
+      for (const s of Object.values(state.settlements)) s.ownerId = 1;
+      const [low, source] = Object.values(state.settlements);
+      low.ownerId = 0;
+      low.population = 500;
+      low.goldTax = 0;
+      low.gold = 0;
+      low.warehouse = { wood: 0, stone: 0, iron: 0, arcane: 0, food: 0 };
+      low.buildings = [];
+      low.citySpots = [];
+      low.districts = {};
+      source.ownerId = 0;
+      source.population = 0;
+      source.goldTax = 0;
+      source.gold = 0;
+      source.warehouse = { wood: 0, stone: 0, iron: 0, arcane: 0, food: 500 };
+      source.buildings = [];
+      source.citySpots = [];
+      source.districts = {};
+      state.heroes = {};
+      state.tradeRoutes = [];
+      const player = { ...state.players.find((p) => p.id === 0)!, wagonsUnassigned: 0, treasuryWagonsUnassigned: 0 };
+      state.players = [player];
+      const created: unknown[] = [];
+      (window as unknown as Record<string, unknown>).__fixture = { state, player, created };
+      openLogisticsModal({
+        parent: document.body,
+        getState: () => state,
+        actions: {
+          transferResources: () => ({ ok: true, reason: "" }),
+          assignWagons: () => ({ ok: true, reason: "" }),
+          buyWagons: () => ({ ok: true, reason: "" }),
+          createTradeRoute: (from, to, payload, wagons) => {
+            created.push({ from, to, payload, wagons });
+            return { ok: true, reason: "" };
+          },
+          updateTradeRoute: () => ({ ok: true, reason: "" }),
+        },
+      });
+      return { low: { q: low.q, r: low.r }, source: { q: source.q, r: source.r } };
+    });
+    assert.notDeepEqual(fixture.low, fixture.source, "fixture source must be a different tile than the destination");
+
+    const acceptAll = page.locator('[data-focus="rec-accept-all"]');
+    assert.equal(await acceptAll.count(), 1, "the fixture produces a bulk control to measure");
+    assert.equal(await page.locator('[data-focus="rec-accept-0"]').count(), 1, "exactly one recommendation exists");
+    assert.equal(await page.locator('[data-focus="rec-accept-1"]').count(), 0);
+    // The per-row sibling was already correct; the bulk control is the defect.
+    assert.equal(await page.locator('[data-focus="rec-accept-0"]').isDisabled(), true);
+    assert.equal(
+      await acceptAll.isDisabled(),
+      true,
+      "Accept all must be disabled when its only recommendation cannot be accepted",
+    );
+    assert.equal(await acceptAll.getAttribute("title"), "no unassigned wagons — buy one below");
+    // State and behaviour agree: a disabled control cannot create anything.
+    await acceptAll.evaluate((el) => (el as HTMLButtonElement).click());
+    const createdCount = await page.evaluate(
+      () => ((window as unknown as { __fixture: { created: unknown[] } }).__fixture).created.length,
+    );
+    assert.equal(createdCount, 0, "a disabled control creates nothing");
+
+    // And the control is not unconditionally dead: one unassigned wagon makes
+    // it live again, with the tooltip reason retired.
+    await page.evaluate(async () => {
+      (window as unknown as { __fixture: { player: { wagonsUnassigned: number } } }).__fixture.player.wagonsUnassigned = 1;
+      const busPath = "/src/core/eventBus.ts";
+      const { bus } = await import(busPath) as typeof import("../../../src/core/eventBus");
+      bus.emit({ type: "state:committed" });
+    });
+    await page.waitForFunction(() => {
+      const el = document.querySelector('[data-focus="rec-accept-all"]') as HTMLButtonElement | null;
+      return !!el && !el.disabled;
+    });
+    assert.equal(await acceptAll.isDisabled(), false);
+    assert.equal(await acceptAll.getAttribute("title"), null, "the failure reason retires with the block");
+  } finally {
+    await browser?.close();
+    await server.close();
+  }
+});

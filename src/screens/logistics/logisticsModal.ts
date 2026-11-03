@@ -648,6 +648,16 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       styleButton(acceptAll);
       acceptAll.style.fontSize = "10px";
       acceptAll.style.padding = "1px 8px";
+      // A bulk control is disabled when it can act on NOTHING: the panel
+      // already refuses an unaffordable route with `no unassigned wagons —
+      // buy one below` (the per-row Accepts above disable with exactly this
+      // sentence), so the sibling that would only ever print that refusal
+      // instead carries it in the same channel. With at least one acceptable
+      // route it stays live and does what its toast already promised: accept
+      // what it can, then name every rejection reason (created N, failed M).
+      if (!recommendations.some((rec) => poolFor(rec.payload) > 0)) {
+        setUnavailable(acceptAll, "no unassigned wagons — buy one below");
+      }
       acceptAll.addEventListener("click", () => {
         // Continues past failures (a mid-list rejection used to silently
         // strand the rest) and summarizes the outcome — created N, failed M

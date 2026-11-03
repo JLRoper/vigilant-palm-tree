@@ -161,6 +161,19 @@ async function clientState(page: Page): Promise<{ phase: { kind: string }; activ
   });
 }
 
+// The client's OWN Castle projection -- `getSettlements()`, the collection the
+// render and UI paths read (owner colour, territory outline, control range, the
+// district door) -- which is a DIFFERENT surface from getState() above. The two
+// drifted apart after a capture (playthrough round 2, F4: the state moved, the
+// mirror kept the pre-capture owner forever), so both directions assert the
+// mirror and not just the state.
+async function clientMirrorOwners(page: Page): Promise<Record<string, number | null>> {
+  return page.evaluate(() => {
+    const mirror = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.getSettlements?.();
+    return Object.fromEntries((mirror ?? []).map((c) => [c.id, c.ownerId ?? null]));
+  });
+}
+
 // Creates a fresh seeded game, garrisons a neutral settlement when asked, and
 // parks `moverHero` on a free passable neighbor of it.
 async function seedAtNeutral(name: string, moverHero: string, garrison?: Stack[]) {
@@ -211,8 +224,10 @@ async function walkInCapturePersisted(browser: Browser): Promise<void> {
     assert.equal(owner, 0, `run ${i}: server owner=${owner}, expected 0 (capture did not persist)`);
     assert(rostered, `run ${i}: settlement missing from player roster server-side`);
     assert.equal(client?.settlements?.[sid]?.ownerId ?? null, 0, `run ${i}: client/server owner diverged`);
+    const mirrorOwners = await clientMirrorOwners(page);
+    assert.equal(mirrorOwners[sid] ?? null, 0, `run ${i}: the client's Castle MIRROR still holds owner=${mirrorOwners[sid]} (F4)`);
     assert(!saw409, `run ${i}: 409 on /commands (capture race regression)`);
-    console.log(`>> [A] run ${i}: server owner flipped to 0, roster updated, client agrees, no 409`);
+    console.log(`>> [A] run ${i}: server owner flipped to 0, roster updated, client state AND castle mirror agree, no 409`);
     await page.close();
     await deleteGame(name);
   }
@@ -305,7 +320,9 @@ async function aiBeatableGarrisonAutoResolves(browser: Browser): Promise<void> {
   assert.equal(owner, 1, `settlement owner=${owner}, expected 1 (AI capture not persisted)`);
   assert(rostered, "settlement missing from AI roster server-side");
   assert.equal(garrisonLeft, 0, `garrison not zeroed after capture (${garrisonLeft} troops left)`);
-  console.log(`>> [C] AI walked in, battle auto-resolved (no arena), turn completed in ${((Date.now() - t0) / 1000).toFixed(1)}s, owner=1 + garrison zeroed persisted server-side`);
+  const mirrorOwners = await clientMirrorOwners(page);
+  assert.equal(mirrorOwners[sid] ?? null, 1, `the client's Castle MIRROR still holds owner=${mirrorOwners[sid]} after the AI's capture (F4)`);
+  console.log(`>> [C] AI walked in, battle auto-resolved (no arena), turn completed in ${((Date.now() - t0) / 1000).toFixed(1)}s, owner=1 + garrison zeroed persisted server-side, castle mirror agrees`);
   await page.close();
   await deleteGame(name);
 }

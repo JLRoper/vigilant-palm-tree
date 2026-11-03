@@ -10,6 +10,22 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.38.6] - 2026-11-03
+
+Playthrough round 2's battle-persistence cluster, both findings re-measured on 0.38.2 and fixed, with both surfaces of F2 closed. A load whose payload carried no `last_event_id` (the Load list's row is the only source, and only `GET /games/:name` returns that field) left the multiplayer sync's cursor unseeded, and the sync opened the event stream at `after=0` -- the poll route's contract makes that "replay the whole game_events log" -- so every historical event was re-delivered as a live delta and a replayed `BattleOffered` re-opened a battle the server had already settled (its closing `BattleResolved` answers "resync", and that snapshot was dropped outright while the phase was blocked, so the modal stayed up and Quick Resolve POSTed a second time). The stream is now deferred until the initial resync seeds the cursor, and a row at or below the cursor is never applied -- the phase cannot be re-opened by a settled battle. The server side is closed too: a defender-seat `ResolveBattle` / `SubmitBattleResult` for a pair the lobby no longer marks pending is refused with `battle_not_pending` on server-driven games (checked before any world mutation, so a refusal leaves nothing half-written), which retires the second persisted resolution that deleted a hero, while an attacker-seat resolve and a browser-driven game's client-local defender path stay ungated. The stale `heroes.troops` scalar is gone as well: one new `withSurvivorStacks` helper now writes the scalar everywhere survivor stacks are written -- both sides of a hero battle, the conceding side, and the settlement battle's attacker -- so the persisted column, the API and `hydrate`'s re-seed all agree with `hero_platoons` instead of the winner keeping its pre-battle headcount. `patch`: both findings are defects on shipped paths, no new command kind, no schema change and no wire-contract change (the new refusal reason is one more value on the existing command error field).
+
+## [0.38.5] - 2026-11-03
+
+- **fix(client): the client's settlement mirror now follows a capture.** `GameStateManager.rebuildSettlementsFromState()` was wired only to wholesale state replacement (boot, load, `state:committed`), and a `TurnController` command deliberately emits no `state:committed` (it would snap every hero) — so after a walk-in capture the `Castle` wrappers every render/UI path reads kept the pre-capture owner, along with every other mirrored field (buildings, auto-trade, level). The wrappers are now reconciled on the per-frame state-identity diff too, in place via `Castle.syncFromState`, because `EntityMirror` and the vision/territory caches alias those instances. Playthrough round 2, F4.
+
+## [0.38.4] - 2026-11-03
+
+fix(logistics): the trade-routes Accept all is disabled when its only route cannot be accepted
+
+## [0.38.3] - 2026-11-03
+
+The town hall's level 2 and 3 art is re-generated onto the iso grid, so `test:towncenter` goes green (25/25, was 15/25). The old L2/L3 sprites still carried a 30° lot, a 107-row / 70-row transparent bottom pad and an 81px / 74px soil plinth, so upgrading a settlement brought the raised platform and the floating base straight back; both levels now measure the level-1 art's own convention — edge slope 0.523 / 0.521, bottom pad 0 rows, ground diamond 100% of the canvas, ≤12px of silhouette below the ground plane, one alpha component each. The regenerated anchor table follows the art (`pixel.townHall.2` 9→0, `pixel.townHall.3` 6→0): a grid-exact lot needs no bottom-pad compensation, exactly as `townHall.1` already measured 0. Eight candidates from four image-generation models, with the measured critique and the pick, are recorded in `design/building-pixel-townhall-l2-l3-wave/`; no game code changed, so patch.
+
 ## [0.38.2] - 2026-11-03
 
 The town-centre sprite audit lands as its own changeset: test/townCenterSprite.e2e.ts (25 checks over the town-hall art family and the rendered sprite in a settlers city view) plus docs/town-center-review/, wired into the suite runner as test:towncenter. No game code changes -- a test-and-docs changeset, so patch.
