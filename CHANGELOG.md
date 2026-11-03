@@ -10,10 +10,18 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.39.7] - 2026-11-03
+## [0.39.9] - 2026-11-03
 
 - **The settlement, city-view and logistics panels stop stating what is not true (playthrough round 2b, E1-E7, plus round 4's F6).** The per-day rate rows are now the rate the turn PAYS (each producer rounded the way `produceSettlementResources` rounds it: the Gold hold's wood really moved -2/day where the row read -2.89, and food +15 where it read +15.72); a full STORE says it is discarding production, with the same amber row, tooltip sentence and one-time End Turn toast the treasury cap already had (`src/screens/settlements/warehouseCap.ts`); the town-hall upgrade states that it levels the WHOLE city and what that does to the daily upkeep (11 wood + 2 stone -> 22 wood + 4 stone on the card's city); the build palette refuses a row the grid has no room for (a level-1 starter city has no free 2x2 anchor at all) and states each row's build time and the upkeep it pays while it builds; a landed placement leaves no stale refusal line (pinned, not reproduced); the logistics heading no longer reprints the player's wagon pool under every settlement; and a trade recommendation names the SHORTFALL instead of the stock it is short of ("Larder short by 2 food - 3 in the larder, 5 food/wk army").
 - Docs: `docs/settlements.md`, `docs/player-guide.md` and `docs/resource-gathering.md` carry the new contracts (the palette's space and build-time rules, the store-cap indicator, the town-hall scope line, the paid-rate rounding and the recommendation copy).
+
+## [0.39.8] - 2026-11-03
+
+A fresh database's first boot tags mage, warhound, giant eagle and eagle prince as human instead of leaving them neutral: migration 006 backfilled rows that 015/020 had not inserted yet, so the recruit gate refused them until a second boot. test:unit against a brand-new PGDATABASE is green on the first run.
+
+## [0.39.7] - 2026-11-03
+
+The native confirm() freezes the renderer: the toolbar's gear -> + New Game, the landing page's delete-game row and the Asset Manager's delete-asset now route through the app's own in-page dialog (`openConfirmDialog`). Measured in a real browser with the tab foregrounded, a native confirm() blocked the renderer thread outright -- `Page.handleJavaScriptDialog` returned {} while every `Runtime.evaluate` timed out after 5s, the rAF counter advanced 0 ticks across a 2s window that otherwise carried 274, and the click that opened it never even acked -- and the tab answered again in 0.0s the moment the box was dismissed. The same click now returns in 0.01s with the dialog on screen, 177 rAF ticks across the same window and zero native confirms. The prompt raised from the landing page or the Asset Manager is mounted above the surface that raised it (z-index 320 over the Load dialog's 300 and the home overlay's 200), so it is clickable rather than merely visible. Three tests, one per site: cancelling deletes nothing, starts nothing and loses no cache entry; confirming acts on exactly the named game/asset.
 
 ## [0.39.6] - 2026-11-03
 

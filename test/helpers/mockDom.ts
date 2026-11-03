@@ -144,6 +144,9 @@ export class MockElement {
 
   focus(): void {}
 
+  /** `<input>` behaviour the New Game form uses when it opens (select-all). */
+  select(): void {}
+
   setAttribute(name: string, value: string): void {
     this.attributes.set(name, value);
     if (name.startsWith("data-")) {

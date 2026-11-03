@@ -31,6 +31,15 @@ INSERT INTO unit_types (id, name, attack, defence, health, speed, description, a
   ('eagle_prince', 'Eagle Prince', 14, 12, 38, 9, 'Eldest of the eyerie; battle-proven, near-mythical, the crown''s final word.', 'monster')
 ON CONFLICT (id) DO NOTHING;
 
+-- Roster faction. 006's human backfill runs BEFORE this file in filename
+-- order, so on a fresh database these three did not exist when 006's UPDATE
+-- ran and would otherwise sit on the column DEFAULT ('neutral' = recruitable
+-- by nobody) until the second boot. The migration that inserts a rostered
+-- unit declares its faction, exactly as 024/025/026 do; guarded on the
+-- DEFAULT like 006 so a re-run or a later retag is never clobbered.
+UPDATE unit_types SET faction_id = 'human'
+  WHERE id IN ('warhound', 'giant_eagle', 'eagle_prince') AND faction_id = 'neutral';
+
 -- 015's guarded pattern: only applies while the row still carries the
 -- DEFAULT specialty, i.e. effectively "if it was just inserted" -- a later
 -- tuning change to these units' specialty won't be clobbered by a re-run.
