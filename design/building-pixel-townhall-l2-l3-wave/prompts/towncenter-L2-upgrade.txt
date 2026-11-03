@@ -1,0 +1,13 @@
+Isometric pixel art game asset for a medieval city-builder, matching the FIRST attached image exactly in style: the same chunky pixel size (large visible pixels, no fine-grained noise), the same thick dark-brown outline around every shape, the same warm brown/tan palette with slate-grey roofs, the same lighting from the upper left, a square 1:1 canvas, one single centred asset. The SECOND attached image is a neighbouring building of the same set - match its palette and grain as well.
+
+The FIRST attached image is the settlement's level-1 TOWN CENTRE (a stone corner tower with a slate turret and a timber-framed hall with a tiled roof). This asset is the LEVEL 2 upgrade of that same building, so it must read as unmistakably the same family, just grander.
+
+KEEP THE FIRST IMAGE'S GROUND EXACTLY AS IT IS. Its lot is a flat isometric diamond of sandy ground with darker speckles, cobblestones and grass tufts: keep the diamond's four corners, keep the sand filled edge to edge, keep the 2-pixel dark-brown outline along its two lower edges, and change nothing about the ground. Do NOT add any vertical face, side wall, thickness, rim, kerb, platform, pedestal or soil slab under the sand - not even 3 pixels of it - and no cast shadow under the lot.
+
+Subject: the LEVEL 2 town centre - the same building grown. The stone corner tower is taller now, with a second slate turret roof above the first and a small clock face on the tower wall. The timber-framed hall is larger, with a jettied upper storey over a stone-founded lower storey, TWO old leaded windows with wooden shutters and a second smaller window, a steep tiled roof drawn as rows of individual tiles, a stone chimney at the gable, a wide plank door on iron hinges with a stone threshold and two stone steps up to it. The walled front yard now holds a wooden bench, two barrels, a stack of crates, a hay bale and a wooden cart wheel leaning on the low stone wall.
+
+The building stands ON the flat lot: its lowest edge rests on the sand with no gap, nothing floats above the ground, and nothing is cut off by the bottom edge of the canvas.
+
+Rich detail everywhere: separate roof tiles, weathered stone joints, plank grain in the timber framing, iron hinges and studs, individual cobblestones. Crisp pixel-art shading, no anti-aliasing halos, no text, no watermark, no border, no scenery.
+
+Background: plain uniform solid light-gray (#c8c8c8) with absolutely no checkerboard pattern anywhere on the canvas.
