@@ -10,6 +10,7 @@ import {
   buildingAllowedForFaction,
   buildingBuildDays,
   buildingFootprintFromRegistry,
+  buildingLevelAllowed,
   buildingPlacementCost,
 } from "../buildingRegistry";
 import { gameModeSettings } from "@heroes/contracts";
@@ -25,6 +26,12 @@ import { newPlacementsAutoCrew } from "./workforce";
 // settlement's own treasury/warehouse, so a modified client can't place
 // what it can't pay for.
 const DESTROY_REFUND_PCT = 0.5;
+
+/**
+ * A NEW placement refused because the settlement's level is below the kind's
+ * registry `requiredLevel` (the tier gate -- see docs/settlements.md).
+ */
+export const SETTLEMENT_LEVEL_TOO_LOW = "settlement_level_too_low";
 
 export interface PlaceBuildingsDistrictTarget {
   q: number;
@@ -131,11 +138,27 @@ export function applyPlaceBuildings(
 
   const factionId = state.players.find((p) => p.id === s.ownerId)?.factionId;
   const previous = district ? s.districts?.[districtKey(district.q, district.r)]?.buildings ?? [] : s.buildings;
-  if (buildings.some((b) =>
-    !previous.some((p) => p.gx === b.gx && p.gy === b.gy && p.kind === b.kind) &&
-    !buildingAllowedForFaction(b.kind, factionId)
-  )) {
+  // A building already in the list round-trips untouched (the city view's cart
+  // sends the whole set back on every commit), so only a genuinely NEW
+  // placement is gated -- an existing building from a save written before a
+  // rule landed must never make the settlement unloadable by refusing its own
+  // re-commit.
+  const isNewPlacement = (b: BuildingDef): boolean =>
+    !previous.some((p) => p.gx === b.gx && p.gy === b.gy && p.kind === b.kind);
+
+  if (buildings.some((b) => isNewPlacement(b) && !buildingAllowedForFaction(b.kind, factionId))) {
     return { ok: false, state, reason: "wrong_faction" };
+  }
+
+  // The tier gate: a new placement also has to be unlocked by the settlement's
+  // own level. It sits HERE, at the same gate as the faction rule, so the
+  // server's command handler, the client's optimistic commit and the AI driver
+  // all read one verdict from one function -- the palette only states the rule
+  // ahead of the click. `s.level` is the settlement being built into, so a
+  // district of a level-3 castle may hold a level-3 building and the same
+  // district of a level-1 keep may not.
+  if (buildings.some((b) => isNewPlacement(b) && !buildingLevelAllowed(b.kind, s.level))) {
+    return { ok: false, state, reason: SETTLEMENT_LEVEL_TOO_LOW };
   }
 
   const newPlacementWorkers = newPlacementsAutoCrew(s) ? undefined : 0;
