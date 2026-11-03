@@ -222,7 +222,7 @@ test("fewer workers means a slower refill", () => {
 
 test("the stepper reads legacy as Auto/0 and explicit counts otherwise", () => {
   const legacy = recruitmentSnapshot(
-    makeSettlement("s0", 0, 2, 2, { gold: 5000, population: 1200, buildings: [building("barracks", 1, 1)] }),
+    makeSettlement("s0", 0, 2, 2, { gold: 5000, population: 3600, buildings: [building("barracks", 1, 1)] }),
   );
   const legacyBuilding = legacy.groups[0].buildings[0];
   assert.equal(legacy.legacy, true);
@@ -238,7 +238,7 @@ test("the stepper reads legacy as Auto/0 and explicit counts otherwise", () => {
   const explicit = recruitmentSnapshot(
     makeSettlement("s0", 0, 2, 2, {
       gold: 5000,
-      population: 1200,
+      population: 3600,
       buildings: [{ ...building("barracks", 1, 1), workers: 4 }],
     }),
   );
@@ -255,7 +255,7 @@ test("the stepper reads legacy as Auto/0 and explicit counts otherwise", () => {
 test("the stepper cannot overspend the idle pool", () => {
   const settlement = makeSettlement("s0", 0, 2, 2, {
     gold: 5000,
-    population: 200,
+    population: 600,
     buildings: [{ ...building("barracks", 1, 1), workers: 1 }, { ...building("house", 0, 0), workers: 1 }],
   });
   const model = recruitmentSnapshot(settlement);
@@ -390,7 +390,7 @@ test("max count aggregates the pools and stops at what the treasury affords", ()
 test("a unit row carries its sources' own staffing and the parent summary adds it up", () => {
   const settlement = makeSettlement("s0", 0, 2, 2, {
     gold: 5000,
-    population: 800,
+    population: 2400,
     buildings: [
       { ...building("barracks", 1, 1), workers: 1 },
       { ...building("barracks", 3, 3), workers: 3 },
@@ -412,7 +412,7 @@ test("a unit row carries its sources' own staffing and the parent summary adds i
 test("a legacy settlement's parent row reads Auto and offers one explicit step", () => {
   const settlement = makeSettlement("s0", 0, 2, 2, {
     gold: 5000,
-    population: 800,
+    population: 2400,
     buildings: [building("barracks", 1, 1), building("barracks", 3, 3)],
   });
   const model = recruitmentSnapshot(settlement);
@@ -435,7 +435,7 @@ test("a legacy settlement's parent row reads Auto and offers one explicit step",
 test("the parent + puts one worker on every building that trains the unit, emptiest first", () => {
   const settlement = makeSettlement("s0", 0, 2, 2, {
     gold: 5000,
-    population: 1000,
+    population: 3000,
     buildings: [
       { ...building("barracks", 1, 1), workers: 3 },
       { ...building("barracks", 3, 3), workers: 0 },
@@ -454,7 +454,7 @@ test("the parent + stops at the idle pool and skips full buildings", () => {
   const tight = recruitmentSnapshot(
     makeSettlement("s0", 0, 2, 2, {
       gold: 5000,
-      population: 400,
+      population: 1200,
       buildings: [
         { ...building("barracks", 1, 1), workers: 3 },
         { ...building("barracks", 3, 3), workers: 0 },
@@ -469,7 +469,7 @@ test("the parent + stops at the idle pool and skips full buildings", () => {
   const full = recruitmentSnapshot(
     makeSettlement("s0", 0, 2, 2, {
       gold: 5000,
-      population: 2000,
+      population: 6000,
       buildings: [
         { ...building("barracks", 1, 1), workers: 4 },
         { ...building("barracks", 3, 3), workers: 1 },
@@ -486,7 +486,7 @@ test("the parent + stops at the idle pool and skips full buildings", () => {
 test("the parent − takes one worker off every staffed building, fullest first", () => {
   const settlement = makeSettlement("s0", 0, 2, 2, {
     gold: 5000,
-    population: 1000,
+    population: 3000,
     buildings: [
       { ...building("barracks", 1, 1), workers: 1 },
       { ...building("barracks", 3, 3), workers: 4 },
@@ -508,7 +508,7 @@ test("the parent − takes one worker off every staffed building, fullest first"
 test("the parent stepper detects a row with no room and no workers", () => {
   const settlement = makeSettlement("s0", 0, 2, 2, {
     gold: 5000,
-    population: 200,
+    population: 600,
     buildings: [
       { ...building("barracks", 1, 1), workers: 2 },
       { ...building("barracks", 3, 3), workers: 2 },

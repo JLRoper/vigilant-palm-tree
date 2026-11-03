@@ -25,11 +25,11 @@ function stateWithSettlement(settlement: SettlementState): GameState {
   return makeState({ settlements: [settlement] });
 }
 
-test("workforcePool floors population / 100 and yields 0 below 100", () => {
-  assert.equal(workforcePool(makeSettlement("s0", 0, 2, 2, { population: 500 })), 5);
-  assert.equal(workforcePool(makeSettlement("s0", 0, 2, 2, { population: 199 })), 1);
-  assert.equal(workforcePool(makeSettlement("s0", 0, 2, 2, { population: 99 })), 0);
-  assert.equal(workforcePool(makeSettlement("s0", 0, 2, 2, { population: 50 })), 0, "a freshly chartered 50-pop settlement has no first worker");
+test("workforcePool floors population / 300 and yields 0 below 300", () => {
+  assert.equal(workforcePool(makeSettlement("s0", 0, 2, 2, { population: 1500 })), 5);
+  assert.equal(workforcePool(makeSettlement("s0", 0, 2, 2, { population: 597 })), 1);
+  assert.equal(workforcePool(makeSettlement("s0", 0, 2, 2, { population: 297 })), 0);
+  assert.equal(workforcePool(makeSettlement("s0", 0, 2, 2, { population: 150 })), 0, "a freshly chartered 150-pop settlement has no first worker");
   assert.equal(workforcePool(makeSettlement("s0", 0, 2, 2)), 0);
 });
 
@@ -169,13 +169,13 @@ test("assignWorkers: negative, non-integer, and over-max workers are invalid_wor
 
 test("assignWorkers: pool_exhausted only when incrementing past the pool", () => {
   const state = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 250 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 750 }),
     buildings: [building("farmField", 0, 0), building("farmField", 1, 0)],
   });
   const a1 = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 1 });
   assert.equal(a1.ok, true);
   const b1 = assignWorkers(a1.state, { settlementId: "s0", gx: 1, gy: 0, workers: 1 });
-  assert.equal(b1.ok, true, "explicit total 2 sits at the floor(250/100) = 2 pool");
+  assert.equal(b1.ok, true, "explicit total 2 sits at the floor(750/300) = 2 pool");
   const over = assignWorkers(b1.state, { settlementId: "s0", gx: 0, gy: 0, workers: 2 });
   assert.equal(over.ok, false, "incrementing to an explicit total of 3 over the pool of 2");
   assert.equal(over.reason, "pool_exhausted");
@@ -185,7 +185,7 @@ test("assignWorkers: pool_exhausted only when incrementing past the pool", () =>
 
 test("assignWorkers: the first assign writes the addressed building and leaves every other building legacy", () => {
   const state = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 200 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 600 }),
     buildings: [building("farmField", 0, 0), building("farmField", 1, 0), building("house", 2, 0)],
   });
   const r = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 2 });
@@ -207,7 +207,7 @@ test("assignWorkers: the first assign writes the addressed building and leaves e
 
 test("assignWorkers: first assign with an empty pool is refused atomically and persists no normalization", () => {
   const state = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 99 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 297 }),
     buildings: [building("farmField", 0, 0), building("farmField", 1, 0)],
   });
   const r = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 1 });
@@ -223,7 +223,7 @@ test("assignWorkers: first assign with an empty pool is refused atomically and p
 
 test("assignWorkers: a legacy first assign is billed against the whole target", () => {
   const legacyTownHall = (): SettlementState => ({
-    ...makeSettlement("s0", 0, 2, 2, { population: 200 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 600 }),
     buildings: [building("townHall", 0, 0)],
   });
   const ok = assignWorkers(stateWithSettlement(legacyTownHall()), { settlementId: "s0", gx: 0, gy: 0, workers: 2 });
@@ -238,7 +238,7 @@ test("assignWorkers: a legacy first assign is billed against the whole target", 
 
 test("assignWorkers: after the first touch increments are gated while decrements stay free", () => {
   const state = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 200 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 600 }),
     buildings: [building("farmField", 0, 0), building("farmField", 1, 0)],
   });
   const first = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 2 });
@@ -260,7 +260,7 @@ test("assignWorkers: after the first touch increments are gated while decrements
 
 test("assignWorkers: decrements stay allowed while explicit staffing oversubscribes the pool", () => {
   const state = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 100 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 300 }),
     buildings: [building("farmField", 0, 0, { workers: 2 }), building("farmField", 1, 0, { workers: 2 })],
   });
   const down = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 1 });
@@ -274,7 +274,7 @@ test("assignWorkers: decrements stay allowed while explicit staffing oversubscri
 
 test("assignWorkers: a district first assign writes the district target and leaves main and the other districts alone", () => {
   const settlement: SettlementState = {
-    ...makeSettlement("s0", 0, 2, 2, { population: 300 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 900 }),
     buildings: [building("farmField", 0, 0)],
     districts: {
       "3,2": { q: 3, r: 2, citySpots: [], buildings: [building("farmField", 0, 0), building("house", 1, 0)] },
@@ -300,7 +300,7 @@ test("assignWorkers: a district first assign writes the district target and leav
 
 test("assignWorkers: untouched buildings keep full legacy effort, construction sites included", () => {
   const state = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 400 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 1200 }),
     buildings: [
       building("farmField", 0, 0),
       building("farmField", 1, 0, { construction: { daysRemaining: 2 } }),
@@ -316,7 +316,7 @@ test("assignWorkers: untouched buildings keep full legacy effort, construction s
 
 test("assignWorkers: an explicit count elsewhere in a legacy settlement is preserved, not overwritten", () => {
   const state = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 400 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 1200 }),
     buildings: [
       building("farmField", 0, 0, { workers: 1 }),
       building("farmField", 1, 0),
@@ -339,7 +339,7 @@ test("assignWorkers: an explicit 0 is kept and shuts output down", () => {
 
 test("assignWorkers: district assignment round-trips and leaves the original state untouched", () => {
   const settlement: SettlementState = {
-    ...makeSettlement("s0", 0, 2, 2, { population: 500 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 1500 }),
     districts: {
       "3,2": { q: 3, r: 2, citySpots: [], buildings: [building("farmField", 0, 0)] },
     },
@@ -357,7 +357,7 @@ test("assignWorkers: district assignment round-trips and leaves the original sta
 
 test("assignWorkers source transfer: explicit source loses one, destination gains one, one command", () => {
   const state = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 300 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 900 }),
     buildings: [
       { ...building("market", 0, 0), w: 2, h: 1, workers: 2 },
       building("market", 3, 0, { workers: 0 }),
@@ -384,7 +384,7 @@ test("assignWorkers source transfer: explicit source loses one, destination gain
 
 test("assignWorkers source transfer: net-zero succeeds with a fully assigned pool", () => {
   const state = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 200 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 600 }),
     buildings: [
       { ...building("market", 0, 0), w: 2, h: 1, workers: 2 },
       building("market", 3, 0, { workers: 0 }),
@@ -407,7 +407,7 @@ test("assignWorkers source transfer: refusals are atomic and named", () => {
     building("market", 3, 0, { workers: 0 }),
   ];
   const emptySource = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 300 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 900 }),
     buildings: buildings(),
   });
   const noStaff = assignWorkers(emptySource, {
@@ -435,7 +435,7 @@ test("assignWorkers source transfer: refusals are atomic and named", () => {
 
 test("assignWorkers source transfer: a legacy source gives one from its own cap and the destination lands at 1", () => {
   const state = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 300 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 900 }),
     buildings: [
       { ...building("market", 0, 0), w: 2, h: 1 },
       building("market", 3, 0),
@@ -456,7 +456,7 @@ test("assignWorkers source transfer: a legacy source gives one from its own cap 
 
 test("assignWorkers source transfer: the untouched remainder is NOT auto-crewed by the transfer", () => {
   const state = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 500 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 1500 }),
     buildings: [
       { ...building("market", 0, 0), w: 2, h: 1 },
       building("market", 3, 0),
@@ -483,7 +483,7 @@ test("assignWorkers source transfer: the untouched remainder is NOT auto-crewed 
 
 test("assignWorkers source transfer: full destination is refused", () => {
   const state = stateWithSettlement({
-    ...makeSettlement("s0", 0, 2, 2, { population: 300 }),
+    ...makeSettlement("s0", 0, 2, 2, { population: 900 }),
     buildings: [
       { ...building("market", 0, 0), w: 2, h: 1, workers: 2 },
       building("farmhouse", 3, 0, { workers: 2 }),
@@ -522,8 +522,9 @@ test("canAssignWorkers: undefined current behaves as max; pool cost is the whole
 /**
  * The playthrough's Silver crest: a level-1 city of 13 buildings -- town hall,
  * 3 woodcutter huts, 3 stone mines, 3 farm fields, 2 houses and a farmhouse --
- * at population 500, i.e. a worker pool of 5. It starts legacy (every building
- * auto-staffed at full effort), which is how every game begins.
+ * at population 500, i.e. a worker pool of 1 (floor(500 / 300)). It starts
+ * legacy (every building auto-staffed at full effort), which is how every game
+ * begins.
  */
 const C_MAJOR_2_SEED = 515690;
 const C_MAJOR_2_HUT_INDEX = 6;
@@ -568,7 +569,7 @@ function dailyNets(s: SettlementState): { wood: number; stone: number; food: num
 test("C-MAJOR-2: the first assignment leaves the settlement legacy and does not drive wood/stone/food negative", () => {
   const state = stateWithSettlement(cMajor2City());
   const before = state.settlements.s0;
-  assert.equal(workforcePool(before), 5);
+  assert.equal(workforcePool(before), 1, "floor(500 / 300) — the level-1 keep's own single worker");
   assert.equal(hasLegacyStaffing(before), true, "the city starts legacy");
 
   // Before: a legacy city running at full effort. The rates are the payment

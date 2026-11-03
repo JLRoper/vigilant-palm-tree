@@ -646,7 +646,9 @@ async function seedWorkforceFixture(page: Page, buildings: Array<Record<string, 
     const sid = Object.keys(settlements).find((id) => settlements[id].ownerId === 0);
     assert(sid, "no player-owned settlement in game row");
     settlements[sid].buildings = buildings as never;
-    settlements[sid].population = 500;
+    // 1500 puts the worker pool at 5 under WORKFORCE_PER_POPULATION = 300 --
+    // the same pool this fixture carried at the old divisor of 100 (500 / 100).
+    settlements[sid].population = 1500;
     settlements[sid].gold = 5000;
     settlements[sid].warehouse = { wood: 500, stone: 500, iron: 500, arcane: 500 };
     if (district) {

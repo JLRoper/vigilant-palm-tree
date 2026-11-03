@@ -79,7 +79,7 @@ export class WorkforcePanel {
     const idle = Math.max(0, snapshot.pool - snapshot.assigned);
     const overPool = snapshot.assigned > snapshot.pool ? " · over pool" : "";
     header.textContent = snapshot.legacy
-      ? `Workers: auto-staffed (pool ${snapshot.pool}) — first assignment crews the rest automatically (jobs, then houses)`
+      ? `Workers: auto crew on ${snapshot.autoStaffed} building${snapshot.autoStaffed === 1 ? "" : "s"} (${snapshot.autoSlots} slots) · pool ${snapshot.pool}`
       : `Workers: ${snapshot.assigned} assigned · ${idle} idle${overPool}`;
     Object.assign(header.style, {
       fontSize: "11px",
@@ -88,6 +88,24 @@ export class WorkforcePanel {
       color: "#7fd0ff",
     });
     this.menu.appendContent(header);
+
+    if (snapshot.legacy) {
+      // The auto crew is stated, not implied: it produces at FULL effort and
+      // spends NOTHING from the pool, so the pool only ever limits what the
+      // player crews by hand. An assignment writes only the building it
+      // addresses (C-MAJOR-2), so the rest stay on the auto crew until touched.
+      const note = document.createElement("div");
+      note.textContent =
+        `Those ${snapshot.autoStaffed} run at full effort for free — the pool limits only what you assign. ` +
+        `Assigning 1 worker to a building writes only that building.`;
+      Object.assign(note.style, {
+        fontSize: "10px",
+        lineHeight: "1.45",
+        marginBottom: "4px",
+        opacity: "0.7",
+      });
+      this.menu.appendContent(note);
+    }
 
     const staffable = snapshot.buildings.filter((b) => b.staffable && b.max >= 1);
     const mainBuildings = staffable.filter((b) => b.district === null);
@@ -212,7 +230,9 @@ export class WorkforcePanel {
 
     const refresh = (): void => {
       value.textContent = b.workers === undefined ? "Auto" : `${b.workers}/${max}`;
-      value.title = b.workers === undefined ? `Auto-staffed (max ${max})` : `Of ${max} worker slots`;
+      value.title = b.workers === undefined
+        ? `Auto crew: full effort (${max} slots), spends no pool — assign a worker to make this building explicit`
+        : `Of ${max} worker slots`;
       const plusDisabled = !canAssignWorkers(staffingBase(b.workers, max, snapshot.legacy), max, 1, snapshot.pool, snapshot.assigned);
       plus.disabled = plusDisabled;
       plus.style.opacity = plusDisabled ? "0.4" : "1";
