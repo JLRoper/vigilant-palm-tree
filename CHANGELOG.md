@@ -10,14 +10,33 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.44.0] - 2026-11-03
+## [0.45.0] - 2026-11-03
 
 AI seats grow their hero armies, and with them take neutral capitals — the other half of the garrison change. Measured on a real `POST /games` board (seed 12 / 36x27 medium, the AI spawning four hexes from a capital), driven round after round: the seat's hero army went **132 -> 348 power** and the seat **took five neutral L3 capitals by assault over rounds 5-11**, where an untouched tree leaves the AI's force frozen at 132 and every 168-power capital neutral forever.
-
 - `packages/engine/src/ai/aiBrain.ts`: `HERO_ARMY_TARGET_POWER = 346` (the player's own realistic force at the turn it can first reach a capital — 216 starting power + the 13 swordsmen / 2,600g the garrison table was sized against; measured with `resolveBattle` against that garrison: 216 loses 12/12, 346 wins 12/12), plus three planners that take the player's own route to it — `pickHeroArmyRecruitment` (buy from the seat's city through the same building/draft gate and power-per-gold rule the garrison planner uses), `pickHeroArmyBuildings` (more recruit buildings through the city view's own `PlaceBuildings` cart when the draft pools cannot cover the deficit) and `pickHeroRefitStep` (walk home while the city holds troops). Settlers mode and covered wagons are excluded by both halves.
 - `server/app/aiDriver.ts`: a once-per-round+seat army section (recruit -> transfer onto the hero), collect-on-arrival inside the sweep so a hero that walks home mid-turn takes its reinforcements the same turn, and the refit errand ahead of the ordinary plan. Before it, neither driver ever grew a hero's army, so `attackerBeatsGarrison` (1.5x = 252 against the 168-power garrison) declined every neutral capital.
 - Tests: `test/ai/aiBrain.test.ts` pins the two planners and the refit errand (sizing to the deficit, the waiting garrison counting against it, free city cells, no errand without waiting troops); `test/server/aiDriver.test.ts` pins the driver end to end — recruits into the city, transferred onto the hero, its army actually grown, the capacity commit, and the settlers no-army invariant. Proven red before the change by disabling the section in place: "the hero's city was recruited from" and "one cart commit, exactly like the city view's" (0 !== 1). Four existing driver pins that count `RecruitUnits` now count both spenders, and the W5 classic byte-identity pin compares the stream with the deliberately-added hero-army block stripped out and asserted beside it.
 
+## [0.44.0] - 2026-11-03
+
+a district's specialisation is derived from its own persisted buildings, and pays a scaling bonus the player can see
+
+A district had no identity: nothing in the game read a building's neighbours, so every district was the same flat pool of producers. Specialisation is now DERIVED from what a district already persists — there is no district-type field to set, no schema change and no migration. `districtSpecialisation` (`packages/engine/src/settlement/districtSpecialisation.ts`) counts a district's completed producers on ONE production chain (the chain is the resource they make, so the food chain is `farmField` + `farmhouse` + `granary`; a `mine` reads the district's own spots). A district qualifies only with at least 4 of them AND at least 60% of its buildings on that chain, and the effect then ramps with the share from 0 at the threshold to 25% at a district that is entirely one chain. The effect is paid on the chain and taken off every other chain the district produces, so the choice is real rather than free.
+
+Measured before and after, against a scratch export of `github/main` (`6cbf138` / 0.43.0), running the same scripts on both:
+- 12 seeded map seeds, 72 settlements: every settlement's buildings, districts, rates and gold are **byte-identical** — the diff is silent. A seeded district holds 2-3 distinct kinds, so the four-producer bar is what makes this structural rather than lucky.
+- A hand-built MIXED district (hut, mine, farm, house) is **unchanged** (wood 3, stone 3, food 6, gold 0); three farms + a house is **unchanged** (food 15).
+- Four farm fields go `food 19 -> 23`; four farms + a house (4 of 5) go `19 -> 21`.
+- Four farms + a level-1 `goldMine` trade `+2 food` for `-6 gold` (`gold 45 -> 39`); with a level-3 mine, `+2 food` for `-16 gold`. A district that hosts a valuable off-chain producer is a bad place to specialise — the bonus is sized against the district's own off-chain output.
+- The adjustment is computed on a chain's TOTAL rather than per producer: a level-1 producer pays 2-6 units and a fractional per-producer multiplier on those is swallowed by the payment loop's per-addition rounding (measured: per-producer scaling paid `food 22` where the headline said `19 + 25%`).
+
+`districtProductionLines` (`packages/engine/src/settlement/produceResources.ts`) is the single place a district's buildings become output, and both `produceSettlementResources` and `settlementProductionRates` walk it, so the rate a player reads cannot drift from the rate the turn pays. A district that is not specialised emits not one line more than it did before.
+
+- `packages/engine/src/settlement/districtSpecialisation.ts` (new): the derived rule, the constants (`DISTRICT_CHAIN_MIN_PRODUCERS` 4, `DISTRICT_CHAIN_MIN_SHARE` 0.6, `DISTRICT_CHAIN_MAX_EFFECT` 0.25), the scale, and `districtSpecialisationLabel` — the words and the multiplier are one source of truth.
+- `packages/engine/src/settlement/produceResources.ts`: `districtProductionLines`, and both district loops rewired onto it.
+- `src/screens/settlements/cityView/CityDesignBoxManager.ts` + `cityView.ts`: the specialisation is the City Design panel's status line — the one panel on screen for every district open — `Food district — 4 of 4 buildings on one chain: +25% food, -25% other chains here`, or `No specialisation — 3 of 4 buildings on the food chain; 4 needed`. Verified in the running client on the worktree's allocated ports against a private DB.
+- `docs/settlements.md`: the rule, the bars and the measured numbers.
+- `test/engine/districtSpecialisationProduction.test.ts` (new) imports only pre-existing exports, so it goes RED on the old engine by assertion (3 of 6 fail: `19 !== 23`, `19 !== 21`, `20 !== 23`) with the neutrality cases green on both sides; `test/engine/districtSpecialisation.test.ts` (new) pins the derivation. Unit suite: base 2758/0, this branch 2776/0.
 
 ## [0.43.0] - 2026-11-03
 

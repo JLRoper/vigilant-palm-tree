@@ -61,6 +61,7 @@ export * from "./settlement/placeBuildings";
 export * from "./settlement/districtConnectivity";
 export * from "./settlement/roadNetwork";
 export * from "./settlement/districtSeed";
+export * from "./settlement/districtSpecialisation";
 export * from "./settlement/starterLayout";
 export * from "./settlement/capacity";
 export * from "./settlement/neutralGarrison";
