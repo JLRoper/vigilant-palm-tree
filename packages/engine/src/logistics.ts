@@ -260,6 +260,10 @@ export const CARAVAN_TILES_PER_DAY = 7;
 // the advance -- past the cap the caravan waits with its cargo intact and
 // the next daily tick retries fresh.
 export const CARAVAN_CATCHUP_REPATHS_PER_DAY = 3;
+// A route always keeps at least one wagon: a zero-wagon route is a zombie that
+// maintenance skips and nothing ever removes. The floor lives here so the
+// engine's clamp and the client's route-row stepper read ONE constant.
+export const MIN_TRADE_ROUTE_WAGONS = 1;
 
 export interface CreateTradeRouteResult {
   ok: boolean;
@@ -426,7 +430,7 @@ export function updateTradeRoute(
     // A route always keeps at least one wagon: clamping a negative delta to
     // 0 would mint a zombie route that maintenance skips and nothing ever
     // removes.
-    if (wagons + move < 1) {
+    if (wagons + move < MIN_TRADE_ROUTE_WAGONS) {
       return { ok: false, state, reason: "route_needs_a_wagon" };
     }
     wagons += move;
