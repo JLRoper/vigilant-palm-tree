@@ -461,8 +461,14 @@ router.post("/games", async (req, res) => {
       return;
     }
     const resolvedGameMode: GameMode = resolveGameMode(gameMode);
+    // `requestedHero`, not `hero`: this is the REQUEST's start (the classic
+    // seat input), and in settlers mode the start placement ignores it
+    // entirely -- the wagon spawns on its own seeded hex. Printing it as
+    // `hero=` named a coordinate the player never had (playthrough finding
+    // 21); the truthful line follows below, read back from the state this
+    // request actually builds.
     console.log(
-      `[api] POST /games name=${name} hero=(${hero_q},${hero_r}) mapSize=${storedMapSize} gameMode=${resolvedGameMode}`,
+      `[api] POST /games name=${name} requestedHero=(${hero_q},${hero_r}) mapSize=${storedMapSize} gameMode=${resolvedGameMode}`,
     );
     const map = getOrCreateGameMap(seed, storedMapSize as MapSize, NEW_GAME_MAP_GEN_VERSION);
     const topHumanSlots = Number.isInteger(humanSlots) ? (humanSlots as number) : null;
@@ -521,6 +527,15 @@ router.post("/games", async (req, res) => {
       ...(seatFactionsSafe ? { seatFactions: seatFactionsSafe } : {}),
     };
     const initial = makeInitialStatePayload(map, mulberry32(seed ^ 0x706c6179), initOpts);
+    // Where each seat's entity ACTUALLY stands, read from the state that was
+    // just built (the same object the INSERT stores), so this line cannot
+    // drift from what the player gets -- the debug trap finding 21 named.
+    console.log(
+      `[api] POST /games name=${name} spawned=${Object.entries(initial.heroes)
+        .map(([id, h]) => `${id}@(${h.q},${h.r})`)
+        .sort()
+        .join(" ")}`,
+    );
 
     let lobbyState: LobbyState = {
       // Rec 4: new games run WITHOUT instant auto-trade (explicit false, so

@@ -429,6 +429,56 @@ test("GET /games/:name/tiles backfills a v2 save on a large map with v2 terrain 
   }
 });
 
+// Playthrough finding 21: the create log printed the REQUEST's start as the
+// seat's own -- `hero=(2,5)` on a game whose covered wagon spawned at (2,12)
+// (the settlers start placement ignores hero_q/hero_r entirely). A log line
+// that names a coordinate the player never had is a debugging trap, so the
+// request's start is labelled as the request's, and a second line reports the
+// spawn read back from the state the INSERT stores.
+test("POST /games logs where the seats' entities spawn, not the hero_q/hero_r the mode ignored", async () => {
+  const name = uniqueName();
+  const lines: string[] = [];
+  const realLog = console.log;
+  console.log = (...args: unknown[]) => { lines.push(args.map((a) => String(a)).join(" ")); };
+  try {
+    await createGame({ name, gameMode: "settlers", humanSlots: 1, hero_q: 2, hero_r: 5 });
+  } finally {
+    console.log = realLog;
+  }
+  try {
+    const { rows } = await pool.query<{ heroes: Record<string, { q: number; r: number }> }>(
+      "SELECT heroes FROM games WHERE name = $1",
+      [name],
+    );
+    const spawned = Object.entries(rows[0].heroes)
+      .map(([id, h]) => `${id}@(${h.q},${h.r})`)
+      .sort()
+      .join(" ");
+    assert.ok(spawned.length > 0, "the created game must have a seat entity to report");
+
+    const spawnLine = lines.find((l) => l.includes("spawned="));
+    assert.ok(spawnLine, `the create must log where the seats spawn; saw:\n${lines.join("\n")}`);
+    assert.equal(
+      spawnLine!.split("spawned=")[1].trim(),
+      spawned,
+      "the logged spawn must be the stored state, key for key",
+    );
+
+    const requested = lines.find((l) => l.includes("requestedHero="));
+    assert.ok(requested, `the request's own start is still logged, labelled as the request's; saw:\n${lines.join("\n")}`);
+    assert.match(requested!, /requestedHero=\(2,5\)/);
+
+    // The trap itself: nothing may print that start as the seat's hero start.
+    assert.equal(
+      / hero=\(/.test(lines.join("\n")),
+      false,
+      `no line may print the requested start as the hero's own; saw:\n${lines.join("\n")}`,
+    );
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
 for (const [factionId, starterKind] of [
   ["human", "farmhouse"],
   ["ashen", "crypt"],
