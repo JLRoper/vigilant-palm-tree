@@ -497,6 +497,99 @@ test("POST /games seatFactions ['verdant'] stamps a verdant seat (the 026 conten
   }
 });
 
+// ── The seat-faction fix: an AI seat is no longer pinned to "human". A
+// single-player game created over the real route must meet the Ashen Court,
+// the Ironmark Holds or the Verdant Wild, reproducibly from its seed, without
+// ever taking the creator's own pick away. ──
+
+test("POST /games gives each AI seat a seed-drawn faction, keeps the human's pick, and repeats for the same seed", async () => {
+  const first = uniqueName();
+  const second = uniqueName();
+  const seed = 20261003;
+  try {
+    const { row } = await createGame({
+      name: first,
+      seed,
+      humanSlots: 1,
+      enemySlots: 2,
+      seatFactions: ["verdant"],
+    });
+    assert.equal(row.players.length, 3);
+    assert.equal(row.players[0].factionId, "verdant", "the creator's own pick is never taken away");
+    assert.equal(row.players[0].faction, "player");
+    const aiSeats = [row.players[1].factionId, row.players[2].factionId];
+    assert.notEqual(aiSeats[0], aiSeats[1], "the two AI seats of one game never draw the same faction");
+    assert.ok(
+      aiSeats.some((f) => f !== undefined && f !== "human"),
+      `a default single-player game must be able to meet a non-human faction; got ${aiSeats.join(",")}`,
+    );
+    for (const faction of aiSeats) {
+      assert.notEqual(faction, "neutral", "\"neutral\" is never a seat faction");
+    }
+
+    // The created game, not a helper: the persisted seats are what the reader
+    // is told to read, and the same seed must assign them identically twice.
+    const persisted = await pool.query<{ players: { id: number; factionId?: string }[] }>(
+      "SELECT players FROM games WHERE name = $1",
+      [first],
+    );
+    assert.deepEqual(
+      persisted.rows[0].players.map((p) => p.factionId),
+      row.players.map((p) => p.factionId),
+      "the persisted seats carry the factions the response reported",
+    );
+
+    const { row: again } = await createGame({
+      name: second,
+      seed,
+      humanSlots: 1,
+      enemySlots: 2,
+      seatFactions: ["verdant"],
+    });
+    assert.deepEqual(
+      again.players.map((p) => p.factionId),
+      row.players.map((p) => p.factionId),
+      "the same seed yields the same seat factions",
+    );
+  } finally {
+    await cleanupGame(first);
+    await cleanupGame(second);
+  }
+});
+
+test("POST /games with no faction pick still fills the AI seats (the default new game)", async () => {
+  const name = uniqueName();
+  try {
+    const { row } = await createGame({ name, seed: 4242, humanSlots: 1, enemySlots: 2 });
+    assert.equal(row.players[0].faction, "player");
+    assert.equal("factionId" in row.players[0], false, "the human seat keeps the legacy no-key shape when nobody picked");
+    assert.ok(row.players[1].factionId, "AI seat 1 records a faction");
+    assert.ok(row.players[2].factionId, "AI seat 2 records a faction");
+    assert.ok(
+      [row.players[1].factionId, row.players[2].factionId].some((f) => f !== "human"),
+      "a default new game must meet a non-human faction",
+    );
+
+    // The seat faction reaches the settlement seeding too, or the AI seat would
+    // fight its roster with the Crownlands' starter city.
+    const persisted = await pool.query<{
+      settlements: Record<string, { ownerId: number | null; buildings: { kind: string }[] }>;
+    }>("SELECT settlements FROM games WHERE name = $1", [name]);
+    const starterKind = { ashen: "crypt", ironmark: "delversHall", verdant: "seedlingGrove", human: "farmhouse" } as const;
+    for (const player of row.players.slice(1)) {
+      const owned = Object.values(persisted.rows[0].settlements).filter((s) => s.ownerId === player.id);
+      assert.ok(owned.length > 0, `AI seat ${player.id} owns a settlement`);
+      const kinds = owned.flatMap((s) => s.buildings.map((b) => b.kind));
+      assert.ok(
+        kinds.includes(starterKind[player.factionId as keyof typeof starterKind]),
+        `AI seat ${player.id} (${player.factionId}) gets its own faction's starter building; got ${kinds.join(",")}`,
+      );
+    }
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
 test("GET /games/:name/tiles backfills a v2 save on a large map with v2 terrain when tile rows are absent", async () => {
   const name = uniqueName();
   try {

@@ -219,6 +219,70 @@ test("makeInitialStatePayload threads seatFactions the same way (the POST /games
   assert.equal(payload.players[1].factionId, "human");
 });
 
+// ── aiSeatFactionSeed (the seat-faction fix): an AI seat can never be pinned
+// to "human" again. The creator's own pick is an explicit entry and wins; every
+// seat it does not assign draws a roster faction from the game seed. ──
+
+test("aiSeatFactionSeed gives every unassigned AI seat a faction; the human seat keeps its missing key", () => {
+  const state = build({ enemyCount: 2, humanSeatCount: 1, aiSeatFactionSeed: 12345 });
+  assert.equal(state.players.length, 3);
+  assert.equal("factionId" in state.players[0], false, "a human seat nobody assigned keeps the legacy no-key shape");
+  for (const seat of [1, 2]) {
+    assert.ok(state.players[seat].factionId, `AI seat ${seat} records a faction`);
+    assert.notEqual(state.players[seat].factionId, "neutral", "\"neutral\" is not a seat faction");
+  }
+  assert.notEqual(
+    state.players[1].factionId,
+    state.players[2].factionId,
+    "the two AI seats of one game can never draw the same faction",
+  );
+});
+
+test("aiSeatFactionSeed never overrides an explicit seat: the creator's pick wins at seat 0", () => {
+  const state = build({ enemyCount: 2, humanSeatCount: 1, seatFactions: ["verdant"], aiSeatFactionSeed: 999 });
+  assert.equal(state.players[0].factionId, "verdant", "the explicit pick is untouched by the seed");
+  assert.ok(state.players[1].factionId);
+  assert.ok(state.players[2].factionId);
+});
+
+test("aiSeatFactionSeed is deterministic: the same seed draws the same seats twice", () => {
+  const once = build({ enemyCount: 3, humanSeatCount: 1, aiSeatFactionSeed: 4242 });
+  const twice = build({ enemyCount: 3, humanSeatCount: 1, aiSeatFactionSeed: 4242 });
+  assert.deepEqual(
+    once.players.map((p) => p.factionId),
+    twice.players.map((p) => p.factionId),
+  );
+});
+
+test("aiSeatFactionSeed absent leaves every seat byte-identical (no draw, no key)", () => {
+  const withSeed = build({ enemyCount: 2, humanSeatCount: 1 });
+  const without = build({ enemyCount: 2, humanSeatCount: 1, aiSeatFactionSeed: 777 });
+  assert.equal(without.players.length, withSeed.players.length);
+  for (const p of withSeed.players) {
+    assert.equal("factionId" in p, false, "without the seed every seat keeps the human default with no key");
+  }
+  assert.ok(without.players[1].factionId, "with the seed the same seats are filled");
+});
+
+test("aiSeatFactionSeed is VARIED: over a run of seeds every seat faction is reachable, and one is always non-human", () => {
+  const seen = new Set<string>();
+  for (let seed = 0; seed < 64; seed++) {
+    const state = build({ enemyCount: 2, humanSeatCount: 1, aiSeatFactionSeed: seed });
+    const ai = [state.players[1].factionId ?? "human", state.players[2].factionId ?? "human"];
+    seen.add(ai[0]);
+    seen.add(ai[1]);
+    assert.ok(
+      ai.some((f) => f !== "human"),
+      `seed ${seed}: a default single-player game must be able to meet a non-human faction`,
+    );
+  }
+  assert.deepEqual(
+    [...seen].sort(),
+    ["ashen", "human", "ironmark", "verdant"],
+    "every seat-pickable faction is reachable from some seed",
+  );
+});
+
 test("uncharted mode seeds revealedTiles on human seats only, covering their spawn", () => {
   const state = build({ enemyCount: 1, humanSeatCount: 2, uncharted: true });
   assert.equal(state.players.length, 3);
