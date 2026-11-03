@@ -11,6 +11,7 @@ import {
 } from "../../io/auth";
 import { styleButton, styleInput, panelTheme } from "@screens/shared/panel";
 import { openDialog } from "@screens/shared/dialog";
+import { openConfirmDialog } from "@screens/shared/confirmDialog";
 // The Load Game progress line is ONE function for both Load surfaces (this
 // landing list and the in-game toolbar modal). It reads the ROUND; see
 // loadRowProgress for why `games.turn` must not be rendered.
@@ -447,8 +448,7 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
     const del = document.createElement("button");
     del.textContent = "Delete";
     styleButton(del);
-    del.addEventListener("click", async () => {
-      if (!confirm(`Delete saved game "${entry.name}"? This cannot be undone.`)) return;
+    const performDelete = async (): Promise<void> => {
       del.disabled = true;
       del.textContent = "Deleting…";
       try {
@@ -463,6 +463,20 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
         del.textContent = "Delete";
         console.error("[home] delete failed:", e);
       }
+    };
+    del.addEventListener("click", () => {
+      openConfirmDialog({
+        title: "Delete saved game",
+        message: `Delete saved game "${entry.name}"? This cannot be undone.`,
+        confirmLabel: "Delete",
+        destructive: true,
+        // The row lives in the Load dialog (300), which is itself above the
+        // home overlay (200), so the prompt has to clear both.
+        zIndex: 320,
+        onConfirm: () => {
+          void performDelete();
+        },
+      });
     });
     right.appendChild(del);
     row.appendChild(right);
