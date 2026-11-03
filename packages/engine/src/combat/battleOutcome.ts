@@ -1,4 +1,4 @@
-import type { GameState, HeroBattleVerdict, HeroState, SettlementState } from "@heroes/contracts";
+import type { GameState, HeroBattleVerdict, HeroState, Platoon, SettlementState } from "@heroes/contracts";
 import { hexDistance } from "@heroes/contracts";
 import { RETREAT_MOVEMENT_LOCK_DAYS } from "../combatConfig";
 import { platoonTroopTotal } from "../units";
@@ -88,10 +88,25 @@ export function applyHeroConcession(
   avoid: ReadonlyArray<{ q: number; r: number }> = [],
 ): HeroState {
   if (verdict !== "retreated" && verdict !== "surrendered") return hero;
-  const counted: HeroState = { ...hero, troops: platoonTroopTotal(hero.stacks) };
+  const counted: HeroState = withSurvivorStacks(hero, hero.stacks);
   const nearest = nearestOwnedSettlement(state, counted, avoid);
   const moved: HeroState = nearest
     ? relocateHeroToSettlement(counted, nearest)
     : { ...counted, movementRemaining: 0, previousQ: null, previousR: null, previousMovementRemaining: null };
   return verdict === "retreated" ? { ...moved, movementLockedThroughDay: day + RETREAT_MOVEMENT_LOCK_DAYS } : moved;
+}
+
+// The ONE place a battle's survivor stacks are written onto a hero. `troops`
+// and `stacks` are two views of one headcount, so anything that rewrites the
+// stacks must rewrite the scalar in the same breath: F3's stale winner kept
+// `troops: 24` while hero_platoons summed to 15, because buildPostBattleHeroes
+// wrote only stacks and the sole battle rewrite of the scalar lived in the
+// LOSER's retreat/surrender path (applyHeroConcession). Every survivor-stack
+// writer now goes through here: server/app/commandHandler.ts's
+// buildPostBattleHeroes (both sides of a hero battle, both battle commands),
+// this file's own applyHeroConcession, and the settlement battle's attacker in
+// settlement/battle.ts -- so the persisted scalar (heroRepo) and the value
+// hydrate re-seeds can never disagree with the stacks again.
+export function withSurvivorStacks(hero: HeroState, stacks: Platoon[]): HeroState {
+  return { ...hero, stacks, troops: platoonTroopTotal(stacks) };
 }

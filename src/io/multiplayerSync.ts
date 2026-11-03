@@ -136,7 +136,7 @@ export class MultiplayerSync {
     if (opts.state) this.mirror.bootstrap(opts.state);
     void this.pollOnce();
     this.timer = window.setInterval(() => void this.pollOnce(), this.intervalMs);
-    this.openEventStream(gameName);
+    this.ensureEventStream(gameName);
   }
 
   stop(): void {
@@ -155,6 +155,25 @@ export class MultiplayerSync {
 
   isRunning(): boolean {
     return this.timer !== null;
+  }
+
+  /**
+   * Opens the event stream only once a cursor exists. An unseeded start has no
+   * valid `after`, and the stream's `after` IS the cursor -- the same contract
+   * as the poll route, where `after=0` means "replay the whole game_events
+   * log". Asking for 0 therefore re-delivered every historical event as a live
+   * delta, which is how a replayed BattleOffered flipped the client into a
+   * battle the server had already settled (F2's client half: its closing
+   * BattleResolved answers "resync", and that resync is dropped while the
+   * phase is blocked, so the client stayed parked in BATTLE with the modal up).
+   * Deferring costs one fetch round-trip: the initial resync seeds the cursor
+   * from the same GET and opens the stream there, the 2 s poll is the
+   * correctness backstop, and the stream's own `after` catches up from that
+   * cursor, so no event is lost.
+   */
+  private ensureEventStream(gameName: string): void {
+    if (this.cursor === null || this.eventSource !== null) return;
+    this.openEventStream(gameName);
   }
 
   /**
@@ -320,6 +339,14 @@ export class MultiplayerSync {
         });
       }
       const id = Number(row.id);
+      // A row at or below the cursor is already baked into the state this batch
+      // applies onto -- the snapshot the cursor came from -- so applying it again
+      // can only resurrect something that snapshot settled. That is F2's client
+      // half: a replayed BattleOffered re-opened a resolved battle. Rows are
+      // id-ordered and the cursor only advances, so this also covers an SSE frame
+      // arriving from a stream still connected at an older cursor. The log
+      // fan-out above has already run, so the audit view stays complete.
+      if (Number.isFinite(id) && id <= cursor) continue;
       if (Number.isFinite(id) && id > cursor) cursor = id;
       if (this.selfEventIds.delete(id)) continue;
       if (localSeat !== null && row.actor_seat === localSeat) continue;
@@ -400,6 +427,9 @@ export class MultiplayerSync {
     const hydrated = hydrateClientGame(game);
     const seeded = Number(game.last_event_id ?? 0);
     this.cursor = Number.isFinite(seeded) && seeded >= 0 ? seeded : 0;
+    // The cursor is now known, so a deferred event stream may open (an unseeded
+    // start has no valid `after` -- see ensureEventStream).
+    this.ensureEventStream(gameName);
     this.selfEventIds.clear();
     const prev = this.lastSeen;
     this.lastSeen = hydrated;
