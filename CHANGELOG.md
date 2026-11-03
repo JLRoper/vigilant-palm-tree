@@ -14,6 +14,7 @@ the version has not already been bumped in that changeset.
 
 - Construction is staffed work: a building under construction advances `buildRate(buildersOnSite(b))` days per day tick — 0 / 1.00 / 1.33 / 1.67 / 2.00x for 0-4 builders (`packages/engine/src/settlement/workforce.ts`)
 - A site with NO builders makes no progress at all; the settlement panel's Workforce row names it (` · N sites stalled`) and the building menu reads `Under construction — stalled: no builders · N days remaining`
+- Save compatibility, in one line: a site an existing save left at `workers: 0` now FREEZES mid-build where it used to crawl at 1.00x — staff it and it resumes — while a site with no `workers` field at all (a legacy settlement) keeps its free full crew and builds in exactly the time it always did
 - Any building takes up to `CONSTRUCTION_MAX_BUILDERS` (4) builders while it is being built, whatever its kind; on completion the crew is trimmed to the kind's own cap in the same tick, losslessly — no worker deleted and no site auto-staffed
 - The curve's top is deliberately today's full-crew rate, so an untouched building builds in exactly the time it always did (the free auto crew is a full crew)
 - The AI crews its own sites out of its own pool on BOTH placement paths (the server driver and the browser-driven seats), and will not start a site it cannot staff
