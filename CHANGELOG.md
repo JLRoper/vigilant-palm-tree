@@ -10,6 +10,16 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.38.3] - 2026-11-03
+
+District-road round-2 feedback and fidelity: each refused district entry now states its reason, a shipyard harbour gets its pier, and the workforce width reading is measured and decided (not faked).
+
+- **F3 (friction) -- a refused district SPEAKS.** A double-click on a hex that cannot host a district used to refuse in silence, leaving the unrelated "Select a hero first" as the only words on screen. It now says WHY on the adventure map's refusal toast: out of the settlement's control range, another seat's land, not touching the settlement's cluster, or impassable ground -- through the engine's new `districtEntryDecision()` and its one `districtEntryRefusalToast()` table, so the rule and the sentence cannot drift.
+- **F4 (cosmetic) -- a shipyard harbour gets its pier.** A water district holding a `shipyard` is not walkable, so it used to get no road and no explanation. It now joins the road network by a single pier/bridge edge to the adjacent node it was founded against -- and a district whose only way out is that harbour gets the same landing edge -- drawn in the same two-tone hairline as every land road. A district with no walkable route AND no harbour adjacent (or no adjacent node at all) still gets no road.
+- **F2 (cosmetic, decided) -- the workforce reading, measured.** The road's width is the reading and it follows the district's actual staffing (15% -> 3 tracks -> 0.70px; 100% -> 20 -> 1.50px), but the 1-vs-20-track delta is 0.90px on a 55.4px hex and every district of a game nobody has staffed is *genuinely* at 100% (`applyPlaceBuildings` places `workers: undefined`, the legacy auto-staffed max), so a busy trunk and a light lane render identically. The mapping is left as the carrier rather than varied by anything the data does not carry; the measurement and the legible-carrier / auto-100% question are recorded in `docs/settlements.md` and filed as a round-3 finding.
+
+The road behaviour the round-2 card proved correct is unchanged: per-terrain drawing, opposite bowing, sprite scaling, one paint per segment, surviving an End Turn and a reload, zero movement cost, and neither blocked nor overwritten by building placement.
+
 ## [0.38.2] - 2026-11-03
 
 The town-centre sprite audit lands as its own changeset: test/townCenterSprite.e2e.ts (25 checks over the town-hall art family and the rendered sprite in a settlers city view) plus docs/town-center-review/, wired into the suite runner as test:towncenter. No game code changes -- a test-and-docs changeset, so patch.
