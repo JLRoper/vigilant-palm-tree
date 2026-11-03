@@ -6,6 +6,7 @@ transferGold,
   mulberry32,
   resolveBattle as resolveBattleEngine,
   normalizePlatoons,
+  withSurvivorStacks,
   detectAdjacentEnemy,
   cancelMove,
   recruitHero,
@@ -393,19 +394,13 @@ async function dualWriteEntities(
       };
       const loot = transferCargoLoot(normalized, attackerHero.id, defenderHero.id);
       const heroes: Record<HeroId, HeroState> = { ...loot.heroes };
-      heroes[attackerHero.id] = { ...heroes[attackerHero.id], stacks: attackerStacks };
-      heroes[defenderHero.id] = { ...heroes[defenderHero.id], stacks: defenderStacks };
+      heroes[attackerHero.id] = withSurvivorStacks(heroes[attackerHero.id], attackerStacks);
+      heroes[defenderHero.id] = withSurvivorStacks(heroes[defenderHero.id], defenderStacks);
       return { heroes, lootedGold: loot.gold };
     }
     const heroes: Record<HeroId, HeroState> = { ...allHeroes };
-    heroes[attackerHero.id] = {
-      ...attackerHero,
-      stacks: attackerStacks,
-    };
-    heroes[defenderHero.id] = {
-      ...defenderHero,
-      stacks: defenderStacks,
-    };
+    heroes[attackerHero.id] = withSurvivorStacks(attackerHero, attackerStacks);
+    heroes[defenderHero.id] = withSurvivorStacks(defenderHero, defenderStacks);
     return { heroes, lootedGold: 0 };
   }
 
