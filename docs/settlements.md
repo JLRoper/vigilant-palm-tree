@@ -163,6 +163,7 @@ A hero walking onto an enemy settlement tile captures it — **only if the garri
 - **Post-battle capture:** when the victorious attacker stands on an enemy settlement whose garrison is now empty, capture fires automatically (`TurnController.captureAfterBattleIfNeeded`, wired on both the hero-battle and settlement-battle paths).
 - Captured settlements produce for the new owner starting the next turn.
 - Capturing is the only way settlements change hands in v1.
+- **The client's `Castle` wrapper follows a capture (2026-11-02).** `GameStateManager.rebuildSettlementsFromState()` reconciles the wrapper collection against `SettlementState` on the per-frame state-identity diff as well as on `state:committed`, and the reconcile is identity-preserving — `Castle.syncFromState` (`src/entities/settlement.ts`) mutates the existing instance rather than reallocating, because `EntityMirror.syncWith` and the vision/territory caches hold those exact objects. A walk-in capture commits no `state:committed` (that would snap every hero), so before this the wrapper kept the pre-capture owner — and, by the same mechanism, every other mirrored field (buildings, auto-trade, level) — for the rest of the session (playthrough round 2, F4). The garrison has no such wrapper field at all: `SettlementState.stacks` is read live by the garrison panels.
 - A player can recapture their own settlements by walking their hero back onto them (same garrison gate).
 - **Active upgrades survive capture.** If a settlement is mid-upgrade, construction continues under the new owner.
 
