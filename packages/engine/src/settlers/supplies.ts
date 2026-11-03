@@ -1,4 +1,4 @@
-import type { BuildingDef, GameMode, GenerationStyle, HeroState, Warehouse } from "@heroes/contracts";
+import type { BuildingDef, GameMode, HeroState, Warehouse } from "@heroes/contracts";
 import { gameModeSettings } from "@heroes/contracts";
 import { foodRequiredForPopulation } from "../economy/consumption";
 import { cityViewSizeFor } from "../settlement/citySpots";
@@ -77,7 +77,7 @@ export function foundedSettlementBuildings(mode: GameMode, population: number): 
   if (!gameModeSettings(mode).freeStarterBuildings) return [];
   return buildStarterLayout({
     size: cityViewSizeFor(1),
-    style: "pixel" as GenerationStyle,
+    style: "pixel",
     farms: starterFarmsNeeded(foodRequiredForPopulation(population)),
   });
 }
