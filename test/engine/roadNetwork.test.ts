@@ -296,3 +296,35 @@ test("the same settlement and map always produce the same network", () => {
   });
   assert.deepEqual(settlementRoadNetwork(input, map), settlementRoadNetwork(input, map));
 });
+
+test("a district's SITE counts its builders at the construction ceiling (2026-11-03)", () => {
+  // A house's operational cap is 1, so a district of five FINISHED houses offers
+  // five slots -- the reading before the build crew existed, unchanged. While
+  // the same houses are being built they hold up to CONSTRUCTION_MAX_BUILDERS
+  // each, and the district's road is a WORKFORCE display: if four people are on
+  // a site, the road may say so.
+  const houses = (crew: Array<{ workers: number; construction?: boolean }>): DistrictState => ({
+    q: 5,
+    r: 4,
+    citySpots: [],
+    buildings: crew.map((c, gx) => ({
+      gx,
+      gy: 0,
+      kind: "house",
+      level: 1,
+      workers: c.workers,
+      ...(c.construction ? { construction: { daysRemaining: 3 } } : {}),
+    })),
+  });
+  const five = (n: number, construction: boolean) =>
+    houses(Array.from({ length: 5 }, () => ({ workers: n, construction })));
+
+  assert.equal(districtWorkforcePercent(five(1, true)), 25, "five 1-builder sites: 5 workers against the 20 slots a district of sites offers");
+  assert.equal(districtWorkforcePercent(five(4, true)), 100, "and a full crew on every site fills it");
+  assert.equal(
+    districtWorkforcePercent(five(1, false)),
+    100,
+    "finished, the same five houses are five slots at their own cap of 1 -- the construction ceiling raises no operational capacity",
+  );
+  assert.equal(buildingMaxWorkers("house"), 1, "which is the cap the finished reading uses");
+});
