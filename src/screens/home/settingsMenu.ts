@@ -141,6 +141,80 @@ function makeFoldableSection(
   return frame;
 }
 
+/**
+ * Builds ONE slider row -- the row, its name line (the name and the slider's
+ * live value) and the slider itself -- and appends the name line TOGETHER with
+ * the slider. Every value slider in this panel goes through here, so a row
+ * cannot be built and then rendered without its name: that is exactly how the
+ * round-4 F1 defect happened (only the max-zoom-out row appended its name line
+ * while the other rows constructed theirs and dropped it, and the player saw a
+ * bare number with no name and no value).
+ *
+ * What stays at the call site is everything that is NOT the row's shape: the
+ * bound accessors, the value's display format, the hint's wording and the
+ * setting's own reader/writer. This helper only guarantees the pair exists.
+ */
+interface LabelledSliderRow {
+  readonly row: HTMLDivElement;
+  readonly slider: HTMLInputElement;
+  /** The live value readout on the name line. */
+  readonly value: HTMLSpanElement;
+  /** The caption line under the slider; the call site owns its words. */
+  readonly hint: HTMLDivElement;
+}
+
+function makeLabelledSliderRow(opts: {
+  label: string;
+  setting: string;
+  min: number;
+  max: number;
+  step: string;
+  /** Optional testid on the value readout (the max-zoom-out row carries one). */
+  labelTestId?: string;
+  /** Optional testid on the slider input (the max-zoom-out row carries one). */
+  sliderTestId?: string;
+}): LabelledSliderRow {
+  const row = document.createElement("div");
+  row.style.display = "flex";
+  row.style.flexDirection = "column";
+  row.style.gap = "6px";
+
+  const labelRow = document.createElement("div");
+  labelRow.style.display = "flex";
+  labelRow.style.justifyContent = "space-between";
+  labelRow.style.alignItems = "baseline";
+
+  const name = document.createElement("span");
+  name.textContent = opts.label;
+  labelRow.appendChild(name);
+
+  const value = document.createElement("span");
+  if (opts.labelTestId) value.setAttribute("data-testid", opts.labelTestId);
+  value.style.fontVariantNumeric = "tabular-nums";
+  labelRow.appendChild(value);
+
+  const slider = document.createElement("input");
+  slider.type = "range";
+  if (opts.sliderTestId) slider.setAttribute("data-testid", opts.sliderTestId);
+  slider.min = String(opts.min);
+  slider.max = String(opts.max);
+  slider.step = opts.step;
+  slider.style.width = "100%";
+  slider.style.accentColor = "#f77f00";
+  slider.setAttribute("data-setting", opts.setting);
+
+  // The name line goes in WITH the slider. Keeping these two appends together
+  // is the entire reason this helper exists.
+  row.append(labelRow, slider);
+
+  const hint = document.createElement("div");
+  hint.style.fontSize = "10px";
+  hint.style.opacity = "0.55";
+  row.appendChild(hint);
+
+  return { row, slider, value, hint };
+}
+
 export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
   const parent = opts.parent ?? document.body;
   const bounds = settingsBounds();
@@ -268,44 +342,25 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
   {
     const children: HTMLElement[] = [];
-    // Every slider row in this panel shows a player its own name and its
-    // current value: the label row is appended WITH the slider. Building that
-    // row and never appending it is the round-4 F1 defect -- seven sliders
-    // rendered as a bare number with no name and no value.
+    // Every slider row in this panel is built by makeLabelledSliderRow, which
+    // constructs the row's name line and its slider together and appends both,
+    // so a row cannot be rendered without its name. The round-4 F1 defect --
+    // seven sliders shown as a bare number with no name and no value -- was one
+    // row doing exactly what this helper makes impossible.
 
     // Movement speed
-    const heroRow = document.createElement("div");
-    heroRow.style.display = "flex";
-    heroRow.style.flexDirection = "column";
-    heroRow.style.gap = "6px";
-
-    const heroLabelRow = document.createElement("div");
-    heroLabelRow.style.display = "flex";
-    heroLabelRow.style.justifyContent = "space-between";
-    heroLabelRow.style.alignItems = "baseline";
-
-    const heroLabel = document.createElement("span");
-    heroLabel.textContent = "Hero movement speed";
-    heroLabelRow.appendChild(heroLabel);
-
-    const heroValue = document.createElement("span");
-    heroValue.style.fontVariantNumeric = "tabular-nums";
-    heroLabelRow.appendChild(heroValue);
-
-    const slider = document.createElement("input");
-    slider.type = "range";
-    slider.min = String(bounds.min);
-    slider.max = String(bounds.max);
-    slider.step = "10";
-    slider.style.width = "100%";
-    slider.style.accentColor = "#f77f00";
-    slider.setAttribute("data-setting", "moveDurationMs");
-    heroRow.append(heroLabelRow, slider);
-
-    const hint = document.createElement("div");
-    hint.style.fontSize = "10px";
-    hint.style.opacity = "0.55";
-    heroRow.appendChild(hint);
+    const {
+      row: heroRow,
+      slider,
+      value: heroValue,
+      hint,
+    } = makeLabelledSliderRow({
+      label: "Hero movement speed",
+      setting: "moveDurationMs",
+      min: bounds.min,
+      max: bounds.max,
+      step: "10",
+    });
 
     function refresh(next: GameSettings): void {
       slider.value = String(next.moveDurationMs);
@@ -320,38 +375,18 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
     children.push(heroRow);
 
-    const enemyRow = document.createElement("div");
-    enemyRow.style.display = "flex";
-    enemyRow.style.flexDirection = "column";
-    enemyRow.style.gap = "6px";
-
-    const enemyLabelRow = document.createElement("div");
-    enemyLabelRow.style.display = "flex";
-    enemyLabelRow.style.justifyContent = "space-between";
-    enemyLabelRow.style.alignItems = "baseline";
-
-    const enemyLabel = document.createElement("span");
-    enemyLabel.textContent = "Enemy movement speed";
-    enemyLabelRow.appendChild(enemyLabel);
-
-    const enemyValue = document.createElement("span");
-    enemyValue.style.fontVariantNumeric = "tabular-nums";
-    enemyLabelRow.appendChild(enemyValue);
-
-    const enemySlider = document.createElement("input");
-    enemySlider.type = "range";
-    enemySlider.min = String(enemyBounds.min);
-    enemySlider.max = String(enemyBounds.max);
-    enemySlider.step = "10";
-    enemySlider.style.width = "100%";
-    enemySlider.style.accentColor = "#f77f00";
-    enemySlider.setAttribute("data-setting", "enemyMoveDurationMs");
-    enemyRow.append(enemyLabelRow, enemySlider);
-
-    const enemyHint = document.createElement("div");
-    enemyHint.style.fontSize = "10px";
-    enemyHint.style.opacity = "0.55";
-    enemyRow.appendChild(enemyHint);
+    const {
+      row: enemyRow,
+      slider: enemySlider,
+      value: enemyValue,
+      hint: enemyHint,
+    } = makeLabelledSliderRow({
+      label: "Enemy movement speed",
+      setting: "enemyMoveDurationMs",
+      min: enemyBounds.min,
+      max: enemyBounds.max,
+      step: "10",
+    });
 
     function refreshEnemy(next: GameSettings): void {
       enemySlider.value = String(next.enemyMoveDurationMs);
@@ -368,38 +403,18 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
 
     // Battle arena move animation speed (also covers the player's own
     // platoons — they glide like the AI's now). 0 = instant.
-    const arenaRow = document.createElement("div");
-    arenaRow.style.display = "flex";
-    arenaRow.style.flexDirection = "column";
-    arenaRow.style.gap = "6px";
-
-    const arenaLabelRow = document.createElement("div");
-    arenaLabelRow.style.display = "flex";
-    arenaLabelRow.style.justifyContent = "space-between";
-    arenaLabelRow.style.alignItems = "baseline";
-
-    const arenaLabel = document.createElement("span");
-    arenaLabel.textContent = "Battle move animation speed";
-    arenaLabelRow.appendChild(arenaLabel);
-
-    const arenaValue = document.createElement("span");
-    arenaValue.style.fontVariantNumeric = "tabular-nums";
-    arenaLabelRow.appendChild(arenaValue);
-
-    const arenaSlider = document.createElement("input");
-    arenaSlider.type = "range";
-    arenaSlider.min = String(arenaBounds.min);
-    arenaSlider.max = String(arenaBounds.max);
-    arenaSlider.step = "10";
-    arenaSlider.style.width = "100%";
-    arenaSlider.style.accentColor = "#f77f00";
-    arenaSlider.setAttribute("data-setting", "arenaMoveMsPerHex");
-    arenaRow.append(arenaLabelRow, arenaSlider);
-
-    const arenaHint = document.createElement("div");
-    arenaHint.style.fontSize = "10px";
-    arenaHint.style.opacity = "0.55";
-    arenaRow.appendChild(arenaHint);
+    const {
+      row: arenaRow,
+      slider: arenaSlider,
+      value: arenaValue,
+      hint: arenaHint,
+    } = makeLabelledSliderRow({
+      label: "Battle move animation speed",
+      setting: "arenaMoveMsPerHex",
+      min: arenaBounds.min,
+      max: arenaBounds.max,
+      step: "10",
+    });
 
     function refreshArena(next: GameSettings): void {
       arenaSlider.value = String(next.arenaMoveMsPerHex);
@@ -415,38 +430,18 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     children.push(arenaRow);
 
     // Border thickness
-    const borderRow = document.createElement("div");
-    borderRow.style.display = "flex";
-    borderRow.style.flexDirection = "column";
-    borderRow.style.gap = "6px";
-
-    const borderLabelRow = document.createElement("div");
-    borderLabelRow.style.display = "flex";
-    borderLabelRow.style.justifyContent = "space-between";
-    borderLabelRow.style.alignItems = "baseline";
-
-    const borderLabel = document.createElement("span");
-    borderLabel.textContent = "Territory border thickness";
-    borderLabelRow.appendChild(borderLabel);
-
-    const borderValue = document.createElement("span");
-    borderValue.style.fontVariantNumeric = "tabular-nums";
-    borderLabelRow.appendChild(borderValue);
-
-    const borderSlider = document.createElement("input");
-    borderSlider.type = "range";
-    borderSlider.min = String(borderBounds.min);
-    borderSlider.max = String(borderBounds.max);
-    borderSlider.step = "0.1";
-    borderSlider.style.width = "100%";
-    borderSlider.style.accentColor = "#f77f00";
-    borderSlider.setAttribute("data-setting", "territoryBorderWidth");
-    borderRow.append(borderLabelRow, borderSlider);
-
-    const borderHint = document.createElement("div");
-    borderHint.style.fontSize = "10px";
-    borderHint.style.opacity = "0.55";
-    borderRow.appendChild(borderHint);
+    const {
+      row: borderRow,
+      slider: borderSlider,
+      value: borderValue,
+      hint: borderHint,
+    } = makeLabelledSliderRow({
+      label: "Territory border thickness",
+      setting: "territoryBorderWidth",
+      min: borderBounds.min,
+      max: borderBounds.max,
+      step: "0.1",
+    });
 
     function refreshBorder(next: GameSettings): void {
       borderSlider.value = String(next.territoryBorderWidth);
@@ -470,38 +465,18 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     const children: HTMLElement[] = [];
 
     // Growth rate
-    const growthRow = document.createElement("div");
-    growthRow.style.display = "flex";
-    growthRow.style.flexDirection = "column";
-    growthRow.style.gap = "6px";
-
-    const growthLabelRow = document.createElement("div");
-    growthLabelRow.style.display = "flex";
-    growthLabelRow.style.justifyContent = "space-between";
-    growthLabelRow.style.alignItems = "baseline";
-
-    const growthLabel = document.createElement("span");
-    growthLabel.textContent = "Population growth rate";
-    growthLabelRow.appendChild(growthLabel);
-
-    const growthValue = document.createElement("span");
-    growthValue.style.fontVariantNumeric = "tabular-nums";
-    growthLabelRow.appendChild(growthValue);
-
-    const growthSlider = document.createElement("input");
-    growthSlider.type = "range";
-    growthSlider.min = String(growthBounds.min);
-    growthSlider.max = String(growthBounds.max);
-    growthSlider.step = "0.01";
-    growthSlider.style.width = "100%";
-    growthSlider.style.accentColor = "#f77f00";
-    growthSlider.setAttribute("data-setting", "populationGrowthRate");
-    growthRow.append(growthLabelRow, growthSlider);
-
-    const growthHint = document.createElement("div");
-    growthHint.style.fontSize = "10px";
-    growthHint.style.opacity = "0.55";
-    growthRow.appendChild(growthHint);
+    const {
+      row: growthRow,
+      slider: growthSlider,
+      value: growthValue,
+      hint: growthHint,
+    } = makeLabelledSliderRow({
+      label: "Population growth rate",
+      setting: "populationGrowthRate",
+      min: growthBounds.min,
+      max: growthBounds.max,
+      step: "0.01",
+    });
 
     function refreshGrowth(next: GameSettings): void {
       growthSlider.value = String(next.populationGrowthRate);
@@ -842,38 +817,18 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     const bgBounds = bgOffsetBounds();
 
     // City background X offset
-    const bgXRow = document.createElement("div");
-    bgXRow.style.display = "flex";
-    bgXRow.style.flexDirection = "column";
-    bgXRow.style.gap = "6px";
-
-    const bgXLabelRow = document.createElement("div");
-    bgXLabelRow.style.display = "flex";
-    bgXLabelRow.style.justifyContent = "space-between";
-    bgXLabelRow.style.alignItems = "baseline";
-
-    const bgXLabel = document.createElement("span");
-    bgXLabel.textContent = "City background X offset";
-    bgXLabelRow.appendChild(bgXLabel);
-
-    const bgXValue = document.createElement("span");
-    bgXValue.style.fontVariantNumeric = "tabular-nums";
-    bgXLabelRow.appendChild(bgXValue);
-
-    const bgXSlider = document.createElement("input");
-    bgXSlider.type = "range";
-    bgXSlider.min = String(bgBounds.min);
-    bgXSlider.max = String(bgBounds.max);
-    bgXSlider.step = "1";
-    bgXSlider.style.width = "100%";
-    bgXSlider.style.accentColor = "#f77f00";
-    bgXSlider.setAttribute("data-setting", "cityBgOffsetX");
-    bgXRow.append(bgXLabelRow, bgXSlider);
-
-    const bgXHint = document.createElement("div");
-    bgXHint.style.fontSize = "10px";
-    bgXHint.style.opacity = "0.55";
-    bgXRow.appendChild(bgXHint);
+    const {
+      row: bgXRow,
+      slider: bgXSlider,
+      value: bgXValue,
+      hint: bgXHint,
+    } = makeLabelledSliderRow({
+      label: "City background X offset",
+      setting: "cityBgOffsetX",
+      min: bgBounds.min,
+      max: bgBounds.max,
+      step: "1",
+    });
 
     function refreshBgX(next: GameSettings): void {
       bgXSlider.value = String(next.cityBgOffsetX);
@@ -891,38 +846,18 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     children.push(bgXRow);
 
     // City background Y offset
-    const bgYRow = document.createElement("div");
-    bgYRow.style.display = "flex";
-    bgYRow.style.flexDirection = "column";
-    bgYRow.style.gap = "6px";
-
-    const bgYLabelRow = document.createElement("div");
-    bgYLabelRow.style.display = "flex";
-    bgYLabelRow.style.justifyContent = "space-between";
-    bgYLabelRow.style.alignItems = "baseline";
-
-    const bgYLabel = document.createElement("span");
-    bgYLabel.textContent = "City background Y offset";
-    bgYLabelRow.appendChild(bgYLabel);
-
-    const bgYValue = document.createElement("span");
-    bgYValue.style.fontVariantNumeric = "tabular-nums";
-    bgYLabelRow.appendChild(bgYValue);
-
-    const bgYSlider = document.createElement("input");
-    bgYSlider.type = "range";
-    bgYSlider.min = String(bgBounds.min);
-    bgYSlider.max = String(bgBounds.max);
-    bgYSlider.step = "1";
-    bgYSlider.style.width = "100%";
-    bgYSlider.style.accentColor = "#f77f00";
-    bgYSlider.setAttribute("data-setting", "cityBgOffsetY");
-    bgYRow.append(bgYLabelRow, bgYSlider);
-
-    const bgYHint = document.createElement("div");
-    bgYHint.style.fontSize = "10px";
-    bgYHint.style.opacity = "0.55";
-    bgYRow.appendChild(bgYHint);
+    const {
+      row: bgYRow,
+      slider: bgYSlider,
+      value: bgYValue,
+      hint: bgYHint,
+    } = makeLabelledSliderRow({
+      label: "City background Y offset",
+      setting: "cityBgOffsetY",
+      min: bgBounds.min,
+      max: bgBounds.max,
+      step: "1",
+    });
 
     function refreshBgY(next: GameSettings): void {
       bgYSlider.value = String(next.cityBgOffsetY);
@@ -1079,43 +1014,22 @@ export function openSettingsMenu(opts: SettingsMenuOptions = {}): void {
     children.push(logPanelToggleRow);
 
     // Max zoom-out width (20–34 hexes wide)
-    const zoomOutRow = document.createElement("div");
-    zoomOutRow.style.display = "flex";
-    zoomOutRow.style.flexDirection = "column";
-    zoomOutRow.style.gap = "6px";
-
-    const zoomOutLabelRow = document.createElement("div");
-    zoomOutLabelRow.style.display = "flex";
-    zoomOutLabelRow.style.justifyContent = "space-between";
-    zoomOutLabelRow.style.alignItems = "baseline";
-
-    const zoomOutLabel = document.createElement("span");
-    zoomOutLabel.textContent = "Max zoom-out width";
-    zoomOutLabelRow.appendChild(zoomOutLabel);
-
-    const zoomOutValue = document.createElement("span");
-    zoomOutValue.setAttribute("data-testid", "max-zoom-out-hexes-value");
-    zoomOutValue.style.fontVariantNumeric = "tabular-nums";
-    zoomOutLabelRow.appendChild(zoomOutValue);
-    zoomOutRow.appendChild(zoomOutLabelRow);
-
-    const zoomOutSlider = document.createElement("input");
-    zoomOutSlider.type = "range";
-    zoomOutSlider.setAttribute("data-testid", "max-zoom-out-hexes-slider");
-    zoomOutSlider.min = String(zoomOutBounds.min);
-    zoomOutSlider.max = String(zoomOutBounds.max);
-    zoomOutSlider.step = "1";
-    zoomOutSlider.style.width = "100%";
-    zoomOutSlider.style.accentColor = "#f77f00";
-    zoomOutSlider.setAttribute("data-setting", "maxZoomOutHexesWide");
-    zoomOutRow.appendChild(zoomOutSlider);
-
-    const zoomOutHint = document.createElement("div");
-    zoomOutHint.style.fontSize = "10px";
-    zoomOutHint.style.opacity = "0.55";
+    const {
+      row: zoomOutRow,
+      slider: zoomOutSlider,
+      value: zoomOutValue,
+      hint: zoomOutHint,
+    } = makeLabelledSliderRow({
+      label: "Max zoom-out width",
+      setting: "maxZoomOutHexesWide",
+      min: zoomOutBounds.min,
+      max: zoomOutBounds.max,
+      step: "1",
+      labelTestId: "max-zoom-out-hexes-value",
+      sliderTestId: "max-zoom-out-hexes-slider",
+    });
     zoomOutHint.textContent =
       "Caps how far out you can scroll on the adventure map (20 hexes wide default, up to 34 hexes wide) to keep rendering fast on large maps.";
-    zoomOutRow.appendChild(zoomOutHint);
 
     function refreshZoomOut(next: GameSettings): void {
       zoomOutSlider.value = String(next.maxZoomOutHexesWide);

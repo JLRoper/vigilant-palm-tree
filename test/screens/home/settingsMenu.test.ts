@@ -562,3 +562,94 @@ test("the skybox-only rows drop the words and go live once the skybox is selecte
     updateSettings({ ...DEFAULT_SETTINGS });
   }
 });
+
+// ── The slider rows are built as ONE unit ───────────────────────────────
+//
+// Every value slider in the panel is built by makeLabelledSliderRow, which
+// constructs the row's name line (the name span + the tabular-nums value span)
+// and its slider together and appends both. The round-4 F1 defect was a row
+// that built its name line and never appended it, so the player saw a bare
+// number. This test pins the shape that helper guarantees, structurally rather
+// than by matching label text: a slider row whose name line is missing, is not
+// the row's FIRST child, or does not sit directly beside its slider, is red --
+// so a ninth slider copy-pasted from the old blocks (name line built, dropped)
+// cannot ship green.
+
+/** The row's setting hook, for a failure message that names the culprit. */
+function settingOf(slider: MockElement): string {
+  return slider.getAttribute("data-setting") ?? "(no data-setting hook)";
+}
+
+test("every slider row is built as one unit: its name line is appended WITH its slider", () => {
+  const parent = new MockElement("div");
+  mount(parent);
+  try {
+    const sliders = findAll(parent, (el) => el.tagName === "INPUT" && el.type === "range");
+    assert.ok(
+      sliders.length >= 8,
+      "the panel's slider rows -- if a slider was removed this must be re-derived, not lowered",
+    );
+
+    // The one documented exception: the parallax layer count is a
+    // checkbox-gated slider whose single caption line carries both name and
+    // value ("N layers — speeds: …"), so it does not use the name-line shape.
+    // It is asserted on its own terms rather than skipped, so no slider
+    // escapes this test.
+    const parallax = findBySetting(parent, "parallaxLayerCount");
+    assert.ok(parallax, "the parallax layer slider, the one non-name-line slider");
+
+    let labelled = 0;
+    for (const slider of sliders) {
+      const row = slider.parent;
+      assert.ok(row, `${settingOf(slider)}: the slider is not mounted in a row`);
+
+      if (slider === parallax) {
+        assert.ok(
+          row.children.some((child) => /layers/.test(textOf(child))),
+          "parallaxLayerCount: the caption line that carries its name and value is gone",
+        );
+        continue;
+      }
+
+      const labelLine = row.children[0];
+      assert.equal(
+        labelLine?.tagName,
+        "DIV",
+        `${settingOf(slider)}: the row does not START with its name line -- a row that builds its ` +
+          "label line and drops it is exactly the round-4 F1 defect this pins",
+      );
+      assert.equal(labelLine.style.justifyContent, "space-between");
+      assert.equal(labelLine.style.alignItems, "baseline");
+
+      const spans = labelLine.children.filter((child) => child.tagName === "SPAN");
+      assert.equal(
+        spans.length,
+        2,
+        `${settingOf(slider)}: the name line must hold exactly the name span and the value span`,
+      );
+      assert.ok(
+        spans[0].textContent.trim().length > 0,
+        `${settingOf(slider)}: the name line carries no name (a bare number is what round 4 F1 found)`,
+      );
+      assert.equal(
+        spans[1].style.fontVariantNumeric,
+        "tabular-nums",
+        `${settingOf(slider)}: the name line has no live value readout`,
+      );
+      assert.equal(
+        row.children[1],
+        slider,
+        `${settingOf(slider)}: the name line and the slider are not appended together as siblings`,
+      );
+      labelled++;
+    }
+
+    assert.equal(
+      labelled,
+      sliders.length - 1,
+      "every slider except the documented parallax exception must be a helper-built labelled row",
+    );
+  } finally {
+    updateSettings({ ...DEFAULT_SETTINGS });
+  }
+});
