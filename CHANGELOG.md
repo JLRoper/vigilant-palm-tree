@@ -12,7 +12,7 @@ the version has not already been bumped in that changeset.
 
 ## [0.41.0] - 2026-11-03
 
-the workforce binds: WORKFORCE_PER_POPULATION 100 -> 300 so a fully built-out L3 castle must choose what stays dark, and the free auto crew is bounded to the bootstrap and shown
+Per-faction troop upkeep: the three non-human rosters pay their own bill (migration 037)
 
 ## [0.40.2] - 2026-11-03
 
