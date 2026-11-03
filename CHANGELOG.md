@@ -10,9 +10,21 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.39.5] - 2026-11-03
+## [0.39.6] - 2026-11-03
 
 The native confirm() freezes the renderer: the toolbar's gear -> + New Game, the landing page's delete-game row and the Asset Manager's delete-asset now route through the app's own in-page dialog (`openConfirmDialog`). Measured in a real browser with the tab foregrounded, a native confirm() blocked the renderer thread outright -- `Page.handleJavaScriptDialog` returned {} while every `Runtime.evaluate` timed out after 5s, the rAF counter advanced 0 ticks across a 2s window that otherwise carried 274, and the click that opened it never even acked -- and the tab answered again in 0.0s the moment the box was dismissed. The same click now returns in 0.01s with the dialog on screen, 177 rAF ticks across the same window and zero native confirms. The prompt raised from the landing page or the Asset Manager is mounted above the surface that raised it (z-index 320 over the Load dialog's 300 and the home overlay's 200), so it is clickable rather than merely visible. Three tests, one per site: cancelling deletes nothing, starts nothing and loses no cache entry; confirming acts on exactly the named game/asset.
+
+## [0.39.5] - 2026-11-03
+
+the load path remembers the seat it claimed, so a reload opens where you are
+
+`test:districts` was red on main. Re-measured on the real tip first: `git fetch github` → `f7e02a3` (0.39.2), where `districts.e2e.ts:372` failed verbatim — `AssertionError [ERR_ASSERTION]: district did not re-open after reload` / `false !== true` (`>> threw:` … `at run (test/districts.e2e.ts:372:12)`). Attributed by RUNNING the suite at the commit on either side of each candidate in `a895975..fd18ec0`, not by reading: green at `a895975` (0.38.12), green at `adcbc18` (0.38.13, PR #297), **red from `0bc64b7` (0.38.14, PR #296 — the load-path/seat-resolver landing) on**, red again at `fd18ec0` (0.39.0, PR #295) and at the tip. The flip is PR #296's, and it is a real product regression, not test drift.
+
+- **the mechanism, read out of the running client at the culprit commit:** after the reload `resolveLocalSeat` answered `{"seat":null,"source":"unknown"}` for a game whose claim map held `{"0":{"handle":"Player 1",…}}`, so the load camera centred `{"q":17.5,"r":13,"source":"map-centre"}` instead of the seat's own castle at `(2,9)`. Every claim check falls back to seat 0, so nothing else refused — the district hex had simply fallen off screen and the double-click never reached it.
+- **the cause:** the client's own self-claims — the New Game form and the auto-created starter, both seat 0, `src/managers/GameSessionManager.ts` — claimed a seat server-side and never recorded it locally. PR #296 removed the old fallback (the *lowest* claimed seat, which happened to be the creator's 0), so a browser that had claimed its own seat now had nothing to be identified BY on reload. Verified against the DB, not inferred: `SELECT lobby->'claimed' FROM games` on the run's own game returns exactly that single seat-0 claim.
+- **the fix is the missing memory, never a softened guess:** both self-claim sites now call the same `rememberSelfClaim()` (`src/players/localPlayer.ts`) the multiplayer lobby's Host/Join tabs already used, which writes the remembered seat, the claim handle and the in-memory seat. `resolveLocalSeat` still refuses to assert a seat the browser cannot prove it holds.
+- **surfaces:** the reload path is shared by every game a browser self-claims through `GameSessionManager.loadGame` → `resolveLocalSeat` (the load camera and the in-memory seat). Verified in a browser by `test:districts` (green on this tree) and by `test:settlements` (green, unaffected); pinned by a new unit file `test/state/selfClaimMemory.test.ts` whose last case reads `src/` and fails if ANY `.claimLobbySeat(` call site stops remembering its seat, so a new claim path cannot reintroduce this silently.
+- docs: `docs/multiplayer.md`'s Local-seat-identity row now states the rule — claiming a seat and remembering it are one act.
 
 ## [0.39.4] - 2026-11-03
 

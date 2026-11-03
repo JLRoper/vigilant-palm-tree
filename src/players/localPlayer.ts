@@ -60,3 +60,23 @@ export function setLocalClaimHandle(gameName: string, handle: string): void {
     // localStorage may be disabled; the claim still stands server-side.
   }
 }
+
+/**
+ * Record, locally, that THIS browser holds `seat` in `gameName` -- the three
+ * things `resolveLocalSeat` matches a claim against (src/players/localSeat.ts).
+ *
+ * EVERY path that claims a seat server-side must call this, or the reload path
+ * has nothing to identify the browser with and answers "no seat": the claim map
+ * says a seat is taken, never by whom. That is exactly what broke when the
+ * self-claiming paths (the "New Game" form and the auto-created starter, both
+ * seat 0, src/managers/GameSessionManager.ts) claimed without remembering --
+ * a reload then centred the map instead of the seat's own stronghold, so a
+ * district hex beside the castle fell off screen and never re-opened
+ * (test:districts, districts.e2e.ts:372). The multiplayer lobby's Host/Join
+ * tabs are the other callers.
+ */
+export function rememberSelfClaim(gameName: string, seat: PlayerId, handle: string): void {
+  setLocalPlayerId(gameName, seat);
+  setLocalClaimHandle(gameName, handle);
+  setInMemoryLocalPlayerId(gameName, seat);
+}

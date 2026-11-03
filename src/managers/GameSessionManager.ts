@@ -12,7 +12,7 @@ import type { Game } from "../io/api";
 import { hydrateClientGame } from "../io/hydrateClientGame";
 import type { FactionId, GameMode } from "@heroes/contracts";
 import { notePersisted } from "../io/commands";
-import { setInMemoryLocalPlayerId, getLocalPlayerId, getLocalClaimHandle } from "../players/localPlayer";
+import { setInMemoryLocalPlayerId, getLocalPlayerId, getLocalClaimHandle, rememberSelfClaim } from "../players/localPlayer";
 import { resolveLocalSeat } from "../players/localSeat";
 import { getMultiplayerSync, getEntityMirror } from "../io/multiplayerSync";
 import { clearServerDriven, syncServerDrivenFromGame } from "../io/serverDrivenGames";
@@ -180,6 +180,7 @@ export class GameSessionManager {
     const seat = 0;
     const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? `Player ${seat + 1}`;
     await this.session.claimLobbySeat(created.name, seat, handle);
+    rememberSelfClaim(created.name, seat, handle);
     await this.loadGame(created);
     void this.session.logEvent(created.name, "new_game", {
       seed: opts.seed,
@@ -219,6 +220,7 @@ export class GameSessionManager {
       const seat = 0;
       const handle = getCachedAuth()?.email.split("@")[0].slice(0, 32) ?? `Player ${seat + 1}`;
       await this.session.claimLobbySeat(created.name, seat, handle);
+      rememberSelfClaim(created.name, seat, handle);
       await this.loadGame(created);
       void this.session.logEvent(created.name, "session_start", {
         seed: MAP_SEED,
