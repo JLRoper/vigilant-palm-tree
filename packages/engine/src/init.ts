@@ -46,6 +46,7 @@ import { buildStarterLayout, heroFoodPerTurn, starterFarmsNeeded } from "./settl
 import { VALID_HORSE_VARIANTS } from "./horseVariants";
 import { HERO_VISION_RANGE, sortedRevealKeys, visionKeysAroundPoints } from "./reveal";
 import { controlRange, districtKey } from "./control";
+import { aiSeatFactions } from "./seatFactions";
 
 const DEFAULT_PLAYER_COUNT = 3;
 const MAX_PLAYER_COUNT = MAX_PLAYERS;
@@ -83,6 +84,18 @@ export interface BuildInitialOptions {
    * count are never read, which is the clamp.
    */
   seatFactions?: FactionId[];
+  /**
+   * The seed an AI seat draws its roster faction from. When present, every AI
+   * seat with no explicit `seatFactions` entry takes a faction drawn
+   * deterministically from this value (see seatFactions.ts), so a single-player
+   * game can meet the Ashen Court, the Ironmark Holds or the Verdant Wild
+   * instead of every unassigned seat sitting on the human default. Absent
+   * leaves every unassigned seat exactly as it was -- byte-identical to a
+   * pre-change snapshot, which is what keeps offline callers and the existing
+   * fixtures unchanged. Human seats are never touched by it: the creator's own
+   * pick rides `seatFactions` and always wins at its seat.
+   */
+  aiSeatFactionSeed?: number;
   /**
    * "Uncharted mode": when true, stamp each HUMAN seat's starting reveal
    * (`revealedTiles`) at creation from that seat's own heroes (radius
@@ -126,6 +139,34 @@ function enemyDerivedPlayerCount(opts: BuildInitialOptions | undefined): number 
 function clampHumanSeatCount(n: number | undefined, playerCount: number): number {
   if (!Number.isFinite(n)) return 1;
   return Math.max(1, Math.min(playerCount, Math.floor(n as number)));
+}
+
+/**
+ * The per-seat roster factions the seeding passes read: the explicit entries
+ * the caller (or the creating request) gave, with every AI seat that has none
+ * filled from `seed`. A seat the caller left alone is `undefined`, which
+ * makePlayers turns back into the legacy "no factionId key" seat -- so a game
+ * whose creator picked nothing, and whose caller supplied no seed, still
+ * records exactly the seats it used to.
+ *
+ * Seats are `undefined`-explicit rather than dropped, because entry i must
+ * stay seat i: the array is read BY INDEX by makePlayers and
+ * seedStarterBuildings, and the human seats sit in front of the AI ones.
+ */
+function resolveSeatFactions(
+  explicit: readonly FactionId[] | undefined,
+  seed: number | undefined,
+  playerCount: number,
+  humanSeatCount: number,
+): readonly (FactionId | undefined)[] | undefined {
+  const draws =
+    typeof seed === "number" && Number.isFinite(seed) ? aiSeatFactions(seed, playerCount) : undefined;
+  if (draws === undefined && explicit === undefined) return undefined;
+  return Array.from({ length: playerCount }, (_, i) => {
+    const given = explicit?.[i];
+    if (given !== undefined) return given;
+    return i < humanSeatCount ? undefined : draws?.[i - humanSeatCount];
+  });
 }
 
 function defaultPlayers(): Player[] {
@@ -262,7 +303,7 @@ function makePlayers(
   settlementIds: Record<string, string[]>,
   playerCount: number,
   humanSeatCount: number,
-  seatFactions?: readonly FactionId[],
+  seatFactions?: readonly (FactionId | undefined)[],
   wagonSeats: readonly PlayerId[] = [],
 ): Player[] {
   const out: Player[] = [];
@@ -532,7 +573,7 @@ function makeSettlements(
   _playerCount: number,
   unitTypes: Record<string, UnitType> = {},
   castleSeed = 0,
-  seatFactions?: readonly FactionId[],
+  seatFactions?: readonly (FactionId | undefined)[],
 ): SettlementState[] {
   const settlements = castles.map((c) => {
     const computed = computeSettlementRates(map, c.tile.q, c.tile.r, c.level);
@@ -639,7 +680,7 @@ function seedStarterBuildings(
   settlements: readonly SettlementState[],
   heroStacks: ReadonlyMap<PlayerId, Platoon[]>,
   unitTypes: Record<string, UnitType>,
-  seatFactions?: readonly FactionId[],
+  seatFactions?: readonly (FactionId | undefined)[],
 ): SettlementState[] {
   // The settlement each seat's starting hero stands on: that owner's FIRST
   // castle in generation order -- the same pick makeHeroes makes via
@@ -709,8 +750,18 @@ function seedEntities(
   castleSeed: number,
 ): { mode: GameMode; settlements: SettlementState[]; players: Player[]; heroes: HeroState[] } {
   const mode = resolveGameMode(opts?.gameMode);
+  // One resolution for the whole pass: the creator's explicit picks plus the
+  // seed's draw for every AI seat they left unassigned (see seatFactions.ts).
+  // Read by both makeSettlements (each seat's starter troop building) and
+  // makePlayers (the seat's roster faction), so the two can never disagree.
+  const seatFactions = resolveSeatFactions(
+    opts?.seatFactions,
+    opts?.aiSeatFactionSeed,
+    playerCount,
+    humanSeatCount,
+  );
   const castles = modeCastles(map, castleSeed, playerCount, castleCount, mode);
-  const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes, castleSeed, opts?.seatFactions);
+  const settlements = makeSettlements(map, rng, castles, playerCount, opts?.unitTypes, castleSeed, seatFactions);
   // A start never lands on an existing settlement: the neutrals are on the
   // board before the wagons are placed, so a wagon can always found where it
   // stands (see settlers/found.ts's distance rule).
@@ -730,7 +781,7 @@ function seedEntities(
     splitByOwner(settlements),
     playerCount,
     humanSeatCount,
-    opts?.seatFactions,
+    seatFactions,
     starts.map((s) => s.playerId),
   );
   const heroes =
