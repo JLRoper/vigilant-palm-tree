@@ -54,10 +54,13 @@ function closeAllModals(): void {
 }
 
 /**
- * A saved game's progress line. It reads the ROUND, not `games.turn`: that
- * column is written once when the game is created and never advances, so a
- * game on round 37 advertised itself as "turn 1" (C-POLISH-1). `round` is the
- * same counter the HUD's Round pill and the End Turn cycle move.
+ * A saved game's progress line, shared by BOTH Load surfaces -- the landing
+ * page's list (homeView) and the in-game toolbar modal. It reads the ROUND,
+ * not `games.turn`: that column is written once when the game is created (by
+ * its DEFAULT 1 -- POST /games' INSERT never names it) and never advances, so
+ * a game on round 37 advertised itself as "turn 1" (C-POLISH-1 on the in-game
+ * list, F4 of playthrough round 2b on the landing one). `round` is the same
+ * counter the HUD's Round pill and the End Turn cycle move.
  */
 export function loadRowProgress(server: Game, lastSeenAt: string): string {
   return `round ${server.round} · ${server.gold}g · seen ${formatTime(lastSeenAt)}`;
