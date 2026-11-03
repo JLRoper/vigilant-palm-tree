@@ -10,9 +10,13 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.38.10] - 2026-11-03
+## [0.38.11] - 2026-11-03
 
 Copilot's two comments on the landed load path: the browser's own seat is resolved instead of the first claimed one, and the load promise is returned through the toolbar callback so a failed load stays observable
+
+## [0.38.10] - 2026-11-03
+
+the settlement UI tells the truth: a blocked upgrade names its cap, and the panel prints one rate
 
 ## [0.38.9] - 2026-11-03
 

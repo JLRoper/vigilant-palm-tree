@@ -12,7 +12,7 @@ import { DESERTION_AFTER_WEEKS } from "@screens/shared/upkeepWarnings";
 import { liveSettlementUpkeepUnfed } from "@screens/shared/heroUpkeepCost";
 import { RESOURCE_PILE_BUBBLY_SPRITES, settlementBannerUrl } from "../../render/assetDescriptors";
 import { bankRejectionMessage, bankRowModel, treasuryRowModel, type BankGoldDirection, type BankRowModel } from "./bankRows";
-import { TREASURY_CAP_AMBER, treasuryCapMessage, treasuryCapped } from "./treasuryCap";
+import { TREASURY_CAP_AMBER, treasuryCapBlockerMessage, treasuryCapBlocksGold, treasuryCapMessage, treasuryCapped } from "./treasuryCap";
 import { dailyRateTitle, foodBalanceTitle, formatDailyRate, populationCapTitle, resourceLabel, settlementDailyRates } from "./panelRates";
 import type { HorseVariant } from "../../state/settings";
 import { WAREHOUSE_RESOURCES } from "@heroes/contracts";
@@ -553,7 +553,21 @@ export class SettlementInfoMenu {
           this.upgradeBtn.disabled = true;
           const nextLevel = settlement.level + 1;
           this.upgradeBtn.textContent = `Upgrade to L${nextLevel}`;
-          this.upgradeInfo.textContent = `Needs: ${missing.join(", ")}`;
+          const goldCost = cost?.gold ?? 0;
+          // F-2/F-6: a gold price above the treasury cap is not a shortfall --
+          // income is discarded at the cap, so the settlement can never hold it
+          // (the L3 settlement upgrade costs 15,000g against a level-2 cap of
+          // 4,000g). The row names the cap and the way out instead of printing a
+          // "need N" the treasury can never reach; the button's own title carries
+          // the same sentence as the town hall menu's control.
+          const capBlocked =
+            goldCost > 0 && settlement.gold < goldCost && treasuryCapBlocksGold(settlement, goldCost);
+          this.upgradeInfo.textContent = capBlocked
+            ? `Needs: ${missing.join(", ")} — and the ${settlementTreasuryCap(settlement).toLocaleString()}g treasury cap cannot hold ${goldCost.toLocaleString()}g`
+            : `Needs: ${missing.join(", ")}`;
+          this.upgradeBtn.title = capBlocked
+            ? treasuryCapBlockerMessage(settlement, goldCost)
+            : `Needs: ${missing.join(", ")}`;
         } else {
           this.upgradeBtn.style.display = "";
           this.upgradeBtn.style.opacity = "1";
@@ -563,6 +577,10 @@ export class SettlementInfoMenu {
           const costStr = cost ? `${cost.gold}g` : "";
           this.upgradeBtn.textContent = `Upgrade to L${nextLevel} — ${costStr}`;
           this.upgradeInfo.textContent = "";
+          // The panel is long-lived and reused across settlements: a refusal
+          // title left over from the blocked frame would describe a control the
+          // player can now click.
+          this.upgradeBtn.title = "";
         }
       }
     } else {
