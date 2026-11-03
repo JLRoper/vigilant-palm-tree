@@ -20,6 +20,11 @@ ever invoked. The Logistics window's hero block offers the same two buttons, bot
 read one shared direction/amount model (`src/screens/shared/cargoTransfer.ts`), and the hero
 panel's own buttons are renamed **Deposit gold** / **Withdraw gold** because they were always
 gold-only despite the generic label (playthrough finding F-2).
+
+## [0.38.10] - 2026-11-03
+
+the settlement UI tells the truth: a blocked upgrade names its cap, and the panel prints one rate
+
 ## [0.38.9] - 2026-11-03
 
 The Load Game surfaces: three fixes, from playthrough round 2b.
