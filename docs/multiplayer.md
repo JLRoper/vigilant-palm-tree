@@ -1,6 +1,6 @@
 # Multiplayer — LAN Seats, Sync, and Session Policy
 
-<!-- docs:verified 2026-10-17 -->
+<!-- docs:verified 2026-11-03 -->
 
 **Status:** Current mechanics, including SSE/poll sync, the disconnect drop policy, and server-driven AI. The AI section below retains earlier decision history; the 2026-10-11 correction supersedes its original host-client-only/no-chartering notes.
 
@@ -79,7 +79,7 @@ All four decisions below are shipped (2026-09-27). Test coverage: `test/server/d
 
 **Current status correction (2026-10-11):** The original host-client-only description below is retained as history. AI turns in games with `enemySlots > 0` are server-driven. Phase 3 heartbeat/watchdog and pool hardening are implemented, and B3 AI chartering/travel is live through `pickCharterAction` in `packages/engine/src/ai/aiBrain.ts` and `server/app/aiDriver.ts`. AI chartering follows the same 2,500g purse, 20 wood, 15 stone, minimum-distance, and 10-day construction rules as player charters. The driver also handles garrison recruitment and up to three trade-route recommendations per round/seat; per-boot tokens, a stale-driver watchdog, and per-game PostgreSQL advisory locks prevent duplicate drivers.
 
-**Decision:** a new game can add 0–3 AI enemy seats ("Number of AI enemies" chip row on the home Create Game screen and the toolbar New Game modal, default 0). An AI seat is a real player in the engine — `playerCount = humanSeatCount + enemyCount` (clamped ≤ MAX_PLAYERS 10): it spawns a castle and a "Warlord" hero at init and takes its own `AI_TURN` phase. But AI seats are **not lobby seats**: `seats` stays = humanSlots, so claim/reclaim/start are unchanged (claiming an AI seat is a 400 `seat_out_of_range`). The LAN lobby path itself sends no `enemySlots` — humans-only in v1 (its seat-count label now reads "Number of human players").
+**Decision:** a new game can add 0–3 AI enemy seats ("Number of AI enemies" chip row on the home Create Game screen and the toolbar New Game modal, default 0). An AI seat is a real player in the engine — `playerCount = humanSeatCount + enemyCount` (clamped ≤ MAX_PLAYERS 10): it spawns a castle and a "Warlord" hero at init and takes its own `AI_TURN` phase. But AI seats are **not lobby seats**: `seats` stays = humanSlots, so claim/reclaim/start are unchanged (claiming an AI seat is a 400 `seat_out_of_range`). The LAN lobby path itself sends no `enemySlots` — humans-only in v1 (its host panel labels the seat chip row "Maximum seats (2-4)" and the count input "Number of human players (1 to the maximum seats)"; both read "Number of human players" until 2026-11-03, so the player could not tell which control they were setting).
 
 **As built (2026-09-29):**
 
