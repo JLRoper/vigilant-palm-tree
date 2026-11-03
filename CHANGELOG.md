@@ -10,6 +10,11 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.8] - 2026-11-03
+
+- Logistics: the wagon steppers no longer stay pressable when the engine can only refuse. The route row's +1 is off with an empty unassigned-wagon pool, its −1 is off on a one-wagon route, and the hero's cargo/treasury −1 is off for a slot the hero holds nothing in — each carrying the panel's own sentence for that refusal.
+- Engine: the one-wagon route floor is one exported constant (`MIN_TRADE_ROUTE_WAGONS`), read by both the clamp and the client's gate.
+
 ## [0.39.7] - 2026-11-03
 
 The native confirm() freezes the renderer: the toolbar's gear -> + New Game, the landing page's delete-game row and the Asset Manager's delete-asset now route through the app's own in-page dialog (`openConfirmDialog`). Measured in a real browser with the tab foregrounded, a native confirm() blocked the renderer thread outright -- `Page.handleJavaScriptDialog` returned {} while every `Runtime.evaluate` timed out after 5s, the rAF counter advanced 0 ticks across a 2s window that otherwise carried 274, and the click that opened it never even acked -- and the tab answered again in 0.0s the moment the box was dismissed. The same click now returns in 0.01s with the dialog on screen, 177 rAF ticks across the same window and zero native confirms. The prompt raised from the landing page or the Asset Manager is mounted above the surface that raised it (z-index 320 over the Load dialog's 300 and the home overlay's 200), so it is clickable rather than merely visible. Three tests, one per site: cancelling deletes nothing, starts nothing and loses no cache entry; confirming acts on exactly the named game/asset.
