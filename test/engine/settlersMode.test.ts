@@ -148,7 +148,14 @@ function seedPayload(seed: number, size: MapSize = "small") {
   });
 }
 
-const ENTITY_PIN = "f33d24e92e845b36";
+// Moved by the neutral-capital garrison (NEUTRAL_CAPITAL_GARRISON): a neutral
+// settlement now carries a `stacks` key, which is exactly what this pin is
+// for -- a change to what a seed seeds. It is NOT a grid move: the two
+// GRID_PINS and AMOUNT_PINS above are untouched, CURRENT_MAP_GEN_VERSION stays
+// 5, and 60 maps (2 sizes x v1..v5 x seeds 1..6, resource amounts included)
+// hash identically to github/main. Castle positions, names, variants and city
+// spots are unchanged; only the neutral settlement objects gained the garrison.
+const ENTITY_PIN = "d257d453732f870c";
 /** The classic seeding's neutral count for seed 42: entity seeding, not terrain. */
 const NEUTRAL_PIN = 2;
 

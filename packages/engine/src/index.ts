@@ -63,6 +63,7 @@ export * from "./settlement/roadNetwork";
 export * from "./settlement/districtSeed";
 export * from "./settlement/starterLayout";
 export * from "./settlement/capacity";
+export * from "./settlement/neutralGarrison";
 export * from "./logistics";
 export * from "./map/pathfinding";
 export * from "./settlement/upgradeTownHall";
