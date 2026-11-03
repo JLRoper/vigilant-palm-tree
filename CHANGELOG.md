@@ -12,7 +12,7 @@ the version has not already been bumped in that changeset.
 
 ## [0.39.9] - 2026-11-03
 
-the four skybox-only settings rows now state the backdrop they need
+load never substitutes a starter game for a failed or empty load
 
 ## [0.39.8] - 2026-11-03
 
