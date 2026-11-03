@@ -253,12 +253,36 @@ async function openCityView(page: Page, tile: Axial): Promise<boolean> {
   return page.evaluate(() => document.body.innerText.includes("City Design"));
 }
 
-/** A neighbour of `from` that is passable on the map and visible on screen. */
+/**
+ * Would a real click at this screen point reach the MAP? The toolbar and the
+ * modal panels are DOM siblings ABOVE the board (`index.html`: `#toolbar` has
+ * z-index 10 over `canvas#game`), so the topmost element at the point is what
+ * the click actually hits -- the board only when that element is the canvas.
+ *
+ * This replaces the fixture's hard-coded `x in 300..1000 / y in 250..620`
+ * window, which encoded where the camera happened to leave a 1280x800 viewport
+ * on the day it was written. The load path now keys the camera off the seat's
+ * own wagon (src/game/loadCamera.ts: the wagon leg of the ladder), so on this
+ * fixture's small (24x18) map the wagon and its whole neighbourhood render high
+ * in the viewport -- every neighbour was rejected by the window even though a
+ * click on it lands on the board.
+ */
+function clickLandsOnMap(page: Page, pt: { x: number; y: number }): Promise<boolean> {
+  return page.evaluate(
+    (p) => {
+      const el = document.elementFromPoint(p.x, p.y);
+      return el?.tagName === "CANVAS";
+    },
+    pt,
+  );
+}
+
+/** A neighbour of `from` that is passable on the map and that a click lands on. */
 async function pickNeighbourHex(page: Page, tiles: Tile[], from: Axial): Promise<Axial> {
   const candidates = tiles.filter((t) => !IMPASSABLE.has(t.terrain) && hexDistance(t, from) === 1);
   for (const t of candidates) {
     const pt = await screenOf(page, t);
-    if (pt.x > 300 && pt.x < 1000 && pt.y > 250 && pt.y < 620) return { q: t.q, r: t.r };
+    if (await clickLandsOnMap(page, pt)) return { q: t.q, r: t.r };
   }
   assert.fail("no passable neighbour of the wagon landed inside the map area");
 }
