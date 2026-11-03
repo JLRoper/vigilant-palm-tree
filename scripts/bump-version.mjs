@@ -3,9 +3,16 @@
 //
 // The root package.json "version" is the single source of truth: vite.config.ts
 // stamps it into the client as __APP_VERSION__ and the settings panel's build
-// info footer displays it. There is no second copy to keep in sync -- the
-// workspace packages (packages/*, 0.0.1) are private internals and are not the
-// app version.
+// info footer displays it. The workspace packages (packages/*, 0.0.1) are
+// private internals and are not the app version.
+//
+// package-lock.json is NOT a second copy of it: its top-level `version` and its
+// root entry's `packages[""].version` are npm's own, derived from package.json
+// and rewritten by npm on every install. This script deliberately does not
+// write the lock -- it owns package.json and CHANGELOG.md only. That is why the
+// lock's `version` lags the app version, and why a bare `npm install` on an
+// otherwise clean tree shows a two-line diff in it. See docs/operations.md,
+// "Deployment and Versioning".
 //
 // Usage:
 //   node scripts/bump-version.mjs <patch|minor|major|X.Y.Z> [-m "message"]
