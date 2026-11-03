@@ -77,7 +77,7 @@ import type {
   SettlementState,
   StartCharterPayload,
 } from "@heroes/contracts";
-import { runEndTurn, clampGrowthRate, removedTradeRouteIds } from "./turnService";
+import { runEndTurn, clampGrowthRate, removedTradeRouteIds, caravanAdvances } from "./turnService";
 import { pool } from "../persistence/db";
 import { createGameRepo, GameNotFoundError, type SettlementSnapshotInput, type ResourceTransactionInput } from "../persistence/repositories/gameRepo";
 import { createEventRepo } from "../persistence/repositories/eventRepo";
@@ -976,6 +976,31 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
           routeId: removedId,
         };
         lastEventId = await deps.eventRepo.append(command.gameName, removedEvent.type, removedEvent, actor);
+      }
+      // The caravans this wrap walked, loaded, delivered or turned for home
+      // (turnService.caravanAdvances -- the same before/after derivation as
+      // the removals above, inside advanceRound). Appended after the removals
+      // and before TurnEnded so the stream reads in the order the pipeline
+      // ran: desertion, then the day's logistics, then the boundary.
+      // Attribution is the route's TRUE owner (routeOwnerId -- the stamp, else
+      // the FROM endpoint's live owner) rather than the ending seat: the
+      // caravan moved on the day tick, not because this player acted, and the
+      // owner's own client skips its own rows anyway (it merges the EndTurn
+      // response), while every other seat applies the delta and sees the cart
+      // move without waiting for the boundary resync.
+      for (const advance of caravanAdvances(state, finalState)) {
+        const route = beforeRoutes.find((r) => r.id === advance.routeId);
+        const owner = route ? routeOwnerId(route, state) : null;
+        const actor: number = owner ?? command.actor;
+        const caravanEvent: EngineEvent = {
+          type: "CaravanAdvanced",
+          actor,
+          routeId: advance.routeId,
+          caravan: advance.caravan,
+          loaded: advance.loaded,
+          delivered: advance.delivered,
+        };
+        lastEventId = await deps.eventRepo.append(command.gameName, caravanEvent.type, caravanEvent, actor);
       }
       const event: EngineEvent = {
         type: "TurnEnded",

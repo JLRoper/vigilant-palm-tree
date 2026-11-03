@@ -1,4 +1,5 @@
 import type {
+  CaravanState,
   EngineEvent,
   GameState,
   HeroState,
@@ -11,6 +12,7 @@ import type {
   WarehouseResource,
 } from "@heroes/contracts";
 import { heroCargo } from "../settlement/capacity";
+import { sameCaravanRecord } from "../logistics";
 import { resourceDepositKey } from "../hero/pickupResource";
 import { transferGold } from "../economy/transfer";
 import { depositIntoBank, requestBankWithdrawal } from "../economy/bank";
@@ -84,6 +86,14 @@ export const ENGINE_EVENT_SYNC_CLASS: Record<EngineEvent["type"], EngineEventSyn
   WagonsAssigned: "ignore",
   WagonsBought: "ignore",
   TradeRouteCreated: "apply",
+  // The daily tick of a caravan's own record (logistics.ts
+  // advanceTradeRoutes, run by advanceRound inside EndTurn). "apply": the
+  // server's post-wrap record rides the event verbatim and the applier
+  // assigns it (targeted construction), because no replay can re-derive a
+  // leg's path -- A* over the rebuilt map plus the wrap's leftover movement.
+  // The endpoint stores the wrap moved are NOT part of it; they ride the
+  // TurnEnded boundary, like every other minimal-payload kind.
+  CaravanAdvanced: "apply",
   TradeRouteUpdated: "ignore",
   TradeRouteRemoved: "ignore",
   UnitsRecruited: "apply",
@@ -298,6 +308,41 @@ function applyTradeRouteCreated(
       players: state.players.map((p) =>
         p.id === actor ? { ...p, wagonsUnassigned: unassigned - wagons } : p,
       ),
+      dirty: true,
+    },
+    outcome: "applied",
+  };
+}
+
+// CaravanAdvanced carries the route's whole caravan record verbatim and the
+// applier ASSIGNS it -- one field of one route, the TradeRouteCreated pattern
+// rather than a reducer re-run, because nothing can re-derive the record: a
+// leg's path is A* over the map plus whatever of the wrap's movement budget
+// the delivery left over, and only the server ran that. `caravan: null` (the
+// cart reached home and unloaded) assigns the same way. The row's
+// loaded/delivered amounts are deliberately not re-credited to the endpoint
+// stores: a lost origin reroutes a return load to the owner's nearest
+// settlement, a target this route-level payload cannot name, so the stores
+// keep the boundary rule every other minimal-payload kind follows
+// (ResourcesTransferred, WagonsBought). An exact duplicate -- the route
+// already holding that record -- is what an already-applied event looks like
+// from behind, so it is a noop; an unknown route id means this client's state
+// drifted (a resync already took the route away, or the creation row never
+// reached it) and the caller refetches.
+function applyCaravanAdvanced(
+  state: GameState,
+  routeId: TradeRouteId,
+  caravan: CaravanState | null,
+): ApplyEngineEventResult {
+  const routes = state.tradeRoutes ?? [];
+  const existing = routes.find((r) => r.id === routeId);
+  if (!existing) return resync(state);
+  if (sameCaravanRecord(existing.caravan, caravan)) return { state, outcome: "noop" };
+  const next: CaravanState | null = caravan ? { ...caravan, path: caravan.path.map((t) => ({ ...t })) } : null;
+  return {
+    state: {
+      ...state,
+      tradeRoutes: routes.map((r) => (r.id === routeId ? { ...r, caravan: next } : r)),
       dirty: true,
     },
     outcome: "applied",
@@ -529,6 +574,9 @@ export function applyEngineEvent(state: GameState, event: EngineEvent): ApplyEng
 
     case "BattleOffered":
       return applyBattleOffered(state, event.attackerId, event.defenderId);
+
+    case "CaravanAdvanced":
+      return applyCaravanAdvanced(state, event.routeId, event.caravan);
 
     case "ResourcePickedUp":
       return applyResourcePickedUp(

@@ -15,17 +15,20 @@ export interface GarrisonEventBridgeDeps {
 // The slice of the engine event stream this bridge carries into the local
 // TurnController: garrison writes (UnitsRecruited/UnitsTransferred arrive as
 // applied deltas), trade-route creation (TradeRouteCreated likewise arrives
-// as an applied delta, targeted-constructed from its payload), and
-// settlement-garrison battle outcomes (SettlementBattleResolved is not
-// derivable from its payload, so it reaches the controller as the
-// full-refetch snapshot behind mp:resynced). Other engine kinds keep their
-// existing transport (mergeFromEndTurn / game load).
+// as an applied delta, targeted-constructed from its payload), a caravan's
+// own daily tick (CaravanAdvanced, the same targeted construction, so a
+// remote map's cart walks its legs mid-turn instead of standing still until
+// the boundary), and settlement-garrison battle outcomes
+// (SettlementBattleResolved is not derivable from its payload, so it reaches
+// the controller as the full-refetch snapshot behind mp:resynced). Other
+// engine kinds keep their existing transport (mergeFromEndTurn / game load).
 function isBridgedDelta(event: EngineEvent): boolean {
   // BattleOffered: a server-offered defender battle must flip the client into the BATTLE phase so the defender's choice modal opens.
   return (
     event.type === "UnitsRecruited" ||
     event.type === "UnitsTransferred" ||
     event.type === "TradeRouteCreated" ||
+    event.type === "CaravanAdvanced" ||
     event.type === "BattleOffered" ||
     event.type === "BankGoldMoved"
   );
