@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { connect, createServer } from "node:net";
 import { mkdirSync, writeFileSync, existsSync, readFileSync, unlinkSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { nodeToolCommand, toolEntry } from "./resolve-tool-entry.mjs";
 
@@ -12,6 +13,19 @@ const REQUEST_PATH = resolve(LOCAL_DIR, ".test-request.json");
 // visible console window when it does not inherit one, and that window takes
 // the foreground with it.
 const TSX = nodeToolCommand("tsx");
+
+// The request file is written FOR ONE CHILD and read by that child at import
+// time. It used to be identified by mtime alone (test/_request.ts's 30s
+// window), which meant a DIRECT-run suite (`npm run test:cityview`,
+// test:settlements, test:resourcePickup) started within 30s of a wrapper entry
+// inherited the DEAD run's ports: measured 2026-11-03, `npm run test:settlements`
+// brought its API up on the previous run's 65020 while vite proxied .env's
+// 56776, so every page fetch died with ECONNREFUSED and the suite looked red
+// for an environmental reason. The token below is handed to this run's child
+// through the environment, so a file that was not written for THIS process is
+// ignored no matter how fresh it is.
+const REQUEST_TOKEN_ENV = "HEROES_TEST_REQUEST_TOKEN";
+const REQUEST_TOKEN = randomBytes(12).toString("hex");
 
 const ENTRIES = {
   smoke: "test/smoke.ts",
@@ -86,6 +100,7 @@ function writeRequest(entry, ports, opts) {
     autoClose: !!opts.autoClose,
     shutdownAfterMs: opts.shutdownAfterMs ?? null,
     extra: opts.extra ?? {},
+    token: REQUEST_TOKEN,
   };
   writeFileSync(REQUEST_PATH, JSON.stringify(payload, null, 2));
   return payload;
@@ -102,6 +117,22 @@ function readRequest() {
 
 function clearRequest() {
   try { if (existsSync(REQUEST_PATH)) unlinkSync(REQUEST_PATH); } catch {}
+}
+
+// The request file must not outlive the run that wrote it. Every exit path is
+// covered: `exit` fires for a normal return, an unhandled throw and an explicit
+// process.exit (which is why the exit code below is applied with
+// process.exitCode + an explicit exit AFTER the try/finally, and never with
+// process.exit inside it -- process.exit inside the try used to skip the
+// finally, and the file was left behind with the dead run's ports on it).
+function installRequestCleanup() {
+  process.on("exit", clearRequest);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.on(signal, () => {
+      clearRequest();
+      process.exit(130);
+    });
+  }
 }
 
 // A chained `all` run reuses the same api/client ports for every entry
@@ -160,12 +191,16 @@ async function runOne(entry, opts) {
     // environment (loadEnv gives process.env precedence over .env), so the
     // dev-server proxy must target THIS entry's ephemeral API port, not the
     // .env value some other environment may hold.
+    // REQUEST_TOKEN_ENV is what makes the request file above belong to THIS
+    // child: test/_request.ts honours the file only when it carries the token
+    // this process was handed, so a leftover from a dead run is ignored.
     const child = spawn(TSX.cmd, [...TSX.args, tsFile], {
       cwd: ROOT,
       stdio: "inherit",
       env: {
         ...process.env,
         ...req,
+        [REQUEST_TOKEN_ENV]: REQUEST_TOKEN,
         API_PORT: String(req.apiPort),
         CLIENT_PORT: String(req.clientPort),
         NODE_NO_WARNINGS: "1",
@@ -189,11 +224,68 @@ async function runOne(entry, opts) {
   });
 }
 
+// Prints the run's whole verdict, including what did NOT run. `npm run test:all`
+// used to abort at the first red entry with nothing but the failing entry's own
+// output, so a partial pass read as a full one: measured 2026-11-03, a red
+// `settlers` entry ended the chain and towncenter + visual + `npm run test:unit`
+// silently never ran.
+function printReport(suiteLabel, results, opts) {
+  const failed = results.filter((r) => r.status === "fail");
+  const notRun = results.filter((r) => r.status === "notRun");
+  console.log(`\n===== ${suiteLabel} report =====`);
+  for (const r of results) {
+    const verdict = r.status === "pass" ? "PASS" : r.status === "fail" ? `FAIL (${r.detail})` : "DID NOT RUN";
+    console.log(`>> [${suiteLabel}] verdict: ${r.entry} ${verdict}`);
+  }
+  console.log(
+    `>> [${suiteLabel}] ${results.filter((r) => r.status === "pass").length} passed, ` +
+      `${failed.length} failed, ${notRun.length} did not run`,
+  );
+  console.log(`>> [${suiteLabel}] DID NOT RUN: ${notRun.length === 0 ? "(none)" : notRun.map((r) => r.entry).join(", ")}`);
+  if (notRun.length > 0) {
+    console.log(
+      `>> [${suiteLabel}] those ${notRun.length} entr${notRun.length === 1 ? "y" : "ies"} were NOT verified by this run: ` +
+        `do not read this run as a full pass.`,
+    );
+  }
+  if (opts.chainAfterAll && (failed.length > 0 || notRun.length > 0)) {
+    console.log(
+      `>> [${suiteLabel}] \`npm run test:all\` chains \`npm run test:unit\` after this runner and tests stop at its ` +
+        `non-zero exit: test:unit did NOT run.`,
+    );
+  }
+}
+
+// Writes the request file exactly as runOne does and leaves the last one in
+// place: a real run's file is cleared by the RUNNER's exit path, never by the
+// entry, so the dry run must exercise that same path (a per-entry clear here
+// would hide a runner that fails to clean up after itself).
+async function dryRunAll(entries, opts) {
+  const results = [];
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const ports = await allocatePorts();
+    const req = writeRequest(entry, ports, opts);
+    console.log(`>> [dry-run] ${entry} -> ${ENTRIES[entry]} api=${req.apiPort} client=${req.clientPort} request @ ${REQUEST_PATH}`);
+    if (opts.failAt && entry === opts.failAt) {
+      results.push({ entry, status: "fail", detail: "exited code=1 signal=null (--fail-at)" });
+      if (opts.stopOnFail) {
+        for (const rest of entries.slice(i + 1)) results.push({ entry: rest, status: "notRun" });
+        break;
+      }
+      continue;
+    }
+    results.push({ entry, status: "pass" });
+  }
+  printReport(opts.suiteLabel, results, opts);
+  return results.some((r) => r.status === "fail") ? 1 : 0;
+}
+
 async function main() {
   const args = process.argv.slice(2);
   if (args.length === 0) {
-    console.error("usage: node tools/run-test.mjs <smoke|multiplayer|cityview|settlements|districts|logpanel|logisticsCaravan|uncharted|heroVariants|heroTrade|settlers|towncenter|visual|aiCharter|all> [--auto-close] [--shutdown-after-ms=N] [--update-baselines]");
-    process.exit(2);
+    console.error("usage: node tools/run-test.mjs <smoke|multiplayer|cityview|settlements|districts|logpanel|logisticsCaravan|uncharted|heroVariants|heroTrade|settlers|towncenter|visual|aiCharter|all> [--auto-close] [--shutdown-after-ms=N] [--update-baselines] [--stop-on-fail] [--dry-run] [--fail-at=<entry>]");
+    return 2;
   }
 
   const cmd = args[0];
@@ -206,7 +298,19 @@ async function main() {
     extra: {
       updateBaselines: args.includes("--update-baselines"),
     },
+    stopOnFail: args.includes("--stop-on-fail"),
+    dryRun: args.includes("--dry-run"),
+    failAt: (() => {
+      const a = args.find((x) => x.startsWith("--fail-at="));
+      return a ? a.split("=")[1] : null;
+    })(),
+    suiteLabel: cmd,
+    chainAfterAll: cmd === "all",
   };
+
+  installRequestCleanup();
+  // Start clean: whatever wrote the file before this process is not this run's.
+  clearRequest();
 
   // Best-effort: allocate ports via the existing script so .env is fresh.
   try {
@@ -217,23 +321,65 @@ async function main() {
     });
   } catch {}
 
+  const entries = cmd === "all" ? ALL_ORDER : [cmd];
+  if (cmd !== "all" && !ENTRIES[cmd]) {
+    console.error(`>> run-test FAILED: unknown entry: ${cmd}`);
+    return 2;
+  }
+
+  let code = 0;
   try {
-    if (cmd === "all") {
-      for (const e of ALL_ORDER) {
-        console.log(`\n===== ${e} =====`);
-        await runOne(e, opts);
+    if (opts.dryRun) {
+      code = await dryRunAll(entries, opts);
+    } else if (cmd === "all") {
+      const results = [];
+      for (let i = 0; i < ALL_ORDER.length; i++) {
+        const entry = ALL_ORDER[i];
+        console.log(`\n===== ${entry} =====`);
+        try {
+          await runOne(entry, opts);
+          results.push({ entry, status: "pass" });
+        } catch (e) {
+          results.push({ entry, status: "fail", detail: e?.message ?? String(e) });
+          if (opts.stopOnFail) {
+            for (const rest of ALL_ORDER.slice(i + 1)) results.push({ entry: rest, status: "notRun" });
+            break;
+          }
+        }
       }
+      printReport(cmd, results, opts);
+      code = results.some((r) => r.status === "fail") ? 1 : 0;
     } else {
-      await runOne(cmd, opts);
+      const results = [];
+      try {
+        await runOne(cmd, opts);
+        results.push({ entry: cmd, status: "pass" });
+      } catch (e) {
+        results.push({ entry: cmd, status: "fail", detail: e?.message ?? String(e) });
+      }
+      printReport(cmd, results, opts);
+      code = results.some((r) => r.status === "fail") ? 1 : 0;
     }
-    console.log(">> run-test OK");
-    process.exit(0);
   } catch (e) {
     console.error(">> run-test FAILED:", e?.message ?? e);
-    process.exit(1);
+    code = 1;
   } finally {
     clearRequest();
   }
+
+  console.log(code === 0 ? ">> run-test OK" : ">> run-test FAILED");
+  return code;
 }
 
-main();
+main().then(
+  (code) => {
+    // Deliberately outside the try/finally above: process.exit() inside it
+    // would skip the finally and leave the request file behind.
+    process.exit(code);
+  },
+  (err) => {
+    console.error(">> run-test FAILED:", err?.message ?? err);
+    clearRequest();
+    process.exit(1);
+  },
+);

@@ -16,13 +16,18 @@ import { constants, loadRequest, type TestRequest } from "./_request";
  * entries always run against a per-worktree dev stack on per-worktree ports
  * and a per-worktree database.
  *
- * The rule: nothing is guessed. The ports may come from a fresh
- * local/.test-request.json (written by tools/run-test.mjs for the run it is
- * about to spawn -- the same precedence as getApiPort/getClientPort) or from
- * API_PORT/CLIENT_PORT in the environment; the database must come from
- * PGDATABASE. Anything missing refuses the run with a non-zero exit BEFORE
- * the first side effect -- no HTTP request, no Postgres connection, no dev
- * server spawned, no report written.
+ * The rule: nothing is guessed. The ports may come from local/.test-request.json
+ * (written by tools/run-test.mjs for the run it is about to spawn -- the same
+ * precedence as getApiPort/getClientPort) or from API_PORT/CLIENT_PORT in the
+ * environment; the database must come from PGDATABASE. Anything missing refuses
+ * the run with a non-zero exit BEFORE the first side effect -- no HTTP request,
+ * no Postgres connection, no dev server spawned, no report written.
+ *
+ * These entries are BY-HAND runs, so they are never spawned by the wrapper and
+ * never hold its token: loadRequest() ignores a request file that was not
+ * written for this process (test/_request.ts), which is why a leftover file from
+ * some other run no longer resolves this run's ports. Pass API_PORT /
+ * CLIENT_PORT explicitly.
  */
 
 /** The old fallbacks, named here so the refusal can quote exactly what it refuses to guess. */

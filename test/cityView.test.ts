@@ -17,6 +17,7 @@ import {
   reapPreviousRunPids,
   clearRegisteredPids,
 } from "./_request";
+import { commandsInFlight, waitForCommandsSettled, watchCommands } from "./helpers/commandBarrier";
 
 const API_PORT = getApiPort(4000);
 const WEB_PORT = getClientPort(5173);
@@ -66,6 +67,17 @@ reapPreviousRunPids();
 async function tailLog(label: string): Promise<string> {
   try { return readFileSync(`test/${label}.log`, "utf8").slice(-500); }
   catch { return "(no log)"; }
+}
+
+// The client commits with fire-and-forget command POSTs and the API answers
+// only after that command's transaction has committed, so a server read or a
+// SQL fixture write taken while one is outstanding samples a value that is
+// still moving. Every such site below waits for the page's POSTs to have been
+// answered first (test/helpers/commandBarrier.ts). A timeout is reported, not
+// swallowed: the assertion that follows still sees the real (unsettled) value.
+async function awaitCommandSettled(page: Page): Promise<void> {
+  if (await waitForCommandsSettled(page)) return;
+  console.warn(`>> server busy: ${commandsInFlight(page)} command POST(s) unanswered after 30s -- reading anyway`);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -640,6 +652,12 @@ async function seedWorkforceFixture(page: Page, buildings: Array<Record<string, 
   const name = currentGameName;
   assert(name, "active game name must be known before seeding");
   const seedOnce = async (): Promise<void> => {
+    // The seed is a SQL write into the same column every command's transaction
+    // rewrites, so it must not be issued while one is in flight: an unawaited
+    // POST that commits after this UPDATE would replace the fixture with the
+    // state it loaded before it. Wait for the page's command POSTs to have been
+    // answered first (test/helpers/commandBarrier.ts).
+    await awaitCommandSettled(page);
     const r = await db.query(`SELECT settlements FROM games WHERE name = $1`, [name]);
     assert(r.rows[0], `game ${name} missing from db`);
     const settlements = r.rows[0].settlements as Record<string, { buildings?: unknown[]; population?: number; ownerId: number | null; districts?: Record<string, unknown>; gold?: number; warehouse?: Record<string, number> }>;
@@ -687,6 +705,7 @@ async function serverSettlement(page: Page, name: string, sid: string): Promise<
   buildings: Array<{ gx: number; gy: number; kind: string; workers?: number }>;
   stacks?: Array<{ entries: Array<{ count: number }> }>;
 }> {
+  await awaitCommandSettled(page);
   return page.evaluate(async ({ name, sid }) => {
     const res = await fetch(`/api/games/${encodeURIComponent(name)}`);
     const row = await res.json();
@@ -702,6 +721,7 @@ function recruitedTotal(settlement: { stacks?: Array<{ entries: Array<{ count: n
 }
 
 async function serverDraft(page: Page, name: string, sid: string, gx: number): Promise<number | undefined> {
+  await awaitCommandSettled(page);
   return page.evaluate(async ({ name, sid, gx }) => {
     const res = await fetch(`/api/games/${encodeURIComponent(name)}`);
     const row = await res.json() as { settlements: Record<string, { buildings?: Array<{ gx: number; draft?: Record<string, number> }> }> };
@@ -723,6 +743,12 @@ async function waitForServerStaffing(
   settlementId: string,
   expected: Array<{ gx: number; workers: number | undefined }>,
 ): Promise<void> {
+  // The budget must be spent on the VALUE, not on the command that produces it:
+  // wait for the page's own POSTs to have been answered before the deadline
+  // starts, or a slow commit (measured: 1-2 AssignWorkers POSTs still in flight
+  // when this wait began) consumes the whole 5s without the state ever being
+  // sampled as it settles.
+  await awaitCommandSettled(page);
   const deadline = Date.now() + 5000;
   let last: { buildings: Array<{ gx: number; gy: number; kind: string; workers?: number }> } | null = null;
   while (Date.now() < deadline) {
@@ -1654,6 +1680,9 @@ async function run() {
 
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    // Every server read/write this suite takes is gated on the page's command
+    // POSTs having been answered -- see test/helpers/commandBarrier.ts.
+    watchCommands(page);
 
     // This suite brings its own game. It used to rely on the client: a boot on
     // an empty localStorage cache silently started a `starter-*` game, and the
