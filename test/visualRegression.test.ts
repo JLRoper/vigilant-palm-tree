@@ -533,6 +533,54 @@ async function runBattleArenaScene(
   );
 }
 
+// ── The FIRST scene's own precondition: a boot account that owns a game ─────
+//
+// adventure-overview's frame contains the one-time first-turn hint
+// (src/screens/shared/firstTurnHint.ts -- the 4,438-px panel at the bottom
+// centre), and the committed baseline records it there. Whether it is PRESENT,
+// though, is a property of the DATABASE rather than of the scene: the client's
+// boot reads GET /api/games and, when the account owns NO game at all, starts a
+// `starter-*` game of its own (GameSessionManager.initBackend's
+// `if (serverGames.length === 0) await this.createFreshStarter()`). That
+// throwaway game is an ACTIVE game, so firstTurnHint's `maybeShow` runs for it:
+// the hint is displayed, `markFirstTurnHintSeen()` writes
+// heroesJs.firstTurnHint.v1 into localStorage, and the page's next click (this
+// scene's own "New Game" click) dismisses it -- by the time the scene's game is
+// loaded the flag is already set, so the panel never appears and the capture is
+// missing 4,438 px of the baseline.
+//
+// Measured 2026-11-03 on github/main d70adae (0.44.0), this scene alone:
+//   * four EMPTY databases: 4,438 / 4,438 / 4,438 / 4,438 px (0.433%), every
+//     page booting into activeGameName `starter-*` with the hint already marked
+//     seen and hidden at capture time;
+//   * four REUSED databases: 0 / 0 / 0 / 8 px, every page booting with
+//     activeGameName null;
+//   * an empty database handed ONE game row before boot: 0 px, hint on screen.
+// With the pin below in place, four fresh and four reused databases all measure
+// 0 px. Never re-cut the baseline to absorb this: the difference is the
+// presence of a UI panel, not drift.
+async function pinBootAccountHasAGame(anchorName: string): Promise<void> {
+  const ctx = await pwRequest.newContext();
+  try {
+    const listed = await ctx.get(`${API_URL}/api/games`);
+    if (!listed.ok()) throw new Error(`GET /api/games -> ${listed.status()}`);
+    const games = (await listed.json()) as unknown[];
+    if (games.length > 0) return;
+    const created = await ctx.post(`${API_URL}/api/games`, {
+      data: { name: anchorName, seed: SEED, humanSlots: 1, enemySlots: 0 },
+    });
+    if (!created.ok()) throw new Error(`POST /api/games (${anchorName}) -> ${created.status()}`);
+    // Assert the postcondition against the AUTHORITY, not the create response:
+    // an anchor that silently failed to land would leave this scene in exactly
+    // the first-run state the pin exists to remove.
+    const after = await ctx.get(`${API_URL}/api/games`);
+    const afterGames = after.ok() ? ((await after.json()) as unknown[]) : [];
+    if (afterGames.length === 0) throw new Error(`boot anchor ${anchorName} did not land: GET /api/games is still empty`);
+  } finally {
+    await ctx.dispose();
+  }
+}
+
 async function run(): Promise<void> {
   let exitCode = 1;
   let browser: Browser | undefined;
@@ -553,7 +601,25 @@ async function run(): Promise<void> {
     browser = await chromium.launch();
     const context = await browser.newContext({ viewport: VIEWPORT, reducedMotion: "reduce" });
 
+    // The boot account is pinned BEFORE this scene's first page exists -- the
+    // client decides whether to start a game of its own at boot, so the state
+    // has to be right before the page loads (see pinBootAccountHasAGame).
+    await pinBootAccountHasAGame(`${GAME_NAME}-boot-anchor`);
+
     await withPageRetry(context, "adventure-overview", async (page) => {
+      // The pin above is only worth anything if it actually held. A page that
+      // booted into a game this scene did not create is a page that has already
+      // consumed the one-time first-turn hint the baseline records, and it
+      // would otherwise be captured as a 4,438-px "diff" that is neither drift
+      // nor a regression. Assert the documented boot contract instead (#307:
+      // with games on the server, an empty profile lands on the home overlay
+      // with activeGameName still null).
+      const bootedInto = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName ?? null);
+      if (bootedInto != null) {
+        throw new Error(
+          `the page booted into "${bootedInto}" before this scene created anything: the boot account was empty, so the client started its own game and consumed the one-time first-turn hint this capture pins`,
+        );
+      }
       await dismissHomeAndCreateGame(page, GAME_NAME, SEED);
       await selectHeroAndHover(page);
       await captureAndCompare("adventure-overview", page);
