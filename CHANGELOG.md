@@ -10,9 +10,14 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.39.11] - 2026-11-03
+## [0.39.12] - 2026-11-03
 
 the settings panel's eight slider rows are built by one labelled-slider-row helper that constructs each row's name line and its slider together, so a row can no longer be built without its name -- the round-4 F1 defect was one row doing exactly that while the others were fixed around it. No behaviour change: the rendered panel is byte-identical before and after, and the settings suite pins the shape (27 checks, was 26).
+
+## [0.39.11] - 2026-11-03
+
+- Logistics: the wagon steppers no longer stay pressable when the engine can only refuse. The route row's +1 is off with an empty unassigned-wagon pool, its −1 is off on a one-wagon route, and the hero's cargo/treasury −1 is off for a slot the hero holds nothing in — each carrying the panel's own sentence for that refusal.
+- Engine: the one-wagon route floor is one exported constant (`MIN_TRADE_ROUTE_WAGONS`), read by both the clamp and the client's gate.
 
 ## [0.39.10] - 2026-11-03
 

@@ -6,6 +6,7 @@ import {
   heroResourceCap,
   heroTreasuryWagons,
   heroWagons,
+  MIN_TRADE_ROUTE_WAGONS,
   playerTreasuryWagonsOwned,
   playerTreasuryWagonsUnassigned,
   playerWagonsOwned,
@@ -86,8 +87,17 @@ const REJECTION_MESSAGES: Record<string, string> = {
 };
 
 function rejectionToast(action: string, reason: string): void {
-  const known = REJECTION_MESSAGES[reason];
-  showToast(`Logistics — ${action} failed: ${known ?? reason.replace(/_/g, " ")}`, "error");
+  const known = refusalSentence(reason);
+  showToast(`Logistics — ${action} failed: ${known}`, "error");
+}
+
+/**
+ * The panel's own sentence for an engine refusal — ONE vocabulary shared by a
+ * disabled control's title and the toast the same refusal would raise, so a
+ * control's state and its words can never name different reasons.
+ */
+function refusalSentence(reason: string): string {
+  return REJECTION_MESSAGES[reason] ?? reason.replace(/_/g, " ");
 }
 
 function setUnavailable(btn: HTMLButtonElement, title: string): void {
@@ -409,7 +419,12 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
           btn.style.padding = "1px 6px";
           btn.dataset.focus = `hero-wagon-${slot}-${delta > 0 ? "plus" : "minus"}`;
           if (delta > 0 && poolUnassigned <= 0) {
-            setUnavailable(btn, "no unassigned wagons — buy one below");
+            setUnavailable(btn, refusalSentence("not_enough_wagons_unassigned"));
+          } else if (delta < 0 && count <= 0) {
+            // The give-back's impossible case: assignWagons clamps a negative
+            // delta at zero assigned, so an empty slot can only be refused
+            // (not_enough_wagons) — the same channel as the sibling above.
+            setUnavailable(btn, refusalSentence("not_enough_wagons"));
           }
           btn.addEventListener("click", () => {
             const result = opts.actions.assignWagons(hero.id, delta, slot);
@@ -678,7 +693,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         acceptBtn.style.fontSize = "10px";
         acceptBtn.style.padding = "1px 8px";
         if (poolFor(rec.payload) <= 0) {
-          setUnavailable(acceptBtn, "no unassigned wagons — buy one below");
+          setUnavailable(acceptBtn, refusalSentence("not_enough_wagons_unassigned"));
         }
         acceptBtn.addEventListener("click", () => {
           const result = opts.actions.createTradeRoute(rec.from, rec.to, rec.payload, rec.wagons);
@@ -702,7 +717,7 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       // route it stays live and does what its toast already promised: accept
       // what it can, then name every rejection reason (created N, failed M).
       if (!recommendations.some((rec) => poolFor(rec.payload) > 0)) {
-        setUnavailable(acceptAll, "no unassigned wagons — buy one below");
+        setUnavailable(acceptAll, refusalSentence("not_enough_wagons_unassigned"));
       }
       acceptAll.addEventListener("click", () => {
         // Continues past failures (a mid-list rejection used to silently
@@ -840,6 +855,12 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
       label.textContent = `${route.wagons}x ${payloadText}`;
       const controls = document.createElement("div");
       controls.style.cssText = "display:flex;flex:none;align-items:center;gap:4px;";
+      // The row's steppers answer to the engine's own rules, read through its
+      // own accessors: a positive delta draws on the same player-wide
+      // unassigned pool updateTradeRoute clamps against (null = the viewer's
+      // seat has no player row at all, which the engine answers no_player), and
+      // a route always keeps MIN_TRADE_ROUTE_WAGONS wagon.
+      const routePool = player ? playerWagonsUnassigned(player) : null;
       for (const [delta, text] of [
         [-1, "−1"],
         [1, "+1"],
@@ -850,6 +871,14 @@ export function openLogisticsModal(opts: LogisticsModalOptions): void {
         btn.style.fontSize = "10px";
         btn.style.padding = "1px 5px";
         btn.dataset.focus = `route-${route.id}-${delta > 0 ? "plus" : "minus"}`;
+        if (delta > 0 && (routePool === null || routePool <= 0)) {
+          setUnavailable(
+            btn,
+            refusalSentence(routePool === null ? "no_player" : "not_enough_wagons_unassigned"),
+          );
+        } else if (delta < 0 && route.wagons <= MIN_TRADE_ROUTE_WAGONS) {
+          setUnavailable(btn, refusalSentence("route_needs_a_wagon"));
+        }
         btn.addEventListener("click", () => {
           const result = opts.actions.updateTradeRoute(route.id, { wagonsDelta: delta });
           if (!result.ok) rejectionToast("route update", result.reason);
