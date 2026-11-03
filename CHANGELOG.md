@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.39.15] - 2026-11-03
+
+the settings panel's eight slider rows are built by one labelled-slider-row helper that constructs each row's name line and its slider together, so a row can no longer be built without its name -- the round-4 F1 defect was one row doing exactly that while the others were fixed around it. No behaviour change: the rendered panel is byte-identical before and after, and the settings suite pins the shape (27 checks, was 26).
+
 ## [0.39.14] - 2026-11-03
 
 games.turn is gone: a column written once by its own DEFAULT 1 (POST /games' INSERT never named it) and read by nothing, so every save claimed "turn 1" while the round advanced -- 329 games on the shared database held one distinct turn value against rounds up to 1996, and driving End Turn across two real seats took the round 1 -> 4 with turn never leaving 1. Dropped in server/migrations/036_drop_games_turn.sql, removed from schema.sql, from GAME_COLUMNS/GameRow/FullGameRow and from the client's Game payload, with the drop pinned by a new test/migrations/migration.test.ts case. The round (with day and active_player_id) is the only progress field a save carries. No turn or round semantics changed.
