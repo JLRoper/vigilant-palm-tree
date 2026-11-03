@@ -1,5 +1,6 @@
 import type { BuildingDef, BuildingKind, PlayerId, ResourceType, SettlementState } from "@heroes/contracts";
 import { buildingSettlementEffects } from "../buildingRegistry";
+import { factionOutputScale, type FactionEconomySeat } from "../economy/factionEconomy";
 import { cellMultiplier, spotResourceAt } from "./cityMultipliers";
 import { effortFraction } from "./workforce";
 
@@ -100,6 +101,7 @@ export function producerTurnOutput(
   building: BuildingDef,
   settlement: Pick<SettlementState, "q" | "r" | "citySpots">,
   seed: number,
+  seat?: FactionEconomySeat,
 ): ProducerOutput | null {
   if (!isProducerKind(building.kind)) return null;
   if (building.construction) return null;
@@ -117,19 +119,27 @@ export function producerTurnOutput(
     spots: settlement.citySpots,
   });
   const effort = effortFraction(building);
+  // The seat's faction scales the BASE the building pays. Scale 1 (a human
+  // seat, a neutral, a legacy seat with no faction, or a faction with no entry
+  // for this resource) leaves `scaledBase` === `basePerTurn`, so the
+  // expression below is the pre-faction arithmetic exactly.
+  const scale = factionOutputScale(seat, resource);
+  const scaledBase = scale === 1 ? basePerTurn : basePerTurn * scale;
   return {
     resource,
     multiplier,
     basePerTurn,
     effort,
-    amount: Math.round(basePerTurn * multiplier * effort * 100) / 100,
+    amount: Math.round(scaledBase * multiplier * effort * 100) / 100,
   };
 }
 
-export function buildingFallbackGold(b: BuildingDef): number {
+export function buildingFallbackGold(b: BuildingDef, seat?: FactionEconomySeat): number {
   if (b.construction) return 0;
   if (isProducerKind(b.kind)) return 0;
   const flat = buildingSettlementEffects(b.kind, b.level).goldPerTurn;
   if (!(flat > 0)) return 0;
-  return Math.round(flat * effortFraction(b) * 100) / 100;
+  const scale = factionOutputScale(seat, "gold");
+  const scaled = scale === 1 ? flat : flat * scale;
+  return Math.round(scaled * effortFraction(b) * 100) / 100;
 }

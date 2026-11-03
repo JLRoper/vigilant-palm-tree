@@ -83,6 +83,19 @@ Each settlement produces:
 
 Initial castles start with population 500, gold tax 1, morale 100, and a seeded starter city (town hall, farm field, 2 houses, 2 woodcutter huts, stone mine, farmhouse — 10 wood + 2 stone/turn). Charter-founded settlements start with population 50, gold tax 1, morale 50, `autoTrade: false`, and a free starter set committed when the city view first opens.
 
+### Faction economy (2026-11-03)
+
+The seat's roster faction scales what its buildings pay. `FactionDef.economy` (`packages/contracts/src/factions.ts`) is one optional percentage table — `goldPct`, `foodPct`, `woodPct`, `stonePct`, `ironPct`, `arcanePct` — and `packages/engine/src/economy/factionEconomy.ts` is the single seam that reads it (`factionOutputScale`, threaded through `producerTurnOutput` / `buildingFallbackGold` / `produceSettlementResources` / `settlementProductionRates` / `settlementIncome` / `effectiveSettlementIncome` as one optional `seat` argument). The multiplier is applied to the **base** a building pays, before the cell multiplier and the staffing effort.
+
+| Faction | Gold | Food | Wood | Stone | Iron | Arcane | Gives up |
+|---|---|---|---|---|---|---|---|
+| The Crownlands (human) | — | — | — | — | — | — | nothing: the neutral baseline, and no `economy` key at all |
+| The Ironmark Holds | +10% | −10% | — | +15% | +25% | — | food income (the slow wall feeds itself last) |
+| The Verdant Wild | −10% | +25% | +15% | — | — | — | gold income (the forest pays in growth, not coin) |
+| The Ashen Court | +10% | −15% | — | — | — | +25% | food income (the largest penalty in the set) |
+
+Neutral is the default: a faction with no key, a seat with no `factionId`, and a neutral settlement all resolve to a multiplier of exactly 1, so a pre-faction save and a human game pay exactly what they paid before. The modifier never touches building costs, build times, unit upkeep, combat statistics or map generation, and a settlement is always produced at **its owner's** faction — an AI seat's settlements run the AI seat's economy, not the acting player's. `test/engine/factionEconomy.test.ts` pins the table, the neutrality and the per-faction totals.
+
 ### Design Intent vs. As-Built Income
 
 The design's market-income effect is represented by `market.goldPerTurn` and by the `effectiveSettlementIncome()` projection helper; since 2026-10-18 the End Turn path **pays it** — `produceSettlementResources` credits the market's flat `goldPerTurn` **× staffing effort** for every completed non-producer building, in the main city and in [districts](./settlements.md#city-districts), and `effectiveSettlementIncome()` skips under-construction buildings on both halves — so projection and accrual agree. Finding F2 in [`resource-gathering.md`](./resource-gathering.md) is **closed**.

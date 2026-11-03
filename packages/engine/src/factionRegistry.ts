@@ -31,6 +31,9 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
       "giant_eagle",
       "eagle_prince",
     ],
+    // The Crownlands are the neutral baseline ON PURPOSE: no `economy` key at
+    // all rather than a table of zeros, so "absent = 1x" is the shape the
+    // type-level default and every existing save/test already exercise.
   },
   ashen: {
     id: "ashen",
@@ -39,6 +42,10 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
     description:
       "A necropolis-confederacy that raises its levies from the barrow fields: fast, fragile attackers, spectral casters, and an elite undead aristocracy backed by bone dragons. No living soldiers — even its bowmen are revenants.",
     palette: { primary: "#2b2b33", secondary: "#e8e0d0", accent: "#ff6b35" },
+    // "Raise cheap, pay in gold": the only faction with an arcane bonus and one
+    // of two with a gold bonus, bought with the largest food penalty in the set
+    // (a gold-and-arcane economy with almost no agriculture).
+    economy: { goldPct: 10, arcanePct: 25, foodPct: -15 },
     roster: [
       "ghoul",
       "bone_pikeman",
@@ -61,6 +68,10 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
     description:
       "Clan-holds carved under the Ironmark peaks: slow, resilient shield lines, hardy beasts, and iron-forged elites — grind them down or be ground. Ranged comes from gunpowder, elites from runeforged tradition.",
     palette: { primary: "#3f5c78", secondary: "#6b7280", accent: "#e0a526" },
+    // "Dig in, then out-produce": the mine faction. Iron and stone above anyone
+    // else, a modest gold bonus (surplus ore and coin both leave the hold), and
+    // a food penalty -- the slow wall feeds itself last.
+    economy: { ironPct: 25, stonePct: 15, goldPct: 10, foodPct: -10 },
     roster: [
       "dwarf_axeman",
       "shield_bearer",
@@ -83,6 +94,10 @@ export const FACTION_REGISTRY: Record<FactionId, FactionDef> = {
     description:
       "Beastkin lodges and grove-wardens: swift woodland troops, long-range archers, and mighty beasts guarded by ancient forest spirits. Builds in wood, pays in favors.",
     palette: { primary: "#3f6212", secondary: "#5c4033", accent: "#d4a017" },
+    // "Move first, take the ground": the farm-and-timber faction. The only
+    // food and wood bonuses in the set, and the only faction that loses gold --
+    // the forest pays in growth, not in coin.
+    economy: { foodPct: 25, woodPct: 15, goldPct: -10 },
     roster: [
       "forest_scout",
       "briar_warden",
