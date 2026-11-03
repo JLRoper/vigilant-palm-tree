@@ -3,7 +3,8 @@ import { SessionManager } from "./SessionManager";
 import { showToast } from "@screens/shared/toast";
 import { pickupRefusalToast } from "@screens/adventure/clickIntent";
 import type { ManualBattleOutcome } from "@screens/combat/arena/openManualBattleArena";
-import type { BattleActionPhase } from "@screens/combat/arena/state";
+import { ARENA_HEARTBEAT_PHASE, type BattleActionRowPhase } from "@screens/combat/arena/state";
+import { startArenaHeartbeat } from "@screens/combat/arena/arenaHeartbeat";
 import { canEndTurn, cleanupDefeatedHeroCharters, endBattlePhase, platoonsHaveTroops, settlementStacks, spellLoadoutForHero, SETTLEMENT_BATTLE_MIN_RETREAT_ROUND, type BattleResult } from "@heroes/engine";
 import type { GameState, HeroBattleVerdict, HeroState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
@@ -290,12 +291,22 @@ export class GameActions {
     // at emit time (seed row = 0), so the per-battle replay order is exact
     // even though the POSTs themselves are fire-and-forget. Failures are
     // swallowed by api.postBattleAction and must never block the arena.
+    //
+    // The arena also posts its own HEARTBEAT row on a timer while it is open
+    // (ARENA_HEARTBEAT_PHASE): the AI driver's wait deadline is an IDLE
+    // window measured from the newest row for this pair, so this is what
+    // keeps a fight the player is still playing from being force-resolved out
+    // from under them -- and what stops the moment the arena closes.
     let actionSeq = 0;
     const telemetry = gameName
-      ? (phase: BattleActionPhase, payload: Record<string, unknown>) => {
+      ? (phase: BattleActionRowPhase, payload: Record<string, unknown>) => {
           void api.postBattleAction(gameName, { attackerId, defenderId, seq: actionSeq++, phase, payload });
         }
       : undefined;
+    const stopHeartbeat =
+      telemetry === undefined
+        ? () => {}
+        : startArenaHeartbeat((at) => telemetry(ARENA_HEARTBEAT_PHASE, { at }));
 
     const { openManualBattleArena } = await import("@screens/combat/arena/openManualBattleArena");
     let closeArena: () => void = () => {};
@@ -316,7 +327,12 @@ export class GameActions {
           telemetry,
         },
       );
-      closeArena = handle.close;
+      closeArena = () => {
+        // The heartbeat is the arena's lifetime: the moment this overlay goes
+        // away the driver's idle window may expire again.
+        stopHeartbeat();
+        handle.close();
+      };
     });
 
     // Only the "applied" result hands the open arena to the caller (its result
@@ -570,7 +586,7 @@ export class GameActions {
       // non-empty defender string).
       let actionSeq = 0;
       const telemetry = gameName
-        ? (phase: BattleActionPhase, payload: Record<string, unknown>) => {
+        ? (phase: BattleActionRowPhase, payload: Record<string, unknown>) => {
             void api.postBattleAction(gameName, { attackerId, defenderId: settlementId, seq: actionSeq++, phase, payload });
           }
         : undefined;

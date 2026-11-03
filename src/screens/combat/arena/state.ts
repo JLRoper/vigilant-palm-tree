@@ -26,6 +26,15 @@ import { hexDistance, type Axial } from "./layout";
 // emitted by openManualBattleArena, not here.
 export type BattleActionPhase = "start" | "move" | "attack" | "retreat" | "surrender" | "spell" | "end";
 
+// The liveness row the arena's own client posts while it is open, and the
+// vocabulary the server's battle-actions route accepts: ARENA_HEARTBEAT_PHASE
+// is not a played action (it changes no state and a future re-simulation
+// consumer must skip it), it is the IDLE-window evidence the AI driver's
+// AI_DEFENDER_WAIT_TIMEOUT_MS reads so an actively fought battle is not
+// force-resolved out from under the player.
+export const ARENA_HEARTBEAT_PHASE = "heartbeat" as const;
+export type BattleActionRowPhase = BattleActionPhase | typeof ARENA_HEARTBEAT_PHASE;
+
 export interface BattleAction {
   phase: BattleActionPhase;
   payload: Record<string, unknown>;

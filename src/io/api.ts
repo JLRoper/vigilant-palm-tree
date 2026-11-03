@@ -13,6 +13,9 @@ import type {
 } from "@heroes/contracts";
 import { getCachedAuth } from "./authStorage";
 import { clearServerDriven } from "./serverDrivenGames";
+// Type-only: the arena's phase vocabulary is the one place the battle-action
+// row shape is declared (state.ts), heartbeat included.
+import type { BattleActionRowPhase } from "@screens/combat/arena/state";
 
 export type {
   GameState,
@@ -304,13 +307,18 @@ export const api = {
   // `false` return (the caller logs it at most), because a dropped telemetry
   // row must never block or fail the arena. v1 validates nothing here and
   // reads nothing back; the future legality-check consumer owns that half.
+  //
+  // "heartbeat" is the arena's liveness row (ARENA_HEARTBEAT_PHASE), not a
+  // played action: it is what tells the server's AI driver
+  // (AI_DEFENDER_WAIT_TIMEOUT_MS, an IDLE window) that the fight is still
+  // being played.
   postBattleAction: async (
     name: string,
     row: {
       attackerId: string;
       defenderId: string;
       seq: number;
-      phase: "start" | "move" | "attack" | "retreat" | "surrender" | "spell" | "end";
+      phase: BattleActionRowPhase;
       payload: Record<string, unknown>;
     },
   ): Promise<boolean> => {
