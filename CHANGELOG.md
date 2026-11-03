@@ -10,6 +10,15 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.50.0] - 2026-11-03
+
+A building now declares the settlement LEVEL it requires, enforced in the one placement gate that already held the faction rule — settlement level gated nothing before, so every one of the 44 registry entries was placeable in a level-1 town.
+
+- `requiredLevel` on the registry entry (default 1) + `buildingRequiredLevel`/`buildingLevelAllowed`; `applyPlaceBuildings` refuses a NEW placement with `settlement_level_too_low`, beside `wrong_faction`. Server, client's optimistic commit and the AI driver all read that one verdict; only a NEW placement is gated, so a building the settlement already holds round-trips and pre-rule saves stay buildable.
+- Bands over the 44 entries — L1 (16, the engine's own tier-1 placements + the producers that keep the upgrades payable), L2 town (18: apartment, warehouse, bank, treasury, arcane font, shipyard and each faction's middle troop buildings), L3 castle (10: mage guild, eyrie, spire of ash, black chapel, dragon boneyard, golem foundry, deep anvil, hearth temple, druid circle, worldroot grove).
+- The build palette states the rule on the row — "Requires a level 2 town — upgrade this settlement to place it" — and keeps the row visible, because the tier is what buys it.
+- Measured absurd end, now closed: at level 3 a settlement's control radius (with its own L3 town hall's +1/level bonus) reaches 6 hexes = 127 hexes = up to 3,150 district city-grid cells beside the 225-cell main grid, and every one of those cells could take a grand building from turn 0. The small end: an L1 keep had all 25 of its faction-legal kinds, including the 400–500g, 6-day grand row.
+
 ## [0.49.0] - 2026-11-03
 
 district roads: a per-tile road GRAPH with welded junctions, at a legible width (was sub-pixel edges)
