@@ -15,9 +15,14 @@
 # steps 1-2 of the setup path, with the same slug rule (lowercased branch, runs
 # of non-alphanumerics to `_`, trimmed, capped at 40). On top of that the setup
 # path also seeds .env from .env.example, allocates this worktree's ports through
-# scripts/allocate-ports.ts, and makes node_modules/.bin resolve -- a freshly cut
+# scripts/allocate-ports.ts, and makes the launchers resolve -- a freshly cut
 # worktree has neither .env nor node_modules, so `tsx`/`tsc`/`vite` are not
-# found until something lays them down.
+# found until something lays them down. It does that by reaching the ONE shared
+# install (the primary checkout's) through the ancestor chain -- npm puts the
+# primary's node_modules/.bin on PATH and node resolves the primary's packages
+# -- so no node_modules and no junction is created in the worktree. When there
+# is only a partial install (packages extracted, launchers gone) the launchers
+# AND node_modules/.package-lock.json are rebuilt from the packages offline.
 #
 # Schema/migration work is still deliberately NOT done here: server/index.ts runs
 # initSchema() on every API boot. Nothing is dropped, truncated or copied.

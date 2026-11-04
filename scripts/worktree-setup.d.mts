@@ -51,6 +51,66 @@ export declare function repairShims(
   log?: (message: string) => void,
 ): { repaired: boolean; written: number };
 
+/** npm's hidden lockfile shape, as written at `node_modules/.package-lock.json`. */
+export interface HiddenLockfile {
+  name?: string;
+  version?: string;
+  lockfileVersion?: number;
+  requires: boolean;
+  packages: Record<string, unknown>;
+}
+
+/**
+ * npm's own `node_modules/.package-lock.json`, derived from the project
+ * `package-lock.json`: the root `""` entry dropped, every other entry kept only
+ * when its directory exists on disk. Byte-for-byte npm's file when written with
+ * the platform line ending. `null` when the lock carries no `packages` map.
+ */
+export declare function hiddenLockfileFrom(
+  lockJson:
+    | {
+        name?: string;
+        version?: string;
+        lockfileVersion?: number;
+        requires?: boolean;
+        packages?: Record<string, unknown>;
+      }
+    | null
+    | undefined,
+  installRoot: string,
+  dirExists?: (path: string) => boolean,
+): HiddenLockfile | null;
+
+/** Regenerate a missing `node_modules/.package-lock.json` from the tracked lock. Additive. */
+export declare function repairHiddenLockfile(
+  installRoot: string,
+  log?: (message: string) => void,
+): { repaired: boolean; entries: number; missing: number };
+
+/**
+ * Restore everything the setup can restore inside an install, offline and
+ * additively: the launchers and the hidden lockfile. Package contents are NOT
+ * restored -- only an `npm install`/`npm ci` re-extracts packages.
+ */
+export declare function repairInstall(
+  installRoot: string,
+  log?: (message: string) => void,
+): { repaired: boolean; shims: { repaired: boolean; written: number } | null; lock: { repaired: boolean; entries: number; missing: number } | null };
+
+/** Whether `child` is `parent` itself or lives under it -- the ancestor walk's precondition. */
+export declare function isInside(parent: string | null | undefined, child: string | null | undefined): boolean;
+
+/**
+ * Make the tools resolve for `root` without ever linking its `node_modules` at
+ * `primary`'s: the share is the ancestor chain. Returns `how` in
+ * `shared | already | installed | skipped | unknown | failed`.
+ */
+export declare function ensureInstall(
+  root: string,
+  primary: string | null,
+  log: (message: string) => void,
+): { how: string; path: string };
+
 export declare function run(
   argv?: string[],
   options?: { root?: string },

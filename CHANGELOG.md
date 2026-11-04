@@ -10,7 +10,7 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.53.8] - 2026-11-04
+## [0.53.9] - 2026-11-04
 
 widen the fixture-naming rule: one module names every database this repo creates, and the guard recognises each shape
 
@@ -22,6 +22,47 @@ Two sweeps of the shared `game_db` container have dropped 234 abandoned database
 - **Per-tree isolation is untouched and nothing was renamed or dropped.** A worktree still gets its own database from its own branch (`game_poc_wtgui_widen_the_fixture_naming_e15607` here), a card still never gets the shared one, and the four families above are exactly the names that already exist — `game_poc_ai_seat`, `game_poc_mpseats`, `game_poc_the_manual_fight_pla`, `game_play_d4a1` and the rest all still match.
 - **Pinned by `test/core/databaseNaming.test.ts`** (8 cases): every naming path's output matches the documented shape *and* the guard, over a table of branches including the `wt/…` and `fix3/…` shapes that would have produced the strays; the guard accepts the four families and rejects the four stray families plus `game_poc_`/`game_poc__x`/an over-long slug/`game_db`/`game_events`; the producers' constants agree with the spelled-out patterns; `databaseNameWarning` stays silent for the repo's own names and quotes every accepted shape for a stray; and a scan of every `PGDATABASE`/`POSTGRES_DB`/`POD_DB_NAME` value written anywhere under `scripts/`, `tools/`, `server/`, `test/`, `docs/`, `docker/`, `.kilo/`, `.github/` and in `.env.example`/`.env.test`/`AGENTS.md`/`README.md`/`docker-compose.yml` (30 names across 520 files) fails on any the guard rejects. Shown red three ways: prefix → `game_wt_` fails the naming-path and constants-vs-patterns cases; a hand-typed `PGDATABASE=game_fix3_all` appended to `scripts/allocate-ports.ts` fails the scan with `scripts/allocate-ports.ts:207  game_fix3_all`; the setup refusal above. `test/core/envGuard.test.ts` gained the case for the by-hand path's warning.
 - Gate: `npm run build`, `npm run lint:deps`, `npm run test:types`, `node tools/docs-check.mjs --changed-from github/main`, `npm run test:unit`, `npm run test:all`.
+## [0.53.8] - 2026-11-04
+
+chore(tooling): the worktree setup creates no junction, and the shim repair restores the hidden lockfile too
+
+A worktree whose `node_modules` is a junction onto the primary checkout's install
+made a routine `git worktree remove` recurse THROUGH that junction and delete
+entries inside the primary's install — `.bin` and `.package-lock.json`
+(dot-prefixed, first) gone, packages intact, `Invalid argument` at the first held
+file. `scripts/worktree-setup.mjs` is what created that junction, so every tree
+the fleet prepared was a trap for the reaper.
+
+**The setup now creates no junction.** It shares the one extracted install
+through the ancestor chain instead: worktrees live under
+`<primary>/.worktrees/<name>`, `npm run` prepends every ancestor's
+`node_modules/.bin` to `PATH`, and node resolves `<primary>/node_modules/<pkg>`
+from any file in the tree — both measured on this box 2026-11-04. A tree with no
+link in it is a tree no reaper can damage, so the root cause is gone for every
+removal path at once (the panel's `git worktree remove`, a hand-run one, and a
+reap script), not just the ones that learn to unlink first. A legacy junction
+found in the tree being prepared is unlinked, its target untouched (Node's
+`rmSync` unlinks a junction; it is git's recursive delete that follows it).
+
+**The repair is now complete.** It restores `node_modules/.bin` (already
+byte-identical to npm's own) AND `node_modules/.package-lock.json`, which nothing
+in the repo ever regenerated — which is why the primary checkout carried 78
+repaired launchers and no hidden lockfile for hours. The hidden lockfile is npm's
+private record of the tree it materialised and is derived the way npm derives it:
+the tracked `package-lock.json` with the root `""` entry dropped and every other
+entry kept only when its directory exists on disk, written with npm's own line
+ending (verified byte-for-byte against a real complete install of this repo).
+What the repair cannot restore is package CONTENTS: a package that is gone or
+empty cannot be re-extracted offline, so a locked-but-absent package is reported
+as such, never invented — `npm install` in the primary is the real repair for
+that, and is still deliberately never run against the shared tree while a
+worktree may be mid-run.
+
+Measured on this changeset: `npm run worktree:setup` from a fresh tree reports
+`node_modules  shared through the primary checkout, no link` and creates nothing
+in the worktree; the primary's missing hidden lockfile was rebuilt (203 installed
+entries, 98 locked-but-absent) and the primary is `installState: complete` again.
+Pinned by `test/core/worktreeSetup.test.ts` and `docs/operations.md`.
 
 ## [0.53.7] - 2026-11-04
 
