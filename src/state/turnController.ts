@@ -683,6 +683,7 @@ export class TurnController {
   }
 
   captureSettlement(heroId: HeroId, settlementId: SettlementId): boolean {
+    const before = this.state.settlements[settlementId];
     const result = captureSettlementReducer(this.state, heroId, settlementId);
     if (!result.captured) return false;
     const previousOwnerId = result.previousOwnerId;
@@ -714,7 +715,7 @@ export class TurnController {
         try {
           await this.hooks.onCaptureSettlement(actor, heroId, settlementId);
         } catch {
-          this.rollbackCapture(heroId, settlementId, previousOwnerId);
+          this.rollbackCapture(heroId, settlementId, previousOwnerId, before);
         }
       },
       hookLabel: "onCaptureSettlement",
@@ -722,8 +723,13 @@ export class TurnController {
     return true;
   }
 
-  private rollbackCapture(heroId: HeroId, settlementId: SettlementId, previousOwnerId: number | null): void {
-    const next = rollbackCaptureSettlement(this.state, heroId, settlementId, previousOwnerId);
+  private rollbackCapture(
+    heroId: HeroId,
+    settlementId: SettlementId,
+    previousOwnerId: number | null,
+    previousSettlement?: SettlementState,
+  ): void {
+    const next = rollbackCaptureSettlement(this.state, heroId, settlementId, previousOwnerId, previousSettlement);
     if (!next) return;
     this.state = next;
     this.hooks.logEvent({
