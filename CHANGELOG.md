@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.52.0] - 2026-11-04
+
+the deposit span is derived from the yield table (1..50 turns of the settlement production each resource pays) and CURRENT_MAP_GEN_VERSION moves to 6 with terrain byte-identical
+
 ## [0.51.3] - 2026-11-04
 
 the level-1 treasury cap (5,000g) now holds the level-1 tier upgrade it gates; a blocked upgrade names the cap only where the Bank/Treasury that clears it can be built

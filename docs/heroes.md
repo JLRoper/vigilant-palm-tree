@@ -54,8 +54,9 @@ The game operates on a **round-based** cycle:
 
 Each hero carries their own gold purse (`hero.gold`), capped by **treasury carts**: `heroGoldCap = treasuryWagons × 500` (`packages/engine/src/settlement/capacity.ts`; soft default 5 carts, migration `023_treasury_wagons.sql`). The carts are a separate slot from the army `wagons` that cap cargo at ×50 per resource — `BuyWagons`/`AssignWagons` take `slot: "cargo" | "treasury"`, and `recruitHero` allocates 5 + 5 from the player's two pools. The cap clamps all three gold landing sites (loot, capture reward, treasury withdrawal — excess stays put, nothing destroyed).
 
-The designer's four ways gold reaches a purse:
+The designer's five ways gold reaches a purse:
 
+- **Pick a deposit up off the adventure map** — a hero standing ON a resource tile takes `min(remaining, cargo room)` off it and leaves the rest on the floor (`PickupResource`, `packages/engine/src/hero/pickupResource.ts`; gold rides the purse, the other five resources ride wagon cargo, so emptying a big tile takes several holds). A tile holds **1..50 turns of the settlement production its own yield pays** — 20..1000 gold, 5..250 arcane — see [resource-gathering.md](./resource-gathering.md) → *The amount a deposit holds*.
 - **Pick up at a city** — deposit/withdraw against a settlement treasury (`transferGold`, same-hex only).
 - **Battle or find on the map** — defeating a hero loots their purse (wagon-capped, cargo included); capturing a settlement pays a reward, clamped to `heroGoldCap`.
 - **Treasure caravans** — a trade route with payload `{ kind: "gold" }` (`wagons × 500` per load, headroom-clamped) delivers into the destination purse or treasury; see [economy.md](./economy.md) → Trade routes & caravans.

@@ -214,12 +214,21 @@ test("the layering is wholesale and idempotent, and clearing it restores raw cos
   assert.equal(map.cost(FAR.q, FAR.r), TERRAIN_COST.grass);
 });
 
-test("roads are derived data: generation is byte-identical and MapGenVersion has not moved", () => {
-  assert.equal(CURRENT_MAP_GEN_VERSION, 5, "MapGenVersion must not move for this change");
+test("roads are derived data: installing them cannot move the generated world", () => {
+  // The version moved to 6 with ADVENTURE P3's yield-derived pickup span, NOT
+  // for this change: a road layering is installed onto an already-generated map
+  // and touches no generation pass, river pass or deposit placement. The hash
+  // below covers terrain, rivers and deposits (placement AND amount) of the
+  // 60-map grid; the AMOUNT half of it moved with that span, the
+  // terrain/river/placement half did not -- `mapGenDigestSweep.test.ts` pins
+  // those two halves separately, and its structural pin is still the value
+  // captured before this card.
+  assert.equal(CURRENT_MAP_GEN_VERSION, 6, "roads do not move MapGenVersion; the pickup span does");
   // FNV-1a over the generated tiles, placed rivers and placed resources of
   // 60 maps (2 sizes x 5 versions x seeds 1..6). Captured on this change's
   // parent commit (github/main a8ac9bf) with the same script and identical --
   // installing a road layering onto an already-generated map cannot move it.
+  // Re-pinned once, for the amount half only (2e36f1b3 -> 74ce29c5).
   const fnv1a = (s: string): string => {
     let h = 0x811c9dc5;
     for (let i = 0; i < s.length; i++) {
@@ -240,9 +249,9 @@ test("roads are derived data: generation is byte-identical and MapGenVersion has
     }
   }
   assert.equal(parts.length, 60);
-  assert.equal(fnv1a(parts.join("|")), "2e36f1b3", "generated terrain/rivers/resources moved");
+  assert.equal(fnv1a(parts.join("|")), "74ce29c5", "generated terrain/rivers/resources moved");
   // And a fresh map carries no road layering of its own.
-  assert.equal(new GameMap(42, "small", 5).roadTiles, null);
+  assert.equal(new GameMap(42, "small", 6).roadTiles, null);
 });
 
 test("the fixture's road really is a road: the network tiles are what got priced", () => {

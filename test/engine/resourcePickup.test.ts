@@ -2,15 +2,18 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   GameMap,
-  RESOURCE_AMOUNT_MAX,
-  RESOURCE_AMOUNT_MIN,
+  RESOURCE_TURNS_MAX,
+  RESOURCE_TURNS_MIN,
+  RESOURCE_YIELD,
   heroCargo,
   heroGoldCap,
   heroResourceCap,
   pickupResource,
   previewResourcePickup,
   resourceAmountFor,
+  resourceAmountRangeFor,
   resourceRemainingOn,
+  resourceTurnsFor,
   WAGON_RESOURCE_CAPACITY,
   type ResourceType,
 } from "@heroes/engine";
@@ -18,8 +21,9 @@ import { makeHero, makeState } from "../charter/_helpers";
 
 // Heroes picking the resources off the tiles they stand on (M-MAJOR-1: the
 // verb that did not exist). Four rules this file pins, all of them the
-// reader's: the tile's amount is 5-500 and derived from the seed; a hero must
-// STAND on the tile; what moves is min(remaining, cargo room) with the
+// reader's: the tile's amount is derived from the seed and is a whole number of
+// turns of its own resource's yield (1..50, the yield-derived span); a hero
+// must STAND on the tile; what moves is min(remaining, cargo room) with the
 // remainder left on the floor; and a pickup never touches the tile's resource
 // type, so the city view's deposit (type, workedBy, yield) reads the same
 // before and after.
@@ -44,13 +48,13 @@ function amountAt(map: GameMap, q: number, r: number): number {
   return tile!.amount;
 }
 
-test("a resource tile's amount is derived from the seed and the tile, inside 5-500", () => {
+test("a resource tile's amount is derived from the seed and the tile, as whole turns of its own yield", () => {
   const seed = 1234;
   // The whole generated world, checked against the derivation: every tile's
   // amount is exactly resourceAmountFor(seed, q, r, resource) -- never a draw
   // from the map's own RNG stream, which is what keeps terrain byte-identical
   // for this seed (see the terrain-identity test below).
-  const map = new GameMap(seed, "small", 5);
+  const map = new GameMap(seed, "small", 6);
   assert.ok(map.placedResourceTiles.length > 20, "the fixture seed places resource tiles");
   for (const tile of map.placedResourceTiles) {
     assert.equal(
@@ -58,9 +62,17 @@ test("a resource tile's amount is derived from the seed and the tile, inside 5-5
       resourceAmountFor(seed, tile.q, tile.r, tile.resource),
       `tile ${tile.q},${tile.r} (${tile.resource}) carries its derived amount`,
     );
+    const range = resourceAmountRangeFor(tile.resource);
     assert.ok(
-      tile.amount >= RESOURCE_AMOUNT_MIN && tile.amount <= RESOURCE_AMOUNT_MAX,
-      `amount ${tile.amount} is inside ${RESOURCE_AMOUNT_MIN}-${RESOURCE_AMOUNT_MAX}`,
+      tile.amount >= range.min && tile.amount <= range.max,
+      `amount ${tile.amount} (${tile.resource}) is inside ${range.min}-${range.max}`,
+    );
+    // The span is in TURNS: every pile is a whole number of turns of the
+    // production the settlement working the tile is paid for it.
+    assert.equal(
+      tile.amount % RESOURCE_YIELD[tile.resource],
+      0,
+      `amount ${tile.amount} (${tile.resource}) is a whole number of turns of ${RESOURCE_YIELD[tile.resource]}/turn`,
     );
   }
   // The same tile computed twice from the same seed, printed: the query's
@@ -69,7 +81,7 @@ test("a resource tile's amount is derived from the seed and the tile, inside 5-5
   const once = resourceAmountFor(seed, first.q, first.r, first.resource);
   const twice = resourceAmountFor(seed, first.q, first.r, first.resource);
   console.log(
-    `[amount] seed=${seed} tile=(${first.q},${first.r}) ${first.resource}: ${once} === ${twice}`,
+    `[amount] seed=${seed} tile=(${first.q},${first.r}) ${first.resource}: ${once} === ${twice} (${resourceTurnsFor(once, first.resource)} turns)`,
   );
   assert.equal(once, twice);
 
@@ -77,16 +89,19 @@ test("a resource tile's amount is derived from the seed and the tile, inside 5-5
   const other = resourceAmountFor(seed + 1, first.q, first.r, first.resource);
   assert.notEqual(other, once);
 
-  // The range is reachable, not merely bounded: a wide sweep must produce
-  // values near both ends.
-  let sawLow = false;
-  let sawHigh = false;
-  for (let i = 0; i < 4000; i++) {
-    const v = resourceAmountFor(7, i % 200, (i / 200) | 0, "gold");
-    if (v < RESOURCE_AMOUNT_MIN + 20) sawLow = true;
-    if (v > RESOURCE_AMOUNT_MAX - 20) sawHigh = true;
+  // Every resource's own span is reachable end to end, not merely bounded: a
+  // wide sweep must roll both 1 turn and 50 turns for each of the five
+  // resources that spawn on the map.
+  for (const resource of ["gold", "wood", "stone", "iron", "arcane"] as const) {
+    let low = false;
+    let high = false;
+    for (let i = 0; i < 4000; i++) {
+      const turns = resourceTurnsFor(resourceAmountFor(7, i % 200, (i / 200) | 0, resource), resource);
+      if (turns === RESOURCE_TURNS_MIN) low = true;
+      if (turns === RESOURCE_TURNS_MAX) high = true;
+    }
+    assert.ok(low && high, `${resource}'s sweep reaches both ends of ${RESOURCE_TURNS_MIN}-${RESOURCE_TURNS_MAX} turns`);
   }
-  assert.ok(sawLow && sawHigh, "the sweep reaches both ends of 5-500");
 });
 
 test("a pickup takes what fits and leaves the rest on the tile (partial pickup is a success)", () => {
@@ -119,11 +134,14 @@ test("a pickup takes what fits and leaves the rest on the tile (partial pickup i
   // The same hold cannot take a second load -- it is at its cap, which is the
   // refusal the test above pins. Emptying the tile therefore takes more
   // carriers, one holdful each (the reader's "left on the floor" rule, walked
-  // to its end): five 2-wagon heroes take 100 + 100 + 100 + 100 + 62.
+  // to its end). The number of carriers is the tile's own amount over the hold
+  // size -- the span is yield-derived now, so a wood pile is up to 750 and a
+  // fixed five-carrier list would leave the last of it on the floor.
   let state2 = result.state;
   let carried = heroCargo(state2.heroes.h0).wood;
-  const carriers = ["h1", "h2", "h3", "h4", "h5"];
-  for (const id of carriers) {
+  const carriersNeeded = Math.ceil(pristine / room);
+  for (let i = 1; i <= carriersNeeded; i++) {
+    const id = `h${i}`;
     // The carrying heroes stand on the tile; each brings its own empty hold.
     const next = pickupResource(
       { ...state2, heroes: { ...state2.heroes, [id]: makeHero(id, 0, 3, 0, { wagons: 2 }) } },
@@ -137,7 +155,7 @@ test("a pickup takes what fits and leaves the rest on the tile (partial pickup i
     state2 = next.state;
     carried += next.taken;
   }
-  assert.equal(carried, pristine, "every last unit came off the floor");
+  assert.equal(carried, pristine, `every last unit came off the floor (${pristine} over ${carriersNeeded} holds)`);
   assert.equal(resourceRemainingOn(state2, 3, 0, pristine), 0, "the tile is empty");
   // Empty is a REFUSAL with a named reason -- and only once the amount is 0.
   const drained = pickupResource(state2, map, { heroId: "h0", q: 3, r: 0 });

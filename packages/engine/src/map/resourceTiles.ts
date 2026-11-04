@@ -27,11 +27,45 @@ export const RESOURCE_YIELD: Record<ResourceType, number> = {
   food: 10,
 };
 
-// How much a resource tile holds. The reader's 5-500 range, closed at both
-// ends; the span is the number of distinct amounts (496), not the max.
-export const RESOURCE_AMOUNT_MIN = 5;
-export const RESOURCE_AMOUNT_MAX = 500;
-export const RESOURCE_AMOUNT_SPAN = RESOURCE_AMOUNT_MAX - RESOURCE_AMOUNT_MIN + 1;
+// How much a resource tile holds, DERIVED from that resource's own per-turn
+// yield rather than from one fixed spread for every resource.
+//
+// The unit is TURNS of the production the tile pays the settlement that works
+// it: `rate[r] = RESOURCE_YIELD[r] x level x count(tiles in radius)`
+// (economy/settlementRates.ts), so one deposit worked by a level-1 settlement
+// pays exactly RESOURCE_YIELD[r] of that resource every turn, and a pile of
+// `RESOURCE_YIELD[r] x n` is worth n turns of it. Deriving the span from
+// RESOURCE_YIELD therefore makes a pickup's worth the SAME band for every
+// resource -- 1 to 50 turns -- instead of the wildly different worths a fixed
+// 5-500 spread gave the six yields (up to 100 turns of arcane against 25 of
+// gold at a level-1 settlement, measured over the 60-map sweep).
+//
+// The amounts a tile can hold are therefore per-resource: RESOURCE_YIELD[r] x 1
+// (the smallest pile) up to RESOURCE_YIELD[r] x 50 (the largest). The old fixed
+// floor of 5 survives as the weakest resource's one-turn pile (arcane 5), and
+// the old fixed cap of 500 is no longer a ceiling at all -- gold's top pile is
+// 1000. Higher levels pay more per turn, so the same pile is worth fewer turns
+// there: 50 turns at L1 is 25 at L2 and 16.7 at L3.
+export const RESOURCE_TURNS_MIN = 1;
+export const RESOURCE_TURNS_MAX = 50;
+export const RESOURCE_TURNS_SPAN = RESOURCE_TURNS_MAX - RESOURCE_TURNS_MIN + 1;
+
+/** What one tile of `resource` can hold, in units: `yield x 1` to `yield x 50`. */
+export function resourceAmountRangeFor(resource: ResourceType): { min: number; max: number } {
+  return {
+    min: RESOURCE_YIELD[resource] * RESOURCE_TURNS_MIN,
+    max: RESOURCE_YIELD[resource] * RESOURCE_TURNS_MAX,
+  };
+}
+
+/**
+ * What an amount of `resource` is worth in turns of a LEVEL-1 settlement's
+ * production of it. The same read the tile panel's yield line implies, so a
+ * pickup's worth and the deposit's rate are one number, not two.
+ */
+export function resourceTurnsFor(amount: number, resource: ResourceType): number {
+  return amount / RESOURCE_YIELD[resource];
+}
 
 /**
  * The amount a resource tile holds, derived from the map seed and the tile
@@ -41,7 +75,9 @@ export const RESOURCE_AMOUNT_SPAN = RESOURCE_AMOUNT_MAX - RESOURCE_AMOUNT_MIN + 
  *   stream. A draw would consume a number from `mulberry32(seed)` and shift
  *   every placement that follows it, so an existing seed would generate
  *   different terrain than it does today -- the thing MapGenVersion exists to
- *   gate, and a bump is exactly what this feature must not need.
+ *   gate, and which this change does NOT do: terrain, rivers and the deposit
+ *   PLACEMENTS are byte-identical (test/engine/mapGenDigestSweep.test.ts's
+ *   STRUCTURAL_PIN, unmoved).
  * - It is stable for the life of the tile: the same key hashes to the same
  *   amount on every process, every reload and every client.
  * - It is computed, not carried. `amount` rides ResourceTile because the map
@@ -50,11 +86,25 @@ export const RESOURCE_AMOUNT_SPAN = RESOURCE_AMOUNT_MAX - RESOURCE_AMOUNT_MIN + 
  *
  * The derivation is the fleet's own pattern (settlers/startPlacement.ts's
  * `mulberry32(hashString(...))` stream): a stable string key mixed by FNV-1a,
- * one mulberry32 draw, scaled onto the closed 5-500 range.
+ * one mulberry32 draw, scaled onto the resource's OWN span in turns, then
+ * multiplied by the yield that span came from. The amount is always an exact
+ * multiple of its resource's yield, so every pile is a whole number of turns.
+ *
+ * THE MAP VERSION MOVED WITH THIS DERIVATION (ADVENTURE P3). `amount` is not
+ * gated on MapGenVersion and cannot be: the version is not an input to this
+ * function, both sides derive the number from the seed alone, and
+ * `GameMap.fromTiles` has no version to pass. So a map already in flight --
+ * any stored version -- re-values its deposits on next load: the pristine
+ * amount under every untouched tile changes, and a partially-picked tile's
+ * stored remaining is clamped to the new pristine (hero/pickupResource.ts
+ * `resourceRemainingOn`). `CURRENT_MAP_GEN_VERSION` is bumped to 6 to record
+ * that the map content this build derives is not what the previous build
+ * derived; it does not shield those saves. Terrain is untouched either way.
  */
 export function resourceAmountFor(seed: number, q: number, r: number, resource: ResourceType): number {
   const roll = mulberry32(hashString(`resource-amount:${seed >>> 0}:${q}:${r}:${resource}`))();
-  return RESOURCE_AMOUNT_MIN + Math.floor(roll * RESOURCE_AMOUNT_SPAN);
+  const turns = RESOURCE_TURNS_MIN + Math.floor(roll * RESOURCE_TURNS_SPAN);
+  return RESOURCE_YIELD[resource] * turns;
 }
 
 /**
