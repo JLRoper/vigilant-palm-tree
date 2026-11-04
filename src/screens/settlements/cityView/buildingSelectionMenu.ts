@@ -44,7 +44,6 @@ function aggregateEffects(entries: SelectedBuildingEntry[]): {
   populationBonus: number;
   defenseBonus: number;
   resourceYieldBonus: Partial<Record<string, number>>;
-  visionRangeBonus: number;
   controlRangeBonus: number;
   heroAttackBonus: number;
   upkeepWood: number;
@@ -56,7 +55,6 @@ function aggregateEffects(entries: SelectedBuildingEntry[]): {
     populationBonus: 0,
     defenseBonus: 0,
     resourceYieldBonus: {} as Record<string, number>,
-    visionRangeBonus: 0,
     controlRangeBonus: 0,
     heroAttackBonus: 0,
     upkeepWood: 0,
@@ -71,7 +69,6 @@ function aggregateEffects(entries: SelectedBuildingEntry[]): {
     acc.foodPerTurn += se.foodPerTurn ?? 0;
     acc.populationBonus += se.populationBonus ?? 0;
     acc.defenseBonus += se.defenseBonus ?? 0;
-    acc.visionRangeBonus += pe.visionRangeBonus ?? 0;
     acc.controlRangeBonus += pe.controlRangeBonus ?? 0;
     acc.heroAttackBonus += pe.heroAttackBonus ?? 0;
     acc.upkeepWood += uk.wood;
@@ -185,7 +182,6 @@ export class BuildingSelectionMenu {
     if (effects.foodPerTurn) lines.push(`+${effects.foodPerTurn} food/turn`);
     if (effects.populationBonus) lines.push(`+${effects.populationBonus} population`);
     if (effects.defenseBonus) lines.push(`+${effects.defenseBonus} defense`);
-    if (effects.visionRangeBonus) lines.push(`+${effects.visionRangeBonus} vision range`);
     if (effects.controlRangeBonus) lines.push(`+${effects.controlRangeBonus} control range`);
     if (effects.heroAttackBonus) lines.push(`+${effects.heroAttackBonus} hero attack`);
     for (const [r, v] of Object.entries(effects.resourceYieldBonus)) {

@@ -10,6 +10,18 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.53.1] - 2026-11-04
+
+the Tower's build card no longer sells a vision bonus no code applied
+
+The Tower's registry entry declared `playerEffects: { visionRangeBonus: 2 }`, both engine aggregators summed it, and both build-card surfaces printed `+2 vision range` — and no code applied it. Measured on `2cf527c` (0.53.0): `buildingPlayerEffects("tower", 1)` returned `visionRangeBonus: 2` and `computeSettlementBonuses` over one L3 Tower returned `visionRangeBonus: 6`, while a seat's vision is assembled only from hero rings (`HERO_VISION_RANGE` = 4), its owned settlements' `controlRange(level, buildings)` and caravans (`src/render/fog.ts` `computeVision` / `computeVisionFromState` / `isTileVisibleTo`, `packages/engine/src/reveal.ts` `visionKeysForPlayer`) — `controlRange` reads `controlRangeBonus` alone, and `computePlayerBonuses` has no production caller at all. A purchased Tower therefore widened the fog by exactly nothing, and a player bought it on the card's word.
+
+- The field is deleted end to end: the registry's `playerEffects` type, the Tower's `playerEffects`, `buildingPlayerEffects`, `PlayerBonuses` and both aggregators, the `+N vision range` line on both card surfaces (`buildingMenu.ts`, `buildingSelectionMenu.ts`), and the `vision +2` cell in `docs/resource-gathering.md`'s building table.
+- Deleted rather than wired into `controlRange` / `computeVision`: wiring it would enlarge the fog ring — and the PERSISTED `revealedTiles` of an uncharted game — of every settlement holding a Tower, a game-wide behaviour change the card never asked for. Deleting is behaviour-identical to main, because nothing read the value.
+- Pinned by `test/engine/towerVisionBonus.test.ts` (4 cases: the Tower's player effects at L1-L3, both aggregators, a `visionRangeBonus` source scan over `src/` + `packages/`, and both card modules' wording). Against the pre-fix source the same file reads `pass 0 / fail 4` (`buildingPlayerEffects("tower", 1) must not carry a visionRangeBonus: nothing applies it`; `computeSettlementBonuses must not carry a visionRangeBonus (got {"visionRangeBonus":6,...})`; the scan naming the four files; the card wording) — and `test/engine/districts.test.ts` still asserted `visionRangeBonus: 4` on that same pre-fix source, which is the field being live.
+- Measured but deliberately NOT touched, out of this row's scope: `heroAttackBonus` (declared by `archeryRange`, aggregated, printed as `+1 hero attack` on both card surfaces, and likewise read by no production code) and `heroSpeedBonus` (declared by no kind at all). Both are the same "sold but never applied" shape and need their own decision.
+- Gate: `npm run build`, `npm run lint:deps` (543 modules, 0 violations), `npm run test:types` (application 0 errors, test tree no regressions), `node tools/docs-check.mjs --changed-from github/main`, `npm run test:unit` (2953/2953) and all 18 `test:all` browser entries PASS on a private database.
+
 ## [0.53.0] - 2026-11-04
 
 feat(engine): a captured troop building is seized, not inherited

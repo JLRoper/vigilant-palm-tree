@@ -52,7 +52,6 @@ export interface BuildingEffect {
     treasuryBonus?: number;
   };
   playerEffects: {
-    visionRangeBonus?: number;
     controlRangeBonus?: number;
     heroSpeedBonus?: number;
     heroAttackBonus?: number;
@@ -116,7 +115,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     recruits: [],
     maxWorkers: 2,
     settlementEffects: { defenseBonus: 1 },
-    playerEffects: { visionRangeBonus: 2 },
+    playerEffects: {},
   },
   mageGuild: {
     kind: "mageGuild",
@@ -910,7 +909,6 @@ export function buildingSettlementEffects(kind: BuildingKind, level: number) {
 export function buildingPlayerEffects(kind: BuildingKind, level: number) {
   const e = REGISTRY[kind];
   return {
-    visionRangeBonus: (e.playerEffects.visionRangeBonus ?? 0) * level,
     controlRangeBonus: (e.playerEffects.controlRangeBonus ?? 0) * level,
     heroSpeedBonus: (e.playerEffects.heroSpeedBonus ?? 0) * level,
     heroAttackBonus: (e.playerEffects.heroAttackBonus ?? 0) * level,
