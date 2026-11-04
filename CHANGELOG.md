@@ -12,67 +12,17 @@ the version has not already been bumped in that changeset.
 
 ## [0.50.1] - 2026-11-04
 
-- chore(release): v0.49.1 with the idle-window deadline and the voided-fight notice (f70fd29)
-- test(combat): narrow the re-delivery payload instead of spreading the outcome union (1b70696)
-- fix(combat): the client adopts a server-voided fight instead of POSTing into the refusal (c871e4a)
-- fix(tests): the acceptance record's faction maps exclude the neutral seat (4d0db9e)
-- ci(gate): the unit suite now gates a PR — a red unit suite fails validate-game (#353) (ea5437c)
-- docs(settlements): the tier gate's measured ends, and the test that pins them (098f56a)
-- test(settlements): the tier gate's acceptance, measured — the two ends and the thresholds it leaves alone (67c174f)
-- chore(release): 0.50.0 with the settlement level gate on new placements (89501c3)
-- wip(rescue): client adoption of a server-voided fight, recovered after a panel-restart interruption (9123c3f)
-- fix(combat): the defender-offer deadline counts idle time, not the offer's age (3f27932)
-- docs(settlements): the tier gate, its bands and why the L1 set is what it is (792b676)
-- feat(city-view): the build palette states the tier gate instead of offering it (3922dfb)
-- feat(settlements): a building declares the settlement level it requires (7a9c6af)
-- test(migrations): rosterParity clears the rows the unit_types FK holds (e693c51)
-- District roads: a per-tile road graph with welded junctions, at a legible width (#351) (d9e741a)
-- chore(release): 0.48.1 with the cargo-row refusal sentence and the resource-pickup suite (a6cbd3a)
-- fix(logistics): the cargo row names the warehouse cap, not empty wagons (269fe5d)
-- test(visual): re-cut district-city-view -- chrome only (b7177d2)
-- test(e2e): the fixtures CITY P6's House price starved, and the one it moved (49125be)
-- fix(docker): pin the compose project name so docker:deploy works from a worktree (fde5161)
-- test(e2e): three fixtures that encoded the product of an earlier day (e97e78b)
-- chore(release): 0.48.0 with the CITY P6 House rebalance (d8eaffe)
-- chore(release): 0.47.1 with the move-cost display fix and the district-map re-cut (1ab3cad)
-- test(visual): re-cut the district-map baseline for the panel's cost line (681c9ec)
-- balance(engine): the House's price scales with level and pays in wood (762b325)
-- fix(ui): the tile panel and toolbar print a move cost, not an IEEE-754 float (b625423)
-- test(engine): pin the CITY P6 House rebalance (red before the registry change) (eee810f)
-- chore(release): 0.47.0 with the map-derived AI settlement band and browser-tick army growth (4c1c8db)
-- feat(ai): wire hero-army growth into the browser-driven AI tick (b9f7859)
-- feat(ai): derive the AI's settlement target band from the map (3d6c7cc)
-- chore(release): 0.46.1 with the test-runner and cityview fixes (e621d1c)
-- test(visual): re-cut the district-map baseline, moved by 827d187 (f69bac2)
-- feat(economy): a faction economy modifier, read at income and yield time by one seam (7a0cf42)
-- chore(release): 0.45.1 with the test-runner and cityview fixes (130047a)
-- fix(cityview): the staffing assertions must wait for a settled value (4cc0b3d)
-- fix(test-runner): test:all must say which suites did not run (32c6b06)
-- fix(test-runner): the request file must not outlive its run (ebc5791)
-- test(visual): pin adventure-overview's boot account, and assert it (db3ced2)
-- chore(release): 0.44.0 with AI hero-army growth (9f8a27e)
-- feat(ai): AI seats grow their hero armies, and take neutral capitals again (b933f1b)
-- feat(districts): derive a district's specialisation from its own buildings (#335) (d70adae)
-- test(visual): re-cut the district-city-view baseline, moved by f15a912 (1c56480)
-- test(visual): re-cut the city-view-diorama baseline, moved by f15a912 (493739a)
-- test(visual): re-cut the city-view-parallax-off baseline, moved by f15a912 (f5c83ee)
-- test(visual): re-cut the city-view-parallax-on baseline, moved by f15a912 (290f8e7)
-- chore(release): 0.43.0 with neutral capitals garrisoned (3a15004)
-- fix(multiplayer): the lobby's seat chips send the seat count they promise, and its AI seats no longer block the start (#330) (872880b)
-- chore(release): 0.43.0 with neutral capitals garrisoned (c304eb6)
-- feat(engine): neutral capitals start garrisoned (ebee950)
-- docs: an unassigned AI seat's roster faction is drawn from the game seed (1ca93a1)
-- test(visual): prove each new scene can fail, and label what district-map only records (8584d8b)
-- chore(release): 0.42.1 with the exact type-gate baseline (3b3c4aa)
-- chore(release): 0.41.1 with the exact type-gate baseline (eb94771)
-- chore(release): 0.42.0 with the workforce rebalance that makes the pool bind (7020bad)
-- chore(release): 0.41.0 with the workforce rebalance that makes the pool bind (8785813)
-- feat(workforce): the worker pool binds at last — divisor 100 -> 300, and the free auto crew is bounded and shown (f15a912)
-- chore(release): 0.40.3 with the exact type-gate baseline (786fd8f)
-- chore(release): 0.41.0 (74e0ef1)
-- fix(test): cityview and logpanel bring their own game, not a substitute (24fd363)
-- chore(release): 0.40.2 with AI seats drawing their faction from the game seed (0608d30)
-- …and 339 more commits
+The fight a player is winning stopped being force-resolved out from under them, and a fight the server does settle now says so.
+
+`AI_DEFENDER_WAIT_TIMEOUT_MS` (300 s) was measured from the offer's own stamp, so the moment an `EnterBattle` offer was 300 s old the server wrote its own `BattleResolved`, cleared `lobby.pendingBattle` and the human's own `SubmitBattleResult` answered `409 battle_not_pending` — with the world keeping the server's troops and the result the player actually played discarded. Arena traffic inside that window changed nothing.
+
+- `server/app/aiDriver.ts`: the deadline is now an **idle** window, measured from the later of the offer's stamp and the newest `battle_actions` row for the pair (`lastBattleActivity`, real SQL; a failed read degrades to the offer's stamp so it cannot resurrect the stall). An actively fought battle stays open however long it takes; a browser that is genuinely gone stops refreshing the evidence and the deadline still fires. The `ai_defender_wait_expired` audit carries `waitedMs` (the idle gap) beside `offerAgeMs`.
+- `src/screens/combat/arena/arenaHeartbeat.ts` + `src/managers/GameActions.ts`: while the arena is open the client posts a `heartbeat` row for the pair every 30 s (a new `ARENA_HEARTBEAT_PHASE`, admitted by `server/http/routes/battleActions.ts`); the timer starts with the arena and stops whenever it closes. That is what keeps a player who is thinking — not moving — from being voided.
+- `src/screens/combat/serverVoidedBattle.ts` + `battleVoidedCard.ts` + `src/managers/GameActions.ts`: when the server **does** settle the pair under the player, the client now sees it in the `mp:battleOutcome` stream, tears the arena down, adopts the server's world and shows **"This fight was voided"** — instead of playing on and POSTing into the refusal, which surfaced as "Couldn't record this battle". A `battle_not_pending` refusal takes the same path as a backstop.
+
+Measured on `github/main` (real handler + real driver, private `PGDATABASE=game_poc_the_manual_fight_pla`): an offer 306779 ms old with an arena row 6779 ms old -> the driver wrote `BattleResolved` `actor=1` `winner=defender` `attackerVerdict=retreated`, `waitedMs=306802`, cleared the marker, and left `p0-hero` at 16 troops after the human's 24 — the human's own submission answered `battle_not_pending`. After the change: zero `BattleResolved`, no audit, marker intact, and the played result lands (one `BattleResolved` `actor=0`, `p0-hero` 24). The contrast path inside the window is unchanged: `200`, one `BattleResolved`, the player's troops.
+
+Pinned by `test/server/pendingBattleActivity.test.ts` (real handler + real driver + Postgres), the idle-window cases in `test/server/aiDriver.test.ts`, the heartbeat row in `test/server/battleActionsRoute.test.ts`, `test/screens/combat/arenaHeartbeat.test.ts`, `test/screens/combat/serverVoidedBattle.test.ts`, and `test/aiDefender.e2e.ts` scenario D (active fight kept; silent fight voided with the notice on screen, and **no** `SubmitBattleResult` ever POSTed).
 
 ## [0.50.0] - 2026-11-03
 
