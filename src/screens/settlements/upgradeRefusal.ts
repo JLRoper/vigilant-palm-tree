@@ -13,13 +13,15 @@ import { treasuryCapBlockerMessage, treasuryCapBlocksGold } from "./treasuryCap"
 // this module is the same vocabulary for the upgrade controls, so a player
 // reads one refusal language everywhere a control can be dead.
 //
-// The cap half is the reason this is not just a shortfall list. `L3` costs
-// 5,000g, and the treasury cap is 1,500g at settlement level 1 and 4,000g at
-// level 2 (F-6, the unwritten half of the same coin): income is discarded at
-// the cap, so at BOTH levels the price is unreachable by waiting, and telling
-// the player "need 5,000, have 1,500" would be asking for something the cap
-// forbids. When the cap is the blocker the refusal says so and names the way
-// out (a Bank or Treasury), and the two sentences are never mixed up.
+// The cap half is the reason this is not just a shortfall list. A level-2
+// settlement's base cap is 4,000g while the town hall's L2->L3 offer costs
+// 5,000g and the settlement's own L2->L3 costs 15,000g (F-6, the unwritten half
+// of the same coin): income is discarded at the cap, so those prices are
+// unreachable by waiting, and telling the player "need 5,000, have 4,000" would
+// be asking for something the base cap forbids. When the cap is the blocker the
+// refusal says so and names the way out (a Bank or Treasury), and the two
+// sentences are never mixed up. A level-1 settlement has no such way out, so its
+// base cap carries the prices its level offers and it never sees this sentence.
 
 /** The cost fields an upgrade control prices: the same keys `buildingUpgradeCost` / `SETTLEMENT_UPGRADE_COSTS` carry. */
 export interface UpgradeCostLike {

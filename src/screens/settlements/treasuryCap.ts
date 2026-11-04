@@ -51,12 +51,19 @@ export function treasuryCapToastMessage(settlement: SettlementState): string {
  *
  * A gold cost above the cap is not a shortfall the player can close by waiting:
  * `applyEffectiveIncome` pays `Math.min(income, headroom)`, so gold income is
- * discarded at the cap and the treasury can never reach the price. F-2/F-6: the
- * town hall's L2->L3 upgrade costs 5,000g while a level-1 settlement's cap is
- * 1,500g (BASE_TREASURY[1]) and a level-2 settlement's is 4,000g
- * (BASE_TREASURY[2]), so the same offer is cap-blocked at both levels -- a
- * control that only says "need 5,000, have 1,500" there is asking the player for
- * something the cap forbids.
+ * discarded at the cap and the treasury can never reach the price. F-2/F-6: a
+ * level-2 settlement's base cap is 4,000g (BASE_TREASURY[2]) while the town
+ * hall's L2->L3 upgrade and the settlement's own L2->L3 upgrade both cost more
+ * (5,000g / 15,000g), so those offers ARE cap-blocked -- a control that only
+ * says "need 5,000, have 4,000" there is asking the player for something the
+ * base cap forbids.
+ *
+ * The sentence may only be shown where its way out exists (a Bank or Treasury,
+ * placeable from settlement level 2). Settlement level 1 has no capacity path at
+ * all -- warehouse/bank/treasury are the only treasuryBonus kinds and all three
+ * are requiredLevel 2 -- so BASE_TREASURY[1] carries every price level 1 is
+ * offered (its own tier upgrade's 5,000g) and a level-1 control is never
+ * cap-blocked. A cap sentence there would name a building the level forbids.
  */
 export function treasuryCapBlocksGold(settlement: SettlementState, goldCost: number): boolean {
   return goldCost > settlementTreasuryCap(settlement);

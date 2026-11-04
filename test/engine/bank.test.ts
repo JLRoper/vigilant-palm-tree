@@ -4,6 +4,7 @@ import type { BuildingDef, GameState, SettlementId } from "@heroes/contracts";
 import {
   BANK_WEEKLY_INTEREST_RATE,
   BANK_WITHDRAWAL_DAYS,
+  BASE_TREASURY,
   accrueBankInterest,
   bankGoldCap,
   bankGoldOf,
@@ -137,7 +138,7 @@ test("matureBankWithdrawals keeps a treasury-capped remainder pending instead of
   // read the cap off the settlement that actually carries the bank.
   const withBank = stateWith([bank(2, 2, 1, { gold: 0, pendingOut: [{ gold: 9999, maturesOnDay: 17 }] })], 0, 17);
   const cap = settlementTreasuryCap(withBank.settlements.s0);
-  assert.equal(cap, 1500 + 2000);
+  assert.equal(cap, BASE_TREASURY[1] + 2000);
   const s = { ...withBank, settlements: { ...withBank.settlements, s0: { ...withBank.settlements.s0, gold: cap - 500 } } };
   const next = matureBankWithdrawals(s);
   assert.equal(next.settlements.s0.gold, cap, "capped at the treasury cap");

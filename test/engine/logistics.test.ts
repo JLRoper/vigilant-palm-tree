@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   advanceTradeRoutes,
   assignWagons,
+  BASE_TREASURY,
   buyWagons,
   CARAVAN_CATCHUP_REPATHS_PER_DAY,
   createTradeRoute,
@@ -385,8 +386,8 @@ test("a treasure caravan loads wagons x 500 from the origin treasury and deliver
   const map = new GameMap(13, "small");
   const [a, b] = firstPassablePair(map);
   const origin = makeSettlement("s0", 0, a.q, a.r, { gold: 3000 });
-  // Level-1 treasury cap is 1500 (BASE_TREASURY): 1400 existing leaves 100 headroom.
-  const dest = makeSettlement("s1", 0, b.q, b.r, { gold: 1400 });
+  // The level-1 cap is BASE_TREASURY[1]: 100g short of it leaves 100 headroom.
+  const dest = makeSettlement("s1", 0, b.q, b.r, { gold: BASE_TREASURY[1] - 100 });
   const state = grantWagons(makeState({ settlements: [origin, dest], activePlayerId: 0 }), 2);
   const created = createTradeRoute(state, 0, settlementEndpoint("s0"), settlementEndpoint("s1"), GOLD, 2);
   assert.equal(created.ok, true, created.reason);
@@ -398,7 +399,7 @@ test("a treasure caravan loads wagons x 500 from the origin treasury and deliver
 
   let current = departed;
   for (let i = 0; i < 20; i++) current = advanceTradeRoutes(current, map);
-  assert.equal(current.settlements.s1.gold, 1500, "delivery clamps at the L1 treasury cap (100 headroom)");
+  assert.equal(current.settlements.s1.gold, BASE_TREASURY[1], "delivery clamps at the L1 treasury cap (100 headroom)");
   const parked = current.tradeRoutes![0].caravan!;
   assert.equal(parked.cargo, 900, "the remainder stays aboard (never lose cargo)");
   assert.equal(parked.phase, "toDestination", "a partial delivery parks at the destination to retry daily");
@@ -477,7 +478,7 @@ test("a hero origin loads gold from its purse and a settlement destination takes
   const total = current.heroes.h0.gold + current.settlements.s0.gold + (current.tradeRoutes![0].caravan?.cargo ?? 0);
   assert.equal(total, 2000, "gold is conserved across the whole cycle (never lose cargo)");
   assert.ok(current.settlements.s0.gold >= 1000, "the first full delivery landed");
-  assert.ok(current.settlements.s0.gold <= 1500, "the treasury never exceeds its cap");
+  assert.ok(current.settlements.s0.gold <= BASE_TREASURY[1], "the treasury never exceeds its cap");
 });
 
 // ---- Hero catch-up (the moving-target rule) ---------------------------------
