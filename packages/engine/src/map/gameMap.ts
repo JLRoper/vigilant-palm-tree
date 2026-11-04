@@ -47,15 +47,27 @@ export const MAP_SIZE_ORDER = [
 ] as const;
 
 export type MapSize = (typeof MAP_SIZE_ORDER)[number];
-export type MapGenVersion = 1 | 2 | 3 | 4 | 5;
+export type MapGenVersion = 1 | 2 | 3 | 4 | 5 | 6;
 
 /**
  * The map-gen version every NEW game is created at. Both the generated grid and
  * `lobby.mapGenVersion` must come from this one constant, or a fresh game would
  * be built on one map and re-generated on another when the client reloads.
  * Saved games keep the version they were created with (v1-v3 render unchanged).
+ *
+ * v6 adds NO generation pass: its terrain, rivers and deposit placements are
+ * byte-identical to v5's for the same seed
+ * (test/engine/mapGenDigestSweep.test.ts pins it directly). It exists because
+ * the DERIVED map content moved instead -- the deposit `amount` is now derived
+ * from the yield table rather than a fixed 5-500 spread
+ * (map/resourceTiles.ts `resourceAmountFor`), and that derivation is
+ * version-blind by construction (the version is not an input to it, both sides
+ * compute the amount from the seed with no wire field, and `GameMap.fromTiles`
+ * has no version to pass). So the version records what this build derives; it
+ * does not shield a save already in flight, whose deposits are re-valued on
+ * next load whatever version it stored.
  */
-export const CURRENT_MAP_GEN_VERSION: MapGenVersion = 5;
+export const CURRENT_MAP_GEN_VERSION: MapGenVersion = 6;
 
 // Dense forest (v4): a rarer, impassable second forest biome. It is grown OUT
 // of the normal forest's edge -- seeded on a non-forest neighbour of a forest
@@ -320,6 +332,7 @@ export function resolveMapGenVersion(version?: number | null): MapGenVersion {
   if (version === 2) return 2;
   if (version === 4) return 4;
   if (version === 5) return 5;
+  if (version === 6) return 6;
   return 3;
 }
 
@@ -328,6 +341,7 @@ export function resolveSavedMapGenVersion(version?: number | null): MapGenVersio
   if (version === 3) return 3;
   if (version === 4) return 4;
   if (version === 5) return 5;
+  if (version === 6) return 6;
   return 1;
 }
 

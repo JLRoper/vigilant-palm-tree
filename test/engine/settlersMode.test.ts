@@ -21,6 +21,7 @@ import {
 import {
   CURRENT_MAP_GEN_VERSION,
   FOUND_SETTLEMENT_REFUSALS,
+  RESOURCE_YIELD,
   SETTLERS_STREAM_PREFIX,
   applyPlaceBuildings,
   buildInitialGameState,
@@ -36,6 +37,7 @@ import {
   makeInitialStatePayload,
   mulberry32,
   placeSettlersStarts,
+  resourceAmountRangeFor,
   settlersStreamKey,
   settlersStreamRng,
   starterCityOnOpen,
@@ -89,13 +91,19 @@ const GRID_PINS: readonly { seed: number; size: MapSize; digest: string }[] = [
 // terrain pin above and deliberately NOT folded into it: the two pins mean
 // different things. The grid pin asks "did a generation pass move the world
 // for a seed that already exists" (only a redesign may change it); this one
-// asks "did the seed+tile hash change" (only a new hash version may change it),
-// and its digests were taken WITHOUT including the amount in the grid shape --
-// which is why the grid digests above are the same values they were before
-// pickups existed.
+// asks "did the seed+tile derivation change span" (only a new span may change
+// it), and its digests were taken WITHOUT including the amount in the grid
+// shape -- which is why the grid digests above are the same values they were
+// before pickups existed.
+//
+// Re-pinned by ADVENTURE P3 (the grid digests above did NOT move): the amount
+// is now derived from the yield table -- `RESOURCE_YIELD[resource] x 1..50`
+// turns of the working settlement's production -- instead of one fixed 5-500
+// spread for every resource. That is exactly the "did the span change" question
+// this pin exists to answer, so it moves; the terrain is untouched.
 const AMOUNT_PINS: readonly { seed: number; size: MapSize; digest: string }[] = [
-  { seed: 42, size: "small", digest: "42db022df1dd2858" },
-  { seed: 7, size: "medium", digest: "a236b61cb4ae6f22" },
+  { seed: 42, size: "small", digest: "e8e4282a08f63ed8" },
+  { seed: 7, size: "medium", digest: "3f2e0cde0aed44f1" },
 ];
 
 test("the generated grid of an existing seed is byte-identical", () => {
@@ -122,7 +130,7 @@ test("the generated grid of an existing seed is byte-identical", () => {
   }
 });
 
-test("the pick-up amount of a resource tile is stable for a seed, inside 5-500", () => {
+test("the pick-up amount of a resource tile is stable for a seed, as whole turns of its own yield", () => {
   for (const pin of AMOUNT_PINS) {
     const map = getOrCreateGameMap(pin.seed, pin.size, CURRENT_MAP_GEN_VERSION);
     const amounts = map.placedResourceTiles.map((t) => ({
@@ -133,9 +141,18 @@ test("the pick-up amount of a resource tile is stable for a seed, inside 5-500",
     }));
     const actual = digest(amounts);
     console.log(`[pin] amounts ${pin.seed}/${pin.size} = ${actual} (${amounts.length} tiles)`);
-    assert.equal(actual, pin.digest, `the seed+tile amount hash changed for seed ${pin.seed}`);
+    assert.equal(actual, pin.digest, `the seed+tile amount derivation changed span for seed ${pin.seed}`);
     for (const a of amounts) {
-      assert.ok(a.amount >= 5 && a.amount <= 500, `${a.q},${a.r} amount ${a.amount} is inside 5-500`);
+      const range = resourceAmountRangeFor(a.resource);
+      assert.ok(
+        a.amount >= range.min && a.amount <= range.max,
+        `${a.q},${a.r} (${a.resource}) amount ${a.amount} is inside ${range.min}-${range.max}`,
+      );
+      assert.equal(
+        a.amount % RESOURCE_YIELD[a.resource],
+        0,
+        `${a.q},${a.r} (${a.resource}) amount ${a.amount} is a whole number of turns of ${RESOURCE_YIELD[a.resource]}/turn`,
+      );
     }
   }
 });
@@ -151,9 +168,11 @@ function seedPayload(seed: number, size: MapSize = "small") {
 // Moved by the neutral-capital garrison (NEUTRAL_CAPITAL_GARRISON): a neutral
 // settlement now carries a `stacks` key, which is exactly what this pin is
 // for -- a change to what a seed seeds. It is NOT a grid move: the two
-// GRID_PINS and AMOUNT_PINS above are untouched, CURRENT_MAP_GEN_VERSION stays
-// 5, and 60 maps (2 sizes x v1..v5 x seeds 1..6, resource amounts included)
-// hash identically to github/main. Castle positions, names, variants and city
+// GRID_PINS above are untouched, 60 maps (2 sizes x v1..v5 x seeds 1..6,
+// terrain, rivers and deposit placements) hash identically to github/main, and
+// only the AMOUNT_PINS moved with the yield-derived span (ADVENTURE P3, which
+// also moved CURRENT_MAP_GEN_VERSION to 6 -- no generation pass, see
+// mapGenDigestSweep.test.ts). Castle positions, names, variants and city
 // spots are unchanged; only the neutral settlement objects gained the garrison.
 const ENTITY_PIN = "d257d453732f870c";
 /** The classic seeding's neutral count for seed 42: entity seeding, not terrain. */
