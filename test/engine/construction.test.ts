@@ -482,3 +482,29 @@ test("the pool counts a site at the CONSTRUCTION ceiling, and an auto-crewed one
   assert.equal(autoStaffedSlots(settlement), 5, "the auto SITE counts 4 and the finished auto house counts 1");
   assert.equal(staffingCeiling(settlement.buildings[0]), 4, "and the ceiling is why");
 });
+
+test("a district site builds by the same rule: staffed it advances, unstaffed it stalls", () => {
+  // The rule is kind-blind and district-blind (design §5.h): the same ceiling,
+  // the same curve, the same stall. This is the half the browser fixture cannot
+  // reach without crewing a district building on the canvas.
+  const settlement: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, { buildings: [] }),
+    districts: {
+      "3,2": {
+        q: 3,
+        r: 2,
+        citySpots: [],
+        buildings: [
+          { gx: 0, gy: 0, kind: "goldMine", level: 1, style: "classic", workers: 1, construction: { daysRemaining: 10 } },
+          { gx: 2, gy: 0, kind: "goldMine", level: 1, style: "classic", workers: 4, construction: { daysRemaining: 10 } },
+          { gx: 4, gy: 0, kind: "goldMine", level: 1, style: "classic", workers: 0, construction: { daysRemaining: 10 } },
+        ],
+      },
+    },
+  };
+  const after = advanceBuildingConstructions(makeState({ settlements: [settlement] }));
+  const days = after.settlements.s0.districts!["3,2"].buildings.map((b) => b.construction?.daysRemaining);
+  assert.equal(days[0], 9, "one builder on a district site: 1.00x");
+  assert.equal(days[1], 8, "a full crew on a district site: 2.00x");
+  assert.equal(days[2], 10, "nobody on a district site: no progress at all");
+});

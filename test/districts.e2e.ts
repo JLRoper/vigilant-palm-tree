@@ -71,7 +71,7 @@ const db = new Pool({
 interface DistrictRow {
   q: number; r: number;
   citySpots: Array<{ cell: { x: number; y: number }; resource: string; vein: string }>;
-  buildings: Array<{ gx: number; gy: number; kind: string; construction?: { daysRemaining: number } }>;
+  buildings: Array<{ gx: number; gy: number; kind: string; workers?: number; construction?: { daysRemaining: number } }>;
 }
 
 async function storedDistricts(gameId: number, settlementId: string): Promise<Record<string, DistrictRow> | null> {
@@ -338,10 +338,20 @@ async function run(): Promise<void> {
     assert.equal(line![2], "farm", `expected the farm variant, panel said "${line![2]}"`);
     assert.equal(Number(line![3]), 2, `expected 2 buildings, panel said "${line![3]}"`);
 
-    // ── 8. End Turn: districts survive and their timers tick ──────────────
-    const daysBefore = Object.fromEntries((farmDistrict!.buildings ?? [])
+    // ── 8. End Turn: districts survive, and a district SITE follows the
+    //       build-crew rule (2026-11-03) -- it advances if it has builders
+    //       (including the auto crew, which is a full one) and makes no
+    //       progress at all if it has none. The fixture used to assert only
+    //       that the timer ticked, which held while an unstaffed site crawled
+    //       at 1.00x. The staffed case in both directions (1.00x and 2.00x on
+    //       a district site) is pinned at the unit layer too, where a district
+    //       building can be crewed without reaching for the canvas. ─────────
+    const storedBefore = await storedDistricts(gameId, home.id);
+    assert(storedBefore?.[key], `no stored ${key} row before the turn`);
+    const sitesBefore = (storedBefore![key]!.buildings ?? [])
       .filter((b) => b.construction)
-      .map((b) => [`${b.kind}@${b.gx},${b.gy}`, b.construction!.daysRemaining]));
+      .map((b) => ({ id: `${b.kind}@${b.gx},${b.gy}`, workers: b.workers, days: b.construction!.daysRemaining }));
+    assert(sitesBefore.length > 0, "the district holds no site to watch across the round wrap");
     const dayBefore = await page.evaluate(() =>
       (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.getState().day as number,
     );
@@ -354,14 +364,40 @@ async function run(): Promise<void> {
     const afterTurn = await settleSnapshot(page, home.id);
     const turnedDistrict = afterTurn!.districts?.[key] as DistrictRow | undefined;
     assert(turnedDistrict?.buildings.length === 2, "district did not survive the End Turn round wrap");
-    for (const b of turnedDistrict!.buildings) {
-      const id = `${b.kind}@${b.gx},${b.gy}`;
-      if (!(id in daysBefore)) continue;
-      assert(
-        b.construction == null || b.construction.daysRemaining < daysBefore[id],
-        `district construction timer for ${id} did not tick (${daysBefore[id]} -> ${b.construction?.daysRemaining})`,
-      );
+    // The rule, read off the SERVER's own stored row on both sides: the crew a
+    // fresh district placement gets is the bootstrap rule's business (a
+    // settlement with any district places at `workers: 0`, so it does NOT
+    // advance; a legacy auto-crewed one is a full crew, so it does), and
+    // reading it back from the client's optimistic copy is how a fixture
+    // pins the wrong side of a client/server divergence.
+    const storedAfter = await storedDistricts(gameId, home.id);
+    assert(storedAfter?.[key], `no stored ${key} row after the turn`);
+    const afterRows = storedAfter![key]!.buildings ?? [];
+    for (const b of afterRows) {
+      const before = sitesBefore.find((s) => s.id === `${b.kind}@${b.gx},${b.gy}`);
+      if (!before) continue;
+      const after = b.construction?.daysRemaining ?? null;
+      if (before.workers === undefined || before.workers > 0) {
+        assert.ok(
+          after === null || after < before.days,
+          `a district site with ${before.workers ?? "an auto"} crew did not advance (${before.days} -> ${after})`,
+        );
+      } else {
+        assert.equal(
+          after,
+          before.days,
+          `a district site with NO builders advanced (${before.days} -> ${after}): the stall reaches districts too`,
+        );
+      }
     }
+    // And the CLIENT's own view of those rows must agree with what the server
+    // stored across the round wrap -- a disagreement here is a hydration
+    // finding to report, not a fixture problem to paper over.
+    assert.deepEqual(
+      (turnedDistrict!.buildings ?? []).map((b) => `${b.gx},${b.gy}:${b.construction?.daysRemaining ?? "done"}`).sort(),
+      afterRows.map((b) => `${b.gx},${b.gy}:${b.construction?.daysRemaining ?? "done"}`).sort(),
+      "the client's district view disagrees with the stored row after the round wrap",
+    );
 
     // ── 9. reload: the district must re-hydrate from the server ──────────
     await page.reload({ waitUntil: "load" });
