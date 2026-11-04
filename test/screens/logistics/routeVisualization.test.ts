@@ -1,4 +1,5 @@
 import type { GameState, HeroState, SettlementState, TradeRouteState } from "@heroes/contracts";
+import { BASE_TREASURY } from "@heroes/engine";
 import {
   formatStoragePercentage,
   getEndpointStorage,
@@ -70,7 +71,7 @@ test("endpoint storage reads the correct warehouse, larder, purse, and treasure 
   );
   assert.deepEqual(
     getEndpointStorage(state, { kind: "settlement", id: "s1" }, { kind: "gold" }),
-    { storeName: "Treasury", resourceName: "gold", amount: 750, capacity: 1500 },
+    { storeName: "Treasury", resourceName: "gold", amount: 750, capacity: BASE_TREASURY[1] },
   );
   assert.equal(getEndpointStorage(state, { kind: "hero", id: "missing" }, { kind: "gold" }), null);
 });

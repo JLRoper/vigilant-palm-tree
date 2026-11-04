@@ -3,7 +3,9 @@
 // OS-assigned port allocator. Cross-platform (Windows / Linux / macOS).
 // Picks free TCP ports via net.Server({ port: 0 }) and writes them to .env
 // in the current working directory. Idempotent: re-running preserves
-// existing .env values unless process.env overrides are set. Replaces
+// existing .env values unless process.env overrides are set, or the existing
+// value is one the OS REFUSES to bind (an excluded port range -- see
+// probePort/classifyBindError below). Replaces
 // scripts/ports.ps1 with no PowerShell dependency.
 //
 // Keys written:
@@ -67,6 +69,50 @@ export async function pickFreePorts(count: number): Promise<number[]> {
   return [...picked];
 }
 
+/**
+ * Why a port could not be bound, as far as the allocator cares:
+ *
+ *   free     -- the bind succeeded, so the port is usable right now.
+ *   in-use   -- EADDRINUSE: something is listening. That is usually THIS
+ *               checkout's own dev server or a live suite, so the value is
+ *               preserved: re-allocating would rotate the port out from under
+ *               a running process and strand it (the exact failure the
+ *               idempotency rule in main() exists to prevent).
+ *   excluded -- EACCES/EPERM: the OS refused the bind outright. On Windows a
+ *               port inside an excluded range answers exactly this
+ *               (`netsh int ipv4 show excludedportrange protocol=tcp`; measured
+ *               52000 -> `listen EACCES: permission denied 0.0.0.0:52000`).
+ *               Nothing can ever bind it, and NOTHING ELSE WILL FREE IT, so a
+ *               preserved value here is a permanent failure.
+ *   unknown  -- any other error. Preserved, like in-use: not our call to make.
+ */
+export type PortProbe = "free" | "in-use" | "excluded" | "unknown";
+
+/** Pure, so the classification can be pinned without an OS that excludes ports. */
+export function classifyBindError(err: unknown): PortProbe {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  if (code === "EACCES" || code === "EPERM") return "excluded";
+  if (code === "EADDRINUSE") return "in-use";
+  return "unknown";
+}
+
+/**
+ * Tries to actually bind `port` on the given host. A value the kernel hands out
+ * is by construction bindable (Windows never allocates a port from an excluded
+ * range), which is what makes a KERNEL-ASSIGNED port safe to keep and a
+ * hand-pinned one not: the exclusion ranges are re-drawn at boot, so a value
+ * that bound yesterday can be EACCES today (measured on this box: .env held
+ * 54232/54233/54234 inside the then-current range 54144-54243, and the same
+ * keys bound fine once re-allocated to 54711/54714/54715).
+ */
+export function probePort(port: number, host = "0.0.0.0"): Promise<PortProbe> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once("error", (err) => resolve(classifyBindError(err)));
+    server.listen(port, host, () => server.close(() => resolve("free")));
+  });
+}
+
 function readEnvFile(): Record<string, string> {
   if (!existsSync(ENV_FILE)) return {};
   const out: Record<string, string> = {};
@@ -81,6 +127,7 @@ async function main(): Promise<void> {
   const existing = readEnvFile();
   const merged: Record<string, string> = { ...existing };
   const allocated: Record<string, number> = {};
+  const reclaimed: Record<string, string> = {};
 
   for (const key of KEYS) {
     const override = process.env[key];
@@ -93,6 +140,25 @@ async function main(): Promise<void> {
       // run; re-allocating would silently rotate ports and strand orphan
       // processes on the previous values. Run `npm run cleanup` to free
       // stale ports before requesting a fresh allocation.
+      //
+      // One exception: a port the OS REFUSES to bind is not "in use", it is
+      // unusable -- nothing can take it and nothing will free it, so keeping
+      // it means every dev run and every suite dies on it. Measured on this
+      // box, the primary checkout's .env held 54232/54233/54234 inside
+      // Windows' then-current excluded range 54144-54243 and vite answered
+      // `listen EACCES: permission denied 0.0.0.0:54233`. EADDRINUSE is left
+      // alone: that is a live holder, usually this checkout's own dev server.
+      const kept = Number(existing[key]);
+      if (Number.isInteger(kept) && kept > 0 && kept <= 65535) {
+        const probe = await probePort(kept);
+        if (probe === "excluded") {
+          const fresh = await pickPort();
+          merged[key] = String(fresh);
+          allocated[key] = fresh;
+          reclaimed[key] = `${kept} (OS refused the bind: excluded port range) -> ${fresh}`;
+          continue;
+        }
+      }
       continue;
     }
     const port = await pickPort();
@@ -123,7 +189,7 @@ async function main(): Promise<void> {
   })();
   console.log(`Worktree: ${branch}  (${process.cwd()})`);
   for (const key of KEYS) {
-    console.log(`  ${key}=${merged[key]}`);
+    console.log(`  ${key}=${merged[key]}${reclaimed[key] ? `  (re-allocated: ${reclaimed[key]})` : ""}`);
   }
   if (Object.keys(allocated).length > 0) {
     const pairs = Object.entries(allocated).map(([k, v]) => `${k}=${v}`).join(", ");

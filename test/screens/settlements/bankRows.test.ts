@@ -149,10 +149,10 @@ test("the treasury row states its own contribution and the settlement's cap", ()
     ),
   );
   assert.ok(model);
-  // 1500 base + 2000 treasury + 2000 bank + 500 warehouse = 6000.
+  // 5000 base + 2000 treasury + 2000 bank + 500 warehouse = 9500.
   assert.equal(model.treasuryBuildingBonus, 2000);
   assert.equal(model.totalBonus, 4500);
-  assert.equal(model.cap, 6000);
+  assert.equal(model.cap, 9500);
   assert.equal(model.gold, 2500);
   assert.equal(model.overCap, false);
 });
@@ -162,7 +162,7 @@ test("the treasury row flags gold sitting above the soft cap", () => {
     settlement([{ gx: 0, gy: 0, kind: "treasury", level: 1, style: "classic" }], 99_999),
   );
   assert.ok(model);
-  assert.equal(model.cap, 3500);
+  assert.equal(model.cap, 7000);
   assert.equal(model.overCap, true);
 });
 

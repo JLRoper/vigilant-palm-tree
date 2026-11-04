@@ -14,7 +14,7 @@ level at all:
 
 | Level | Population | Gold tax | Income/turn (`pop × tax`) | Treasury cap |
 |---|---|---|---|---|
-| 1 | 500 | 1 | **500** | 1,500 |
+| 1 | 500 | 1 | **500** | 5,000 |
 | 2 | 1,500 | 2 | **3,000** | 4,000 |
 | 3 | 5,000 | 3 | **15,000** | 10,000 |
 
@@ -38,12 +38,16 @@ Meanwhile:
   beyond available footprint space — so a turn's income directly caps how
   many buildings/units can be bought *that turn*, with no other throttle.
 - **The treasury cap doesn't keep pace with income.** Base treasury cap
-  only grows ~6.7× (1,500→10,000, `BASE_TREASURY` in
-  [`packages/engine/src/settlement/capacity.ts:11`](../packages/engine/src/settlement/capacity.ts))
+  only grows 2× (5,000→10,000, `BASE_TREASURY` in
+  [`packages/engine/src/settlement/capacity.ts:22`](../packages/engine/src/settlement/capacity.ts))
   while income grows 30×. A L3 castle's single-turn income (15,000) already
   exceeds its base cap before any Bank/Treasury building is built, so the
   cap doesn't throttle a single turn's spending — it only wastes overflow
-  across turns.
+  across turns. *(The level-1 base moved 1,500→5,000 on 2026-11-03 so a
+  level-1 vault can hold its own tier upgrade's 5,000g price — it had no
+  capacity path at all. That is the L1 end of this table, not a re-measurement
+  of the L1→L3 growth; the ratio above is the recomputed one, and the finding
+  it supports stands.)*
 
 Net effect: once a settlement reaches L2/L3, a single turn's income can
 outright buy its entire remaining building roster or a stack of top-tier
