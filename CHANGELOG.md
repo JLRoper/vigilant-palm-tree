@@ -10,6 +10,29 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.53.6] - 2026-11-04
+
+chore(tooling): a fresh worktree prepares itself
+
+A worktree cut with `git worktree add` carries neither `.env` nor
+`node_modules` (both gitignored), so the first command a card runs dies on a
+missing launcher — `predev`/`pretest` report `'tsx' is not recognized` and
+`npm run build` reports `'tsc' is not recognized`, while only pure-`node`
+scripts run at all. The primary checkout's own `node_modules/.bin` was missing
+too (an interrupted `npm install` leaves every package extracted and the
+launchers gone), so every tree failed at once.
+
+`npm run worktree:setup` (`scripts/worktree-setup.mjs`) is the repo-owned,
+cross-platform preparation path, so the next card does not rediscover it: it
+seeds `.env` from `.env.example`, writes `PGDATABASE=game_poc_<branch-slug>`
+and creates that database in the shared `game_db` container (the primary
+branch deliberately gets none), allocates the three ports through
+`scripts/allocate-ports.ts`, and makes `node_modules/.bin` resolve —
+regenerating a shared install's launchers from the extracted packages
+(offline, additive, byte-identical to npm's own) instead of reinstalling over
+a tree other worktrees are using. `.kilo/setup-script.ps1` forwards to it, so
+the database-name rule lives in one place.
+
 ## [0.53.5] - 2026-11-04
 
 delete the five declared-never-emitted `GameEvent` names, and require every declared one to keep a real emitter
