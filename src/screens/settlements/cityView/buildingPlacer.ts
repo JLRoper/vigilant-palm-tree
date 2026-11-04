@@ -1,6 +1,6 @@
 import { cityLayout, coversCell as reCoversCell, screenToGridCell } from "../../../core/cityGrid";
 import type { CityViewSize } from "@heroes/engine";
-import type { BuildingDef, BuildingKind, FactionId } from "@heroes/contracts";
+import type { BuildingDef, BuildingKind, CastleLevel, FactionId } from "@heroes/contracts";
 import { FloatingPanel, styleButton, panelTheme, createPanel } from "@screens/shared/panel";
 import { toolbarHeight } from "@screens/shared/panelRail";
 import {
@@ -66,6 +66,15 @@ export class BuildingPlacer {
   buildings: BuildingDef[] = [];
 
   private factionId?: FactionId;
+  /**
+   * The open settlement's live level, read through the city view's own
+   * `getSettlement` hook -- the same live settlement the palette's output
+   * readouts price. Live rather than a snapshot taken at open time, so an
+   * upgrade that lands while the city view is open unlocks the higher tier's
+   * rows on the next render. Defaults to 1 (= today's behaviour: no tier gate)
+   * until the owner installs the source.
+   */
+  private settlementLevel: () => CastleLevel = () => 1;
   private size: CityViewSize = 5;
   private center: { gx: number; gy: number } | null = { gx: 2, gy: 2 };
   private isDistrict = false;
@@ -104,6 +113,15 @@ export class BuildingPlacer {
     this.hoverCell = null;
     this.valid = false;
     this.selectedKind = null;
+  }
+
+  /**
+   * The open settlement's level source (the city view's live settlement). The
+   * gate this feeds is the registry's `requiredLevel`, declared with each
+   * building and enforced by the engine; this only states it on the row.
+   */
+  setSettlementLevelSource(fn: () => CastleLevel): void {
+    this.settlementLevel = fn;
   }
 
   setAffordability(aff: Affordability | null): void {
@@ -486,7 +504,7 @@ export class BuildingPlacer {
         const days = buildingBuildDays(kind);
         const hasTownHall = kind === "townHall" && this.buildings.some((b) => b.kind === "townHall");
         const isSelected = this.selectedKind === kind;
-        const status = buildEntryStatus({ kind, affordability: this.affordability, hasTownHall, isDistrict: this.isDistrict, districtTerrain: this.districtTerrain, space: { size: this.size, buildings: this.buildings } });
+        const status = buildEntryStatus({ kind, affordability: this.affordability, hasTownHall, isDistrict: this.isDistrict, districtTerrain: this.districtTerrain, space: { size: this.size, buildings: this.buildings }, settlementLevel: this.settlementLevel() });
         const disabled = status.disabled;
 
         Object.assign(row.style, {

@@ -72,6 +72,10 @@ jobs:
         if: steps.scope.outputs.run_tests == 'true'
         run: npx playwright install chromium --with-deps
 
+      - name: Unit gate (serial node:test suites)
+        if: steps.scope.outputs.run_tests == 'true'
+        run: npm run test:unit
+
       - name: Validate "npm run dev" boots client + API
         if: steps.scope.outputs.run_tests == 'true'
         run: |
