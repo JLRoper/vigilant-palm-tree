@@ -28,7 +28,14 @@ battleActionsRouter.use(attachAuth, attachPlayerSeat);
 // ("start") and the terminal row ("end") are posted by the arena itself,
 // move/attack/retreat/surrender come from the arena/state.ts action sites,
 // and "spell" is spellcasting v1's cast row (same wrapper file).
-const VALID_PHASES = ["start", "move", "attack", "retreat", "surrender", "spell", "end"] as const;
+//
+// "heartbeat" is not a played action: while the arena is open the client
+// re-posts one for the pair on a timer, so the AI driver's
+// AI_DEFENDER_WAIT_TIMEOUT_MS (an IDLE window, measured from the newest row
+// for the pair) can tell a fight that is still being played from a browser
+// that is gone. A future re-simulation consumer must skip these rows -- they
+// carry no state change.
+const VALID_PHASES = ["start", "move", "attack", "retreat", "surrender", "spell", "end", "heartbeat"] as const;
 
 function parseBattleAction(
   body: unknown,

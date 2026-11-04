@@ -74,7 +74,7 @@ process.on("SIGINT", () => { cleanup(); process.exit(1); });
 process.on("SIGTERM", () => { cleanup(); process.exit(1); });
 process.on("uncaughtException", (err) => { console.error(err); cleanup(); process.exit(1); });
 reapPreviousRunPids();
-setTimeout(() => { console.error(">> aiDefender.e2e exceeded 300s, forcing exit"); cleanup(); process.exit(2); }, 300_000).unref();
+setTimeout(() => { console.error(">> aiDefender.e2e exceeded 600s, forcing exit"); cleanup(); process.exit(2); }, 600_000).unref();
 
 // Defaults pin the LOCAL docker db -- never .env's possible gameserver host.
 const db = new Pool({
@@ -110,6 +110,109 @@ async function battleResolvedSeen(name: string): Promise<boolean> {
     [name],
   );
   return (r.rowCount ?? 0) > 0;
+}
+
+interface ResolvedRow {
+  actor_seat: number | null;
+  payload: Record<string, unknown>;
+}
+
+async function battleResolvedRows(name: string): Promise<ResolvedRow[]> {
+  const r = await db.query(
+    `SELECT e.actor_seat, e.payload FROM game_events e JOIN games g ON g.id = e.game_id
+      WHERE g.name = $1 AND e.kind = 'BattleResolved' ORDER BY e.id`,
+    [name],
+  );
+  return r.rows as ResolvedRow[];
+}
+
+// The client's own p0-hero troop total, read out of the live client state.
+async function clientHeroTroops(page: Page, heroId: string): Promise<number> {
+  return page.evaluate((id) => {
+    const st = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.getState?.();
+    const hero = st?.heroes?.[id];
+    if (!hero) return -1;
+    return (hero.stacks ?? []).reduce(
+      (sum: number, platoon: { entries: Array<{ count: number }> }) =>
+        sum + platoon.entries.reduce((n: number, e: { count: number }) => n + e.count, 0),
+      0,
+    );
+  }, heroId);
+}
+
+function serverHeroTroops(row: GameRow, heroId: string): number {
+  const hero = (row.heroes as unknown as Record<string, { stacks?: Array<{ entries: Array<{ count: number }> }> }>)[heroId];
+  if (!hero) return -1;
+  return (hero.stacks ?? []).reduce(
+    (sum, platoon) => sum + platoon.entries.reduce((n, e) => n + e.count, 0),
+    0,
+  );
+}
+
+// The driver's deadline is an IDLE window measured from the newest
+// battle_actions row for the pair (plus the offer's own stamp), so "the fight
+// has been quiet for 400s" is expressed by backdating both -- the same state a
+// browser that dropped out and came back leaves behind, without the wait.
+async function ageFightActivity(name: string, ageMs: number): Promise<void> {
+  await db.query(
+    `UPDATE games SET lobby = jsonb_set(lobby, '{pendingBattle,since}', to_jsonb($2::bigint))
+      WHERE name = $1 AND lobby ? 'pendingBattle'`,
+    [name, Date.now() - ageMs],
+  );
+  await db.query(
+    `UPDATE battle_actions SET created_at = to_timestamp($2::bigint / 1000.0)
+      WHERE game_name = $1
+        AND ((attacker_id = 'p1-hero' AND defender_id = 'p0-hero')
+          OR (attacker_id = 'p0-hero' AND defender_id = 'p1-hero'))`,
+    [name, Date.now() - ageMs],
+  );
+}
+
+// One arena row for the pair, stamped now: what the arena's own action stream
+// (and its 30s heartbeat) writes while the player is still fighting.
+async function postArenaRow(name: string, phase: string): Promise<void> {
+  await db.query(
+    `INSERT INTO battle_actions (game_name, seat, attacker_id, defender_id, seq, phase, payload)
+     VALUES ($1, 0, 'p1-hero', 'p0-hero', 99, $2, '{}'::jsonb)`,
+    [name, phase],
+  );
+}
+
+interface VoidedCardSnapshot {
+  arenaUp: boolean;
+  hasVoidedTitle: boolean;
+  hasVoidedText: boolean;
+  hasSubmitFailedTitle: boolean;
+  body: string;
+}
+
+async function voidedCardSnapshot(page: Page): Promise<VoidedCardSnapshot> {
+  return page.evaluate(() => {
+    let arenaUp = false;
+    const canvases = document.querySelectorAll("canvas");
+    for (let i = 0; i < canvases.length; i++) {
+      const el = canvases[i] as HTMLCanvasElement;
+      const rect = el.getBoundingClientRect();
+      if (getComputedStyle(el).backgroundColor === "rgb(20, 22, 26)" && rect.width > 0 && rect.height > 0) {
+        arenaUp = true;
+        break;
+      }
+    }
+    // No named arrow bindings inside a page.evaluate body: tsx/esbuild's
+    // keepNames transform would inject a __name() helper that does not exist
+    // in the browser page (see openGame's note).
+    const titles = Array.from(document.querySelectorAll("div, span, h1, h2, h3"))
+      .filter((el) => (el as HTMLElement).offsetParent !== null)
+      .map((el) => (el.textContent ?? "").trim());
+    const body = document.body.innerText;
+    return {
+      arenaUp,
+      hasVoidedTitle: titles.includes("This fight was voided"),
+      hasVoidedText: body.includes("was not recorded") && body.includes("server's outcome"),
+      hasSubmitFailedTitle: titles.includes("Couldn't record this battle"),
+      body: body.slice(0, 600),
+    };
+  });
 }
 
 async function freshGame(name: string): Promise<{ id: string }> {
@@ -522,6 +625,133 @@ async function fightAsDefenderDeploysAttackerLeft(browser: Browser): Promise<voi
   }
 }
 
+// Scenario D: the fight the player is winning must not be force-resolved out
+// from under them, and when the deadline DOES fire it must not be silent.
+// Both halves are driven here against the real API + real driver + real DB:
+//
+//  (1) ACTIVE — with the offer 400s old but a fresh arena row for the pair
+//      (what every played action, and the arena's own 30s heartbeat, writes),
+//      the driver must NOT resolve: no BattleResolved, the marker still
+//      pending, the client still in the arena.
+//  (2) IDLE — once the pair has been quiet past the 300s window, the driver
+//      resolves once; the client adopts the server's world, shows "This fight
+//      was voided" with the plain wording, and NEVER posts SubmitBattleResult
+//      (asserted from the request log, so the old "Couldn't record this
+//      battle" refusal can never come back unnoticed).
+async function voidedFightIsNotSilent(browser: Browser): Promise<void> {
+  console.log(">> [D] an active fight is kept; a silent one is voided and SAID SO");
+  const name = "ai-defender-e2e-d";
+  const game = await freshGame(name);
+  await seedAdjacentHeroes(name);
+
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const consoleErrors = attachErrorCollectors(page);
+  // Every command POST the client makes that carries a played-out battle
+  // result. The point of half two is that this list stays empty.
+  const submittedBodies: string[] = [];
+  page.on("request", (req) => {
+    if (!req.url().includes("/commands")) return;
+    const body = req.postData() ?? "";
+    if (body.includes("SubmitBattleResult")) submittedBodies.push(body);
+  });
+  const t0 = Date.now();
+  try {
+    await openGame(page, name, game.id);
+    await page.evaluate(() => void (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.endTurn());
+
+    // The offer modal auto-opens (the human is the defender).
+    let snap: ModalSnapshot | null = null;
+    const modalDeadline = Date.now() + 45_000;
+    while (Date.now() < modalDeadline) {
+      snap = await modalSnapshot(page);
+      if (snap.hasQuickResolve && snap.hasFight && !snap.hasFlee) break;
+      await wait(250);
+    }
+    assert.ok(snap?.hasFight, `the defender modal never opened; buttons=${JSON.stringify(snap?.visibleButtons)}`);
+    await page.locator("button", { hasText: /^Fight$/ }).first().click();
+
+    // The arena overlay (its canvas carries the fixed "#14161a" background).
+    let arenaReady = false;
+    const arenaDeadline = Date.now() + 30_000;
+    while (Date.now() < arenaDeadline) {
+      const probe = await voidedCardSnapshot(page);
+      if (probe.arenaUp) { arenaReady = true; break; }
+      await wait(250);
+    }
+    assert(arenaReady, "the arena overlay did not appear after Fight");
+    console.log(`>> [D] arena up at t+${Date.now() - t0}ms`);
+
+    // (1) ACTIVE: the offer is old, the arena is alive.
+    await ageFightActivity(name, 400_000);
+    await postArenaRow(name, "heartbeat");
+    await wait(13_000); // > two 5s driver scans
+    const activeRows = await battleResolvedRows(name);
+    const activeMarker = await pendingBattleMarker(name);
+    const activeClient = await voidedCardSnapshot(page);
+    console.log(
+      `>> [D] ACTIVE (offer 400s old, arena row fresh): BattleResolved=${activeRows.length} ` +
+        `marker=${JSON.stringify(activeMarker)} arenaUp=${activeClient.arenaUp}`,
+    );
+    assert.equal(activeRows.length, 0, "the driver force-resolved a fight the arena was still playing");
+    assert.ok(activeMarker, "the pending offer was cleared while the fight was live");
+    assert.equal(activeClient.arenaUp, true, "the arena must stay up while the fight is live");
+
+    // (2) IDLE: the pair goes quiet past the deadline. The client's own 30s
+    // heartbeat can re-arm the window, so the aging is retried until the
+    // driver has had its say.
+    let voided: VoidedCardSnapshot | null = null;
+    let resolvedRows: ResolvedRow[] = [];
+    const voidDeadline = Date.now() + 90_000;
+    while (Date.now() < voidDeadline) {
+      await ageFightActivity(name, 400_000);
+      const settleDeadline = Date.now() + 20_000;
+      while (Date.now() < settleDeadline) {
+        resolvedRows = await battleResolvedRows(name);
+        voided = await voidedCardSnapshot(page);
+        if (resolvedRows.length > 0 && voided.hasVoidedTitle) break;
+        await wait(500);
+      }
+      if (resolvedRows.length > 0 && voided?.hasVoidedTitle) break;
+    }
+    console.log(
+      `>> [D] IDLE (pair quiet past 300s): BattleResolved=${resolvedRows.length} ` +
+        `actors=${JSON.stringify(resolvedRows.map((r) => r.actor_seat))} ` +
+        `card=${JSON.stringify({ title: voided?.hasVoidedTitle, text: voided?.hasVoidedText, arenaUp: voided?.arenaUp })}`,
+    );
+    assert.equal(resolvedRows.length, 1, `the deadline must fire exactly once on a silent fight (got ${JSON.stringify(resolvedRows)})`);
+    assert.equal(resolvedRows[0].actor_seat, 1, "the server's own resolution (the AI seat) is the one written");
+    assert.equal(await pendingBattleMarker(name), null, "the forced resolution cleared the offer");
+    assert.ok(voided?.hasVoidedTitle, `the voided notice never appeared; body=${JSON.stringify(voided?.body)}`);
+    assert.ok(voided?.hasVoidedText, "the voided notice must say plainly that the fight was not recorded");
+    assert.equal(voided?.hasSubmitFailedTitle, false, "the old \"Couldn't record this battle\" refusal must not be what the player sees");
+    assert.equal(voided?.arenaUp, false, "the arena overlay must be torn down when the fight is voided");
+    assert.deepEqual(submittedBodies, [], `the client POSTed a played-out battle result into the server's refusal: ${submittedBodies.join(" | ")}`);
+
+    // The client adopted the server's world, not its own played-out one.
+    let clientTroops = await clientHeroTroops(page, "p0-hero");
+    let serverTroops = serverHeroTroops(await serverRow(name), "p0-hero");
+    for (let i = 0; i < 5 && clientTroops !== serverTroops; i++) {
+      await wait(500);
+      clientTroops = await clientHeroTroops(page, "p0-hero");
+      serverTroops = serverHeroTroops(await serverRow(name), "p0-hero");
+    }
+    const phase = await clientPhase(page);
+    console.log(
+      `>> [D] adopted: client p0-hero troops=${clientTroops} server=${serverTroops} phase=${phase?.kind}/player ${phase?.activePlayerId}`,
+    );
+    assert.ok(clientTroops >= 0, "the client must still hold p0-hero after adopting the server's resolution");
+    assert.equal(clientTroops, serverTroops, "the client's state must be the server's world, not the fight the player played");
+    assert.notEqual(phase?.kind, "BATTLE", "the client must leave the BATTLE phase once the server settled it");
+
+    assert.equal(consoleErrors.length, 0, `console/page errors during scenario D:\n${consoleErrors.join("\n")}`);
+    console.log(`>> [D] pass (t+${((Date.now() - t0) / 1000).toFixed(1)}s total), console errors: 0`);
+  } finally {
+    await page.close().catch(() => {});
+    await db.query(`DELETE FROM battle_actions WHERE game_name = $1`, [name]).catch(() => {});
+    await deleteGame(name);
+  }
+}
+
 async function main(): Promise<void> {
   children.push(spawnLogged("api", "npx", ["tsx", "server/index.ts"], { API_PORT: String(API_PORT) }));
   children.push(spawnLogged("web", "npx", ["vite", "--port", String(WEB_PORT), "--strictPort"], {}));
@@ -535,6 +765,7 @@ async function main(): Promise<void> {
       await aiAttacksHumanModalAutoOpens(browser);
       await reloadMidOfferReopensModal(browser);
       await fightAsDefenderDeploysAttackerLeft(browser);
+      await voidedFightIsNotSilent(browser);
     } finally {
       await browser.close().catch(() => {});
     }
