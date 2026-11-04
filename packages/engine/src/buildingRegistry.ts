@@ -53,7 +53,6 @@ export interface BuildingEffect {
   };
   playerEffects: {
     controlRangeBonus?: number;
-    heroSpeedBonus?: number;
   };
 }
 
@@ -909,7 +908,6 @@ export function buildingPlayerEffects(kind: BuildingKind, level: number) {
   const e = REGISTRY[kind];
   return {
     controlRangeBonus: (e.playerEffects.controlRangeBonus ?? 0) * level,
-    heroSpeedBonus: (e.playerEffects.heroSpeedBonus ?? 0) * level,
   };
 }
 
