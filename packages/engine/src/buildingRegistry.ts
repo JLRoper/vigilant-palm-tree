@@ -54,7 +54,6 @@ export interface BuildingEffect {
   playerEffects: {
     controlRangeBonus?: number;
     heroSpeedBonus?: number;
-    heroAttackBonus?: number;
   };
 }
 
@@ -284,7 +283,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
     draftMax: 3,
     draftPerDay: 0.25,
     settlementEffects: { defenseBonus: 1 },
-    playerEffects: { heroAttackBonus: 1 },
+    playerEffects: {},
   },
   stables: {
     kind: "stables",
@@ -911,7 +910,6 @@ export function buildingPlayerEffects(kind: BuildingKind, level: number) {
   return {
     controlRangeBonus: (e.playerEffects.controlRangeBonus ?? 0) * level,
     heroSpeedBonus: (e.playerEffects.heroSpeedBonus ?? 0) * level,
-    heroAttackBonus: (e.playerEffects.heroAttackBonus ?? 0) * level,
   };
 }
 
