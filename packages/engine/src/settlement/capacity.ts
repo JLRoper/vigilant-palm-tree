@@ -8,7 +8,18 @@ import { buildingSettlementEffects } from "../buildingRegistry";
 // is never destroyed, it just can't grow.
 
 export const BASE_STORAGE: Record<1 | 2 | 3, number> = { 1: 500, 2: 1500, 3: 4000 };
-export const BASE_TREASURY: Record<1 | 2 | 3, number> = { 1: 1500, 2: 4000, 3: 10000 };
+// THE BASE CAP MUST HOLD THE PRICE THE LEVEL IS OFFERED. A settlement pays its
+// own upgrades out of its own treasury and every gold addition lands clamped by
+// treasuryHeadroom, so a price above the cap a level can REACH is an offer that
+// can never be accepted -- not a shortfall to save for. Above level 1 that is
+// reachable through the design's capacity path (a Bank or Treasury adds
+// 2,000g/level of cap and both are placeable from level 2), so those bases are
+// deliberately base-blocked on purpose. Level 1 has no capacity path at all --
+// warehouse/bank/treasury are the only treasuryBonus kinds and all three are
+// requiredLevel 2 -- so its base has to carry its own tier upgrade's 5,000g
+// (was 1,500g, which capped the vault below SETTLEMENT_UPGRADE_COSTS[1] and made
+// that upgrade unpayable however long the player waited).
+export const BASE_TREASURY: Record<1 | 2 | 3, number> = { 1: 5000, 2: 4000, 3: 10000 };
 
 // §4.2 + the Phase 1 treasury-wagons split — hero caps scale with the
 // matching wagon slot. Army `wagons` govern the RESOURCE cargo cap ONLY

@@ -83,22 +83,22 @@ function makeState(settlements: SettlementState[]): GameState {
 }
 
 test("below the cap is not capped", () => {
-  assert.equal(treasuryCapped(settlement("s0", 0, { gold: 1499 })), false);
+  assert.equal(treasuryCapped(settlement("s0", 0, { gold: BASE_TREASURY[1] - 1 })), false);
   assert.equal(treasuryCapped(settlement("s0", 0, { gold: 0 })), false);
 });
 
 test("exactly at the cap is capped -- headroom is already zero", () => {
   const atCap = settlement("s0", 0, { gold: BASE_TREASURY[1] });
-  assert.equal(settlementTreasuryCap(atCap), 1500);
+  assert.equal(settlementTreasuryCap(atCap), BASE_TREASURY[1]);
   assert.equal(treasuryCapped(atCap), true);
 });
 
 test("above the cap still counts: caps never claw gold back", () => {
-  assert.equal(treasuryCapped(settlement("s0", 0, { gold: 5000 })), true);
+  assert.equal(treasuryCapped(settlement("s0", 0, { gold: BASE_TREASURY[1] + 1000 })), true);
 });
 
 test("the cap rises with level and with treasury/bank buildings", () => {
-  const lvl1 = settlement("s0", 0, { level: 1, gold: 4000 });
+  const lvl1 = settlement("s0", 0, { level: 1, gold: BASE_TREASURY[1] + 1000 });
   assert.equal(treasuryCapped(lvl1), true);
 
   const lvl2 = settlement("s0", 0, { level: 2, gold: 4000 });
@@ -112,7 +112,7 @@ test("the cap rises with level and with treasury/bank buildings", () => {
   });
   const cap = settlementTreasuryCap(withTreasury);
   assert.ok(cap > BASE_TREASURY[1], "treasury raises the cap");
-  assert.equal(cap, 3500, "1500 base + 2000 per-level treasuryBonus");
+  assert.equal(cap, 7000, "5000 base + 2000 per-level treasuryBonus");
   assert.equal(treasuryCapped(withTreasury), false, "a building that raises the cap must clear the row");
 });
 
@@ -148,55 +148,55 @@ test("the amber is the codebase's existing warning amber", () => {
 
 test("foreign and neutral settlements are excluded", () => {
   const state = makeState([
-    settlement("mine", 0, { gold: 1500 }),
-    settlement("theirs", 1, { gold: 1500 }),
-    settlement("neutral", null, { gold: 1500 }),
+    settlement("mine", 0, { gold: BASE_TREASURY[1] }),
+    settlement("theirs", 1, { gold: BASE_TREASURY[1] }),
+    settlement("neutral", null, { gold: BASE_TREASURY[1] }),
   ]);
   assert.deepEqual(cappedSettlements(state, 0).map((s) => s.id), ["mine"]);
   assert.deepEqual(cappedSettlements(state, null), [], "unknown seat warns about nothing");
 });
 
 test("transition: fires once on entry, not again while still capped", () => {
-  const before = makeState([settlement("s0", 0, { gold: 1400 })]);
-  const entered = makeState([settlement("s0", 0, { gold: 1500 })]);
+  const before = makeState([settlement("s0", 0, { gold: BASE_TREASURY[1] - 100 })]);
+  const entered = makeState([settlement("s0", 0, { gold: BASE_TREASURY[1] })]);
   assert.deepEqual(newlyCappedSettlements(before, entered, 0).map((s) => s.id), ["s0"]);
 
-  const stillCapped = makeState([settlement("s0", 0, { gold: 1500 })]);
+  const stillCapped = makeState([settlement("s0", 0, { gold: BASE_TREASURY[1] })]);
   assert.deepEqual(newlyCappedSettlements(entered, stillCapped, 0), []);
   assert.deepEqual(newlyCappedSettlements(entered, stillCapped, 0), [], "and again next turn");
 });
 
 test("transition: un-cap then re-cap fires a second time", () => {
-  const capped = makeState([settlement("s0", 0, { gold: 1500 })]);
-  const uncapped = makeState([settlement("s0", 0, { gold: 1200 })]);
+  const capped = makeState([settlement("s0", 0, { gold: BASE_TREASURY[1] })]);
+  const uncapped = makeState([settlement("s0", 0, { gold: BASE_TREASURY[1] - 300 })]);
   assert.deepEqual(newlyCappedSettlements(capped, uncapped, 0), []);
 
-  const reCapped = makeState([settlement("s0", 0, { gold: 1500 })]);
+  const reCapped = makeState([settlement("s0", 0, { gold: BASE_TREASURY[1] })]);
   assert.deepEqual(newlyCappedSettlements(uncapped, reCapped, 0).map((s) => s.id), ["s0"]);
 });
 
 test("transition: a settlement that drops out of the roster is not re-reported", () => {
-  const before = makeState([settlement("s0", 0, { gold: 1500 })]);
+  const before = makeState([settlement("s0", 0, { gold: BASE_TREASURY[1] })]);
   const lost = makeState([]);
   assert.deepEqual(newlyCappedSettlements(before, lost, 0), []);
 });
 
 test("transition: an unknown previous state counts every capped settlement", () => {
-  const next = makeState([settlement("s0", 0, { gold: 1500 })]);
+  const next = makeState([settlement("s0", 0, { gold: BASE_TREASURY[1] })]);
   assert.deepEqual(newlyCappedSettlements(null, next, 0).map((s) => s.id), ["s0"]);
 });
 
 test("transition: a failed end-turn that changed nothing reports nothing", () => {
-  const state = makeState([settlement("s0", 0, { gold: 1500 })]);
+  const state = makeState([settlement("s0", 0, { gold: BASE_TREASURY[1] })]);
   assert.deepEqual(newlyCappedSettlements(state, state, 0), []);
 });
 
 test("transition: foreign and neutral settlements never toast", () => {
   const before = makeState([settlement("theirs", 1, { gold: 0 }), settlement("neutral", null, { gold: 0 })]);
   const after = makeState([
-    settlement("theirs", 1, { gold: 1500 }),
-    settlement("neutral", null, { gold: 1500 }),
-    settlement("mine", 0, { gold: 1500 }),
+    settlement("theirs", 1, { gold: BASE_TREASURY[1] }),
+    settlement("neutral", null, { gold: BASE_TREASURY[1] }),
+    settlement("mine", 0, { gold: BASE_TREASURY[1] }),
   ]);
   assert.deepEqual(newlyCappedSettlements(before, after, 0).map((s) => s.id), ["mine"]);
   assert.deepEqual(newlyCappedSettlements(before, after, null), []);
@@ -206,25 +206,25 @@ test("transition: a bank that raises the cap un-caps, then a refill re-caps", ()
   // The clear case: building a cap-building mid-turn lifts the purse back under
   // the cap (colour clears, no toast), and filling the larger pot later is a
   // genuinely new crossing.
-  const before = makeState([settlement("s0", 0, { level: 1, gold: 1500 })]);
+  const before = makeState([settlement("s0", 0, { level: 1, gold: BASE_TREASURY[1] })]);
   assert.equal(treasuryCapped(before.settlements.s0), true);
 
   const banked = makeState([
-    settlement("s0", 0, { level: 1, gold: 1500, buildings: [building("bank")] }),
+    settlement("s0", 0, { level: 1, gold: BASE_TREASURY[1], buildings: [building("bank")] }),
   ]);
-  assert.equal(settlementTreasuryCap(banked.settlements.s0), 3500);
+  assert.equal(settlementTreasuryCap(banked.settlements.s0), 7000);
   assert.equal(treasuryCapped(banked.settlements.s0), false);
   assert.deepEqual(newlyCappedSettlements(before, banked, 0), [], "rising the cap is not a new cap");
 
   const refilled = makeState([
-    settlement("s0", 0, { level: 1, gold: 3500, buildings: [building("bank")] }),
+    settlement("s0", 0, { level: 1, gold: BASE_TREASURY[1] + 2000, buildings: [building("bank")] }),
   ]);
   assert.deepEqual(newlyCappedSettlements(banked, refilled, 0).map((s) => s.id), ["s0"]);
 });
 
 test("session dedupe (E1a): each settlement toasts once per session while it stays at cap", () => {
   resetTreasuryCapDedupe();
-  const capped = makeState([settlement("s0", 0, { gold: 1500 })]);
+  const capped = makeState([settlement("s0", 0, { gold: BASE_TREASURY[1] })]);
   const first = applyTreasuryCapSessionDedupe("g1", capped, 0, newlyCappedSettlements(null, capped, 0));
   assert.deepEqual(first.map((s) => s.id), ["s0"]);
 
@@ -237,22 +237,22 @@ test("session dedupe (E1a): each settlement toasts once per session while it sta
 
 test("session dedupe (E1a): a settlement observed below cap re-arms and toasts again on the next cap", () => {
   resetTreasuryCapDedupe();
-  const capped = makeState([settlement("s0", 0, { gold: 1500 })]);
+  const capped = makeState([settlement("s0", 0, { gold: BASE_TREASURY[1] })]);
   assert.deepEqual(applyTreasuryCapSessionDedupe("g1", capped, 0, newlyCappedSettlements(null, capped, 0)).map((s) => s.id), ["s0"]);
 
   // Weekly route upkeep (or a bank deposit) drops it below cap — the release.
-  const below = makeState([settlement("s0", 0, { gold: 1200 })]);
+  const below = makeState([settlement("s0", 0, { gold: BASE_TREASURY[1] - 300 })]);
   assert.deepEqual(applyTreasuryCapSessionDedupe("g1", below, 0, newlyCappedSettlements(capped, below, 0)), []);
 
   // The next turn's income refills it — a genuinely new crossing, toast again.
-  const refilled = makeState([settlement("s0", 0, { gold: 1500 })]);
+  const refilled = makeState([settlement("s0", 0, { gold: BASE_TREASURY[1] })]);
   const again = applyTreasuryCapSessionDedupe("g1", refilled, 0, newlyCappedSettlements(below, refilled, 0));
   assert.deepEqual(again.map((s) => s.id), ["s0"]);
 });
 
 test("session dedupe (E1a): the session key scopes ids across games", () => {
   resetTreasuryCapDedupe();
-  const capped = makeState([settlement("s0", 0, { gold: 1500 })]);
+  const capped = makeState([settlement("s0", 0, { gold: BASE_TREASURY[1] })]);
   assert.deepEqual(applyTreasuryCapSessionDedupe("game-a", capped, 0, newlyCappedSettlements(null, capped, 0)).map((s) => s.id), ["s0"]);
   assert.deepEqual(
     applyTreasuryCapSessionDedupe("game-b", capped, 0, newlyCappedSettlements(null, capped, 0)).map((s) => s.id),
@@ -263,7 +263,7 @@ test("session dedupe (E1a): the session key scopes ids across games", () => {
 
 test("session dedupe (E1a): foreign settlements and an unknown seat dedupe nothing", () => {
   resetTreasuryCapDedupe();
-  const capped = makeState([settlement("theirs", 1, { gold: 1500 })]);
+  const capped = makeState([settlement("theirs", 1, { gold: BASE_TREASURY[1] })]);
   const rows = newlyCappedSettlements(null, capped, 0);
   assert.deepEqual(rows, []);
   assert.deepEqual(applyTreasuryCapSessionDedupe("g1", capped, 0, rows), []);
