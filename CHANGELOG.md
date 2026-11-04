@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.51.3] - 2026-11-04
+
+the level-1 treasury cap (5,000g) now holds the level-1 tier upgrade it gates; a blocked upgrade names the cap only where the Bank/Treasury that clears it can be built
+
 ## [0.51.2] - 2026-11-04
 
 the primary checkout can run the browser suites again: kernel-assigned ports, a private test database, and a dev server that no longer walks the worktree fleet
