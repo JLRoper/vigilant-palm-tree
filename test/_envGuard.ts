@@ -1,5 +1,6 @@
 import { writeSync } from "node:fs";
 import { constants, loadRequest, type TestRequest } from "./_request";
+import { databaseNameWarning } from "../scripts/lib/database-name.mjs";
 
 /**
  * Fail-closed environment guard for the three by-hand entries that drive a
@@ -44,6 +45,14 @@ const DEPLOYED_PORT_WARNINGS: Record<number, string> = {
 };
 const SHARED_DATABASE_WARNING =
   "PGDATABASE=game_poc is the SHARED dev database -- `npm test`/test/smoke.ts delete every game in it except their own fixtures.";
+
+// A name outside every family `scripts/lib/database-name.mjs` produces is not
+// refused -- a person may deliberately aim at a database this repo did not
+// create -- but it IS said out loud, because a database the repo creates and
+// the repo's own guard cannot recognise is one a sweep has to hand-widen for:
+// the gap that left `game_wt_*`, `game_fix3_*`, `game_play_flip_*` and
+// `game_play_meas_*` behind. The wording is the module's own
+// (`databaseNameWarning`), the same one `tools/run-test.mjs` prints.
 
 /** A malformed port has no fallback to refuse; say what shape is required instead. */
 const MALFORMED_PORT_REFUSAL = "no default -- a TCP port (1-65535), an integer, is required";
@@ -137,6 +146,9 @@ export function inspectRunTargets(input: TargetInput): TargetInspection {
     refusals.push({ variable: "PGDATABASE", problem: database.problem ?? "unset", refusedValue: REFUSED_DEFAULTS.database });
   } else if (database.value === "game_poc") {
     warnings.push(SHARED_DATABASE_WARNING);
+  } else {
+    const stray = databaseNameWarning(database.value);
+    if (stray) warnings.push(stray);
   }
 
   const requestPresent = input.request != null;

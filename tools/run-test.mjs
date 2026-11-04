@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync, existsSync, readFileSync, unlinkSync } from "
 import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { nodeToolCommand, toolEntry } from "./resolve-tool-entry.mjs";
+import { databaseNameWarning } from "../scripts/lib/database-name.mjs";
 
 const ROOT = process.cwd();
 const LOCAL_DIR = resolve(ROOT, "local");
@@ -253,6 +254,14 @@ async function runOne(entry, opts) {
         `both read it, and these suites delete games. Put PGDATABASE=game_play_<hex> in ${TEST_ENV_FILES[1]} ` +
         `(gitignored) or export it, to aim this run at a database of its own.`,
     );
+  } else {
+    // A name the repo's own guard does not recognise is one a sweep cannot
+    // claim as this repo's own -- the gap that let `game_wt_*`, `game_fix3_*`,
+    // `game_play_flip_*` and `game_play_meas_*` accumulate until two sweeps had
+    // to hand-widen the guard to see them. Said out loud at the run that would
+    // create it, so the next card names a database of its own instead.
+    const stray = databaseNameWarning(childEnv.PGDATABASE);
+    if (stray) console.log(`>> [${entry}] WARNING: ${stray}`);
   }
 
   return await new Promise((resolveRun, rejectRun) => {
