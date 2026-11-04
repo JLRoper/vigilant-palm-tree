@@ -4,6 +4,7 @@ dist/
 *.log
 .env
 .env.local
+.env.test.local
 kilo.json
 .vite/
 .recycled/

@@ -27,6 +27,38 @@ function getCommitHash(): string {
   }
 }
 
+/**
+ * Directories under the checkout root that the dev server must NOT watch.
+ *
+ * The dev server watches the whole root, and vite holds the first document
+ * request until that initial crawl settles. The PRIMARY checkout is the one
+ * directory on this box that contains ~130 sibling worktrees
+ * (`git worktree list` -> `.worktrees/`, plus `.kilo/worktrees/`), each a full
+ * tree with its own heavy art and scratch dirs, so the walk takes minutes
+ * instead of milliseconds: measured on the primary, the first
+ * `GET /index.html` took 135252ms with the defaults alone and 5494ms with only
+ * the worktrees entry added, so every browser suite died on
+ * `page.goto: Timeout 30000ms exceeded` at the very commit that passed from a
+ * worktree (2370ms for the same request). These are all build output, scratch
+ * or agent state -- nothing the app imports and nothing HMR needs to see.
+ *
+ * `.git` and `node_modules` are vite's own defaults, RESTATED on purpose:
+ * declaring this key replaces them rather than adding to them.
+ */
+const WATCH_IGNORED = [
+  "**/.git/**",
+  "**/node_modules/**",
+  "**/.worktrees/**",
+  "**/.kilo/**",
+  "**/.agentboard/**",
+  "**/local/**",
+  "**/dist/**",
+  "**/analysis/**",
+  "**/design/**",
+  "**/reviews/**",
+  "**/sessionTracking/**",
+];
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const apiHost = process.env.API_HOST ?? "127.0.0.1";
@@ -64,6 +96,10 @@ export default defineConfig(({ mode }) => {
     server: {
       host: "0.0.0.0",
       port: Number(env.CLIENT_PORT ?? 5173),
+      // A document request is held until the initial crawl settles, so a root
+      // this box's worktree fleet has filled changes from milliseconds to
+      // minutes. See WATCH_IGNORED.
+      watch: { ignored: WATCH_IGNORED },
       proxy: {
         "/api": {
           target: `http://${apiHost}:${apiPort}`,
