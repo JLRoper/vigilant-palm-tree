@@ -10,6 +10,19 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.53.5] - 2026-11-04
+
+delete the five declared-never-emitted `GameEvent` names, and require every declared one to keep a real emitter
+
+Five names in the `GameEvent` union (`src/core/events.ts`) were DECLARED-NEVER-EMITTED: `calc:heroSpeed`, `calc:controlRange`, `calc:visionRange`, `economy:moraleChanged`, `economy:warehouseChanged`. Re-measured on `55457c4` (0.53.4) — not read off `docs/event-system.md`, whose §7.4 row for `economy:warehouseChanged` claimed an emitter at `turnController.ts:562-563` while those lines are `startMove`'s body today — by an audit that parses the union and then classifies every string literal in every `src/`, `packages/`, `server/` and `test/` file by whether a `bus.emit`/`bus.emitRaw` call or a `commit({ events: [...] })` array sits within four lines of it. All five measured empty on BOTH sides: no emitter in production or in tests, no `bus.on`/`bus.once` listener anywhere.
+
+- Emitter side per name: zero hits; listener side: zero hits. Each of the four `calc:*`/`economy:moraleChanged` names was referenced by exactly one line in the whole tree — its own union member. `economy:warehouseChanged` had a second reference, a stale `DEFAULT_BUS_EVENT_TYPES` entry in `src/debug/eventLog.ts` (the dev EventLog's `bus.onAny` filter) whose entry could never match, because its emitter was dropped by `c1debf9` on 2026-10-02 and the doc row was never updated.
+- Nothing emits those five, so nothing could ever have listened: deleting them is behaviour-identical to main.
+- Deleted: the five union members; the stale whitelist entry in `src/debug/eventLog.ts` (10 kinds -> 9); and the `docs/event-system.md` lines naming them (§7.3 #9, the five §7.4 rows, the §7.4 `commit()` footnote, the §9 table row, §10 item 7).
+- LEFT, measured but not deleted: every other declared `GameEvent` type is EMITTED. `turn:ended`, `phase:changed`, `round:changed`, `day:changed`, `hero:moved`, `settlement:captured` (via `commit()`'s `events:` array) and `economy:goldChanged` are emit-only in production — the dev EventLog is their only listener — and `battle:resolved` is emit-only with 4 emit sites and no production subscriber. Those are wired on one side; only a name empty on BOTH is dead.
+- Pinned by `test/core/busEventNames.test.ts` (4 cases: the union parses for real, no retired name is referenced in `src/` + `packages/`, every declared type has a real emitter, and the retired names are absent from the union's own text). Against the pre-fix source the same file reads `pass 1 / fail 3`, and the emitter case prints the five names it found on its own — `actual: ['calc:controlRange', 'calc:heroSpeed', 'calc:visionRange', 'economy:moraleChanged', 'economy:warehouseChanged']`, `expected: []` — re-deriving the audit's list from the code alone. The "every declared type has an emitter" case is the general rule: the next name declared and left unwired fails there instead of waiting for a card.
+- Gate: `npm run build`, `npm run lint:deps`, `npm run test:types`, `node tools/docs-check.mjs --changed-from github/main`, `npm run test:unit`.
+
 ## [0.53.4] - 2026-11-04
 
 remove the dead heroSpeedBonus field end to end
