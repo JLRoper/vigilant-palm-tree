@@ -632,14 +632,24 @@ export class SettlementInfoMenu {
         const townHall = settlement.buildings.find((b) => b.kind === "townHall");
         const thLevelOk = townHall && townHall.level >= settlement.level + 1;
 
+        // Every entry carries the amount it is asking for. The resource rows
+        // used to push a bare noun ("Stone") beside a gold entry that read
+        // "Gold 0/5000", so the one line that explains a dead control withheld
+        // the number a player plans around -- at `stone 13` against an L2 cost
+        // of 30 it read exactly `Needs: Stone` (round-2 city-view finding F-3).
+        const shortOf = (label: string, have: number, need: number): string => `${label} ${have}/${need}`;
         const missing: string[] = [];
-        if (settlement.population < popReq) missing.push(`Pop ${settlement.population}/${popReq}`);
+        if (settlement.population < popReq) missing.push(shortOf("Pop", settlement.population, popReq));
         if (!thLevelOk) missing.push(`TH L${settlement.level + 1}`);
-        if (cost && settlement.gold < cost.gold) missing.push(`Gold ${settlement.gold}/${cost.gold}`);
-        if (cost && (settlement.warehouse.wood ?? 0) < cost.wood) missing.push(`Wood`);
-        if (cost && (settlement.warehouse.stone ?? 0) < cost.stone) missing.push(`Stone`);
-        if (cost && (settlement.warehouse.iron ?? 0) < cost.iron) missing.push(`Iron`);
-        if (cost && (settlement.warehouse.arcane ?? 0) < cost.arcane) missing.push(`Arcane`);
+        if (cost && settlement.gold < cost.gold) missing.push(shortOf("Gold", settlement.gold, cost.gold));
+        if (cost && (settlement.warehouse.wood ?? 0) < cost.wood)
+          missing.push(shortOf("Wood", settlement.warehouse.wood ?? 0, cost.wood));
+        if (cost && (settlement.warehouse.stone ?? 0) < cost.stone)
+          missing.push(shortOf("Stone", settlement.warehouse.stone ?? 0, cost.stone));
+        if (cost && (settlement.warehouse.iron ?? 0) < cost.iron)
+          missing.push(shortOf("Iron", settlement.warehouse.iron ?? 0, cost.iron));
+        if (cost && (settlement.warehouse.arcane ?? 0) < cost.arcane)
+          missing.push(shortOf("Arcane", settlement.warehouse.arcane ?? 0, cost.arcane));
 
         if (missing.length > 0) {
           this.upgradeBtn.style.display = "";
