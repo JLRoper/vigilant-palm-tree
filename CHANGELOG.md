@@ -10,7 +10,7 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.53.3] - 2026-11-04
+## [0.53.4] - 2026-11-04
 
 remove the dead heroSpeedBonus field end to end
 
@@ -23,6 +23,10 @@ remove the dead heroSpeedBonus field end to end
 - The other half is RECORDED so it can be reversed by preference: the spec's header names the seam — a hero speed multiplier on `HeroState`, applied to `MOVEMENT_PER_TURN` at the movement grants in `hero/move.ts:116`, `hero/recruit.ts:102` and `charter/advance.ts:129`, resolved through `computePlayerBonuses` — plus the re-declaration sequence.
 - Measured but deliberately NOT touched, out of this row's scope: the `calc:heroSpeed` EVENT name in `src/core/events.ts:24` (already documented as declared-never-emitted in `docs/event-system.md`; an event name, not this field).
 - Gate: `npm run build`, `npm run lint:deps` (543 modules, 0 violations), `npm run test:types` (application 0 errors, test tree no regressions), `node tools/docs-check.mjs --changed-from github/main`, and `npm run test:all`.
+
+## [0.53.3] - 2026-11-04
+
+docs: the RecruitUnits faction gate is live, not dormant -- correct the comment and the copies of the claim
 
 ## [0.53.2] - 2026-11-04
 
