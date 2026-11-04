@@ -17,7 +17,7 @@ import { gameModeSettings } from "@heroes/contracts";
 import { districtKey } from "../control";
 import { disconnectedDistrictKeys } from "./districtConnectivity";
 import { type CitySpot } from "./citySpots";
-import { newPlacementsAutoCrew } from "./workforce";
+import { freshPlacementWorkers } from "./workforce";
 
 // The server-side (and optimistic client-side) commit of the city view's
 // working cart -- the F4 gap closer. Mirrors the client's own net-cost model
@@ -161,7 +161,7 @@ export function applyPlaceBuildings(
     return { ok: false, state, reason: SETTLEMENT_LEVEL_TOO_LOW };
   }
 
-  const newPlacementWorkers = newPlacementsAutoCrew(s) ? undefined : 0;
+  const newPlacementWorkers = freshPlacementWorkers(s);
 
   if (district) {
     if (buildings.some((b) => b.kind === "townHall")) {

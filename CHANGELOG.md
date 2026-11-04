@@ -12,7 +12,9 @@ the version has not already been bumped in that changeset.
 
 ## [0.51.1] - 2026-11-04
 
-the primary checkout can run the browser suites again: kernel-assigned ports, a private test database, and a dev server that no longer walks the worktree fleet
+- A fresh placement no longer reads as an automatic 2.00x crew: the client's optimistic write of the cart into its own state now carries the engine's own new-placement verdict, so the row the player sees is the row the server stores (`workers: 0` in a town being grown; the free auto crew kept in a bootstrap) instead of a site the engine holds frozen
+- The building menu's site line follows the live site while the menu stays open: crew, rate and day count are re-read on every state commit, and a site that completes under the menu drops its `Under construction` line
+- docs/settlements.md: the construction-sites section names the client's row and the menu's refresh
 
 ## [0.51.0] - 2026-11-03
 

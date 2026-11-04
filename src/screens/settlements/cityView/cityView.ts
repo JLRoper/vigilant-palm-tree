@@ -16,6 +16,7 @@ import {
   autoStaffedSlots,
   buildingLegacyStaffing,
   canAssignWorkers,
+  freshPlacementWorkers,
   isProducerKind,
   isRecruitBuilding,
   staffingBase,
@@ -27,7 +28,7 @@ import { getUnitImageUrl } from "../../../data/unitImages";
 import { cachedUnitTypes } from "../../../data/unitCatalog";
 import { advanceChargedOnCommit, netDelta } from "./netCost";
 import { cartCommitSignature } from "./commitSignature";
-import { syncCartBuildings } from "./syncedBuildings";
+import { syncCartBuildings, withFreshPlacementStaffing } from "./syncedBuildings";
 import { BuildingMenu, type BuildingMenuOptions, type BuildingMenuWorkforce } from "./buildingMenu";
 import { BuildingPlacer } from "./buildingPlacer";
 import { BuildingSelectionMenu, type SelectedBuildingEntry } from "./buildingSelectionMenu";
@@ -374,15 +375,15 @@ export class CityView {
 
     window.addEventListener("keydown", this.onKeyDown);
 
-    // A turn (or any committed state) moves the treasury while the city -- and
-    // its palette -- stay open, and the palette renders its rows FROM that
-    // snapshot, so a treasury that refilled under it has to reach it. off()
-    // first so a context switch that opens the view again cannot stack
-    // listeners.
-    bus.off("turn:ended", this.syncAffordability);
-    bus.off("state:committed", this.syncAffordability);
-    bus.on("turn:ended", this.syncAffordability);
-    bus.on("state:committed", this.syncAffordability);
+    // The state moved under an open city view -- a turn ended, or any state was
+    // committed: a treasury that refilled under it has to reach the palette
+    // (which renders its rows FROM that snapshot) and the open building menu has
+    // to re-read the site it is showing. off() first so a context switch that
+    // opens the view again cannot stack listeners.
+    bus.off("turn:ended", this.syncOpenView);
+    bus.off("state:committed", this.syncOpenView);
+    bus.on("turn:ended", this.syncOpenView);
+    bus.on("state:committed", this.syncOpenView);
 
     // The city owns Escape ordering while it is open, because the settlement
     // info panel deliberately stays visible over the city (user request,
@@ -1212,14 +1213,18 @@ export class CityView {
     );
   }
 
-  /** Cart buildings with construction/level/style/bank re-synced from live state -- EndTurn's round wrap replaces state objects, so the cart snapshot goes stale otherwise. */
+  /** Cart buildings with construction/level/style/bank re-synced from live state -- EndTurn's round wrap replaces state objects, so the cart snapshot goes stale otherwise. A cart entry with NO live twin is a FRESH placement, and its staffing is the engine's own new-placement verdict (`freshPlacementWorkers`): this list is what the client writes into its own state ahead of the engine's commit, so an unstamped entry would make the reducer read the placement as a building that already exists and keep the cart's missing count -- the site the menu drew as a 2.00x crew while the server held 0 (see withFreshPlacementStaffing). */
   private syncedBuildings(): BuildingDef[] {
     const live = this.getSettlement();
     if (!live) return this.placer.buildings;
     const liveBuildings = this.openDistrict
       ? (live.districts?.[districtKey(this.openDistrict.q, this.openDistrict.r)]?.buildings ?? [])
       : live.buildings;
-    return syncCartBuildings(this.placer.buildings, liveBuildings);
+    return withFreshPlacementStaffing(
+      syncCartBuildings(this.placer.buildings, liveBuildings),
+      liveBuildings,
+      freshPlacementWorkers(live),
+    );
   }
 
   private pendingNetDelta(): Partial<Record<ResourceType, number>> {
@@ -1243,13 +1248,18 @@ export class CityView {
   }
 
   /**
-   * The treasury moved under an open city view (a turn ended, or any state was
-   * committed): re-read it, which re-renders the palette's rows when one is
-   * open. Bound once per open so a closed view does not keep listening.
+   * The state moved under an open city view (a turn ended, or any state was
+   * committed): re-read the treasury -- which re-renders the palette's rows when
+   * one is open -- and re-show the open building menu from live state. The menu
+   * is otherwise composed when it opens and left alone, so a site's own line
+   * (`refreshIfOpen` -> `showMenu`'s live read of the site's crew and its day
+   * count) kept the figures it had at open for as long as the menu stayed open
+   * (2026-11-03). Bound once per open so a closed view does not keep listening.
    */
-  private syncAffordability = (): void => {
+  private syncOpenView = (): void => {
     if (!this.isOpen()) return;
     this.refreshAffordability();
+    this.buildingMenu.refreshIfOpen();
   };
 
   private updateBuildButton(): void {
@@ -1289,8 +1299,8 @@ export class CityView {
       this.closeRecruitmentPanel?.();
       this.designBox.hide();
       window.removeEventListener("keydown", this.onKeyDown);
-      bus.off("turn:ended", this.syncAffordability);
-      bus.off("state:committed", this.syncAffordability);
+      bus.off("turn:ended", this.syncOpenView);
+      bus.off("state:committed", this.syncOpenView);
       this.releaseEscapeClaim?.();
       this.releaseEscapeClaim = null;
       this.endWorkerDrag();
