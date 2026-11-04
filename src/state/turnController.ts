@@ -18,6 +18,7 @@ import {
   SETTLEMENT_BATTLE_MIN_RETREAT_ROUND,
   rollbackCaptureSettlement,
   assignWorkers as assignWorkersReducer,
+  pickAiConstructionStaffing,
   revealForPlayer,
 } from "@heroes/engine";
 import type { HorseVariant } from "./settings";
@@ -1562,6 +1563,29 @@ export class TurnController {
         this.hooks.logEvent({
           type: "ai_army_building_rejected",
           payload: { seat, settlementId, reason: result.reason, kinds: list.map((p) => `${p.kind}@${p.gx},${p.gy}`) },
+        });
+      }
+    }
+    // Crew the seat's sites (2026-11-03). THIS is the second AI building path:
+    // the browser-driven seats (hotseat, single-player) place through the local
+    // controller, not through the server driver, and a site nobody is working on
+    // makes no progress at all -- so the same shared staffing planner runs here,
+    // spending the seat's own pool through the same AssignWorkers reducer and
+    // persisting through the same hook. Without it the local seats' placements
+    // would freeze while the server's finished: a divergence visible only in
+    // hotseat play.
+    for (const item of pickAiConstructionStaffing(this.state, seat)) {
+      const staffing = this.assignWorkers(
+        item.settlementId,
+        item.gx,
+        item.gy,
+        item.workers,
+        item.district,
+      );
+      if (!staffing.ok) {
+        this.hooks.logEvent({
+          type: "ai_construction_staffing_rejected",
+          payload: { seat, settlementId: item.settlementId, gx: item.gx, gy: item.gy, workers: item.workers, reason: staffing.reason },
         });
       }
     }

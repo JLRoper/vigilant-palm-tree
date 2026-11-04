@@ -3,6 +3,7 @@
 // pointing here.
 export type {
   AiMove,
+  AiWorkerAssignment,
   CharterAction,
   GarrisonRecruitment,
   HeroArmyPlacement,
@@ -13,6 +14,7 @@ export {
   CHARTER_TARGET_REACH,
   GARRISON_BACKOFF_ROUNDS,
   HERO_ARMY_TARGET_POWER,
+  pickAiConstructionStaffing,
   pickAiMove,
   pickCharterAction,
   pickFoundingHex,

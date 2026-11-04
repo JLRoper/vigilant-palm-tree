@@ -4,12 +4,16 @@ import {
   advanceSettlementUpgrades,
   assignedWorkersExplicit,
   assignWorkers,
+  buildingLegacyStaffing,
   canAssignWorkers,
+  committedWorkerSlots,
   effortFraction,
   hasExplicitStaffing,
   hasLegacyStaffing,
   producerTurnOutput,
   staffingBase,
+  staffingCeiling,
+  steppedWorkers,
   upgradeAccelEffort,
   workforcePool,
 } from "@heroes/engine";
@@ -657,3 +661,194 @@ test("advanceSettlementUpgrades: 1/day by default, accel adds more, staffed town
   const legacy = advanceSettlementUpgrades(withUpgrade([building("townHall", 0, 0)]), { accel: upgradeAccelEffort });
   assert.equal(legacy.settlements.s0.upgrade?.daysRemaining, 9, "legacy unstaffed townHall adds no accel");
 });
+
+// ── the BUILD CREW ceiling (2026-11-03): 4 on any site, the kind's cap once finished ──
+
+test("assignWorkers: a site takes up to 4 builders whatever its kind, and still refuses 5", () => {
+  // A house's own cap is 1. While it is being BUILT the ceiling is the
+  // construction cap for every kind, so the reducer must accept 2..4 on it and
+  // refuse 5 with the SAME `invalid_workers` it always used.
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 3000 }),
+    buildings: [building("house", 0, 0, { construction: { daysRemaining: 4 } })],
+  });
+  for (const workers of [1, 2, 3, 4]) {
+    const r = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers });
+    assert.equal(r.ok, true, `a house SITE accepts ${workers} builders`);
+    assert.equal(r.state.settlements.s0.buildings[0].workers, workers);
+  }
+  const five = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 5 });
+  assert.equal(five.ok, false, "the 5th builder is still refused: the ceiling is 4");
+  assert.equal(five.reason, "invalid_workers", "and rejected for the same reason as before -- no new one");
+});
+
+test("assignWorkers: the ceiling is the KIND's cap once the site is finished", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 3000 }),
+    buildings: [building("house", 0, 0)],
+  });
+  const two = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 2 });
+  assert.equal(two.ok, false, "a finished house still holds exactly 1 worker");
+  assert.equal(two.reason, "invalid_workers");
+});
+
+test("assignWorkers: a site's 4 builders are 4 pool slots, and the increment is pool-gated", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 900 }), // pool floor(900/300) = 3
+    buildings: [building("house", 0, 0, { construction: { daysRemaining: 4 } })],
+  });
+  const three = assignWorkers(state, { settlementId: "s0", gx: 0, gy: 0, workers: 3 });
+  assert.equal(three.ok, true);
+  assert.equal(assignedWorkersExplicit(three.state.settlements.s0), 3, "a site under construction spends its crew from the pool");
+  const four = assignWorkers(three.state, { settlementId: "s0", gx: 0, gy: 0, workers: 4 });
+  assert.equal(four.ok, false, "the 4th builder needs a 4th slot and the pool only has 3");
+  assert.equal(four.reason, "pool_exhausted");
+});
+
+test("the source transfer reads the ceiling on both ends: a builder can be dragged ONTO a site", () => {
+  const state = stateWithSettlement({
+    ...makeSettlement("s0", 0, 2, 2, { population: 900 }),
+    buildings: [
+      building("farmField", 0, 0, { workers: 2 }),
+      building("house", 3, 0, { workers: 1, construction: { daysRemaining: 4 } }),
+    ],
+  });
+  // Farm Field at 2 -> 1, the house SITE at 1 -> 2: a kind-cap destination would
+  // have refused the second builder here (a house's cap is 1).
+  const r = assignWorkers(state, {
+    settlementId: "s0",
+    gx: 3,
+    gy: 0,
+    workers: 2,
+    source: { gx: 0, gy: 0 },
+  });
+  assert.equal(r.ok, true, "the 2nd builder lands on the site");
+  const after = r.state.settlements.s0;
+  assert.deepEqual(after.buildings.map((b) => b.workers), [1, 2]);
+  const third = assignWorkers(r.state, { settlementId: "s0", gx: 3, gy: 0, workers: 3, source: { gx: 0, gy: 0 } });
+  assert.equal(third.ok, true, "and so can the 3rd");
+  const fourth = assignWorkers(third.state, { settlementId: "s0", gx: 3, gy: 0, workers: 4, source: { gx: 0, gy: 0 } });
+  assert.equal(fourth.ok, false, "but the source is empty at that point: a worker must come from somewhere");
+});
+
+// ── the build-crew accounting, and the stepper's own legaciness (2026-11-03) ──
+//
+// Two defects the stage-4 browser pass found in the build-crew branch, pinned
+// here as the pair of rules that close them.
+
+test("committedWorkerSlots: a site claims its kind's cap whether or not anyone is on it", () => {
+  const site = building("crypt", 0, 0, { workers: 0, construction: { daysRemaining: 2 } });
+  const overCrewedSite = building("house", 2, 0, { workers: 4, construction: { daysRemaining: 3 } });
+  const settlement: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, {
+      population: 1500,
+      buildings: [
+        site,
+        overCrewedSite,
+        building("market", 4, 0, { workers: 2 }),
+        building("farmField", 6, 0),
+      ],
+    }),
+    districts: {
+      "3,2": {
+        q: 3,
+        r: 2,
+        citySpots: [],
+        buildings: [building("crypt", 0, 0, { workers: 0, construction: { daysRemaining: 2 } })],
+      },
+    },
+  };
+  assert.equal(assignedWorkersExplicit(settlement), 6, "the dark sites are explicit 0s there: 0 + 4 + 2 + 0");
+  assert.equal(
+    committedWorkerSlots(settlement),
+    14,
+    "yet 14 slots are spoken for: 4+4 for the two sites (the crew a site may hold) + market 2 + 4 for the district site; the auto farm claims nothing",
+  );
+  const finished: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, {
+      population: 1500,
+      buildings: [building("crypt", 0, 0, { workers: 0 }), building("market", 4, 0, { workers: 2 })],
+    }),
+  };
+  assert.equal(
+    committedWorkerSlots(finished),
+    2,
+    "a FINISHED dark crypt holds nothing; a finished explicit building holds its own count",
+  );
+});
+
+test("a stepper reaches the 4-builder crew on a settlement that still holds an auto-crewed building", () => {
+  const settlement: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, {
+      population: 1500,
+      buildings: [
+        building("house", 0, 0), // auto crew (workers undefined)
+        building("barracks", 2, 0, { workers: 0, construction: { daysRemaining: 5 } }),
+      ],
+    }),
+  };
+  assert.equal(hasLegacyStaffing(settlement), true, "one auto-crewed building makes the settlement read legacy");
+  const site = settlement.buildings[1];
+  const ceiling = staffingCeiling(site);
+  assert.equal(ceiling, 4, "a site takes up to the construction ceiling whatever its kind (a barracks caps at 4 anyway)");
+
+  let workers = 0;
+  const steps: number[] = [];
+  for (let i = 0; i < 4; i++) {
+    workers = steppedWorkers({ ...site, workers }, ceiling, 1);
+    steps.push(workers);
+  }
+  assert.deepEqual(steps, [1, 2, 3, 4], "four clicks, four DISTINCT counts: 1.00x / 1.33x / 1.67x / 2.00x are reachable");
+  assert.equal(steppedWorkers({ ...site, workers: 4 }, ceiling, 1), 4, "and the ceiling holds a 5th click");
+  assert.equal(steppedWorkers({ ...site, workers: 4 }, ceiling, -1), 3, "the way back down is one step too");
+
+  assert.equal(
+    staffingBase(2, ceiling, hasLegacyStaffing(settlement)),
+    0,
+    "the settlement-wide flag is what pinned every step at 1: it ignores the 2 the site really holds",
+  );
+  assert.equal(
+    staffingBase(2, ceiling, buildingLegacyStaffing(site)),
+    2,
+    "the building's own legaciness resumes from the count it has",
+  );
+  assert.equal(
+    steppedWorkers({ ...site, workers: undefined }, ceiling, 1),
+    1,
+    "an auto-crewed building still writes its FIRST explicit count as 1, never max + 1",
+  );
+});
+
+test("a builder can be dragged onto a site in a city that still holds an auto-crewed building", () => {
+  // The same defect on the engine's own transfer path: the DESTINATION's resume
+  // point asked the settlement-wide flag, so a city with one auto-crewed building
+  // anywhere accepted only `workers: 1` on any target and refused the rest of the
+  // crew -- 3 identical commands on a real settlement, row stuck at `1 / 4`.
+  const settlement: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, {
+      population: 1500,
+      buildings: [
+        building("farmField", 0, 0), // auto crew: makes the city read legacy
+        building("market", 2, 0, { workers: 3 }),
+        building("barracks", 4, 0, { workers: 2, construction: { daysRemaining: 5 } }),
+      ],
+    }),
+  };
+  assert.equal(hasLegacyStaffing(settlement), true, "the city as a whole reads legacy");
+
+  const r = assignWorkers(stateWithSettlement(settlement), {
+    settlementId: "s0",
+    gx: 4,
+    gy: 0,
+    workers: 3,
+    source: { gx: 2, gy: 0 },
+  });
+
+  assert.equal(r.ok, true, "the 3rd builder lands on the site: its own count is where the drag resumes from");
+  assert.deepEqual(
+    r.state.settlements.s0.buildings.map((b) => b.workers),
+    [undefined, 2, 3],
+    "the market gave one up, the site took it, and the auto-crewed farm is untouched",
+  );
+});
+
