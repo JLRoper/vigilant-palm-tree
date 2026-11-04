@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.51.1] - 2026-11-04
+
+the primary checkout can run the browser suites again: kernel-assigned ports, a private test database, and a dev server that no longer walks the worktree fleet
+
 ## [0.51.0] - 2026-11-03
 
 - Construction is staffed work: a building under construction advances `buildRate(buildersOnSite(b))` days per day tick — 0 / 1.00 / 1.33 / 1.67 / 2.00x for 0-4 builders (`packages/engine/src/settlement/workforce.ts`)
