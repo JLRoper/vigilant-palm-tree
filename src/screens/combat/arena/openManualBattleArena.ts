@@ -376,7 +376,13 @@ export function openManualBattleArena(
 
   const titleEl = document.createElement("div");
   Object.assign(titleEl.style, { fontWeight: "600", fontSize: "13px" });
-  titleEl.textContent = options.title ?? "Test Battle — Manual Fight";
+  // The sandbox is the only caller that passes neither an end-of-fight callback
+  // nor telemetry, so this is the last-resort title for a REAL fight that
+  // forgot to pass its own: the battle's own two sides, never the dev
+  // sandbox's name (playthrough round 4, F5).
+  const productionFlow = options.onComplete !== undefined || options.telemetry !== undefined;
+  titleEl.textContent =
+    options.title ?? (productionFlow ? `${attackerLabel} vs ${defenderLabel}` : "Test Battle — Manual Fight");
   topBar.appendChild(titleEl);
 
   const sideTag = document.createElement("span");

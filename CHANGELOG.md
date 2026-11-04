@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.53.11] - 2026-11-04
+
+a real hero battle names its two heroes on the arena's top bar and its own rail, and a production fight can no longer inherit the dev sandbox's title — the round-4 manual-arena finding F5
+
 ## [0.53.10] - 2026-11-04
 
 the settlement tier-upgrade row says how much of each missing resource it wants, and it is pinned outside the panel's scrolling body — the round-2 city-view findings F-3 and F-5
