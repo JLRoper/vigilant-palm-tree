@@ -426,8 +426,22 @@ export class SettlementInfoMenu {
     });
     this.recruitContainer.appendChild(this.recruitBtn);
 
+    // The tier-upgrade control is this panel's progression row, so it is pinned
+    // to the panel ROOT rather than left in the scrolling body: on a short
+    // window (the 1258x566 harness) the body scrolls and the control sat 300px
+    // below the fold, where a hit test at its centre landed on the map canvas
+    // (round-2 city-view finding F-5). Same shape as heroTradePanel's Confirm
+    // footer -- a child of root, with the body shrunk to `1 1 auto` so the
+    // footer keeps its place after a manual resize.
+    Object.assign(body.style, { flex: "1 1 auto" });
     this.upgradeContainer = document.createElement("div");
-    body.appendChild(this.upgradeContainer);
+    Object.assign(this.upgradeContainer.style, {
+      padding: "6px 10px",
+      borderTop: "1px solid rgba(255,255,255,0.12)",
+      background: "rgba(0,0,0,0.25)",
+      flexShrink: "0",
+    });
+    this.menu.root.appendChild(this.upgradeContainer);
 
     this.upgradeBtn = document.createElement("button");
     Object.assign(this.upgradeBtn.style, {
