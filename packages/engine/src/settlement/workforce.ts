@@ -227,6 +227,26 @@ export function newPlacementsAutoCrew(s: SettlementState): boolean {
   return !hasExplicitStaffing(s) && Object.keys(s.districts ?? {}).length === 0;
 }
 
+/**
+ * What a NEW placement into `s` starts with on staffing: `undefined` -- the free
+ * auto crew -- in a bootstrap town, an explicit `0` once the settlement is being
+ * grown. ONE reader of the rule, so the row a client PREDICTS cannot drift from
+ * the row the server stores.
+ *
+ * It matters because the client's own commit path writes the cart into its state
+ * before the engine's `applyPlaceBuildings` runs over it (UIManager.onClose, the
+ * optimistic resource settle), and the resolver reads any entry it finds in the
+ * settlement as an EXISTING building -- so a fresh placement arrives at the
+ * reducer already looking pre-existing and the new-placement branch never runs.
+ * Handing the client this number is what makes its pre-write the server's shape
+ * (measured: without it the client kept the cart's absent count, `buildersOnSite`
+ * read that as the full construction ceiling and the menu printed 2.00x for a
+ * site the server holds frozen at 0 until the next EndTurn replaced the state).
+ */
+export function freshPlacementWorkers(s: SettlementState): number | undefined {
+  return newPlacementsAutoCrew(s) ? undefined : 0;
+}
+
 function accelEffortOf(b: BuildingDef): number {
   if (b.workers === undefined) return 0;
   return Math.min(b.workers / buildingMaxWorkers(b.kind), 1);

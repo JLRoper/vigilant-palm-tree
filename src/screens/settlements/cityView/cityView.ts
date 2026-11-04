@@ -16,6 +16,7 @@ import {
   autoStaffedSlots,
   buildingLegacyStaffing,
   canAssignWorkers,
+  freshPlacementWorkers,
   isProducerKind,
   isRecruitBuilding,
   staffingBase,
@@ -27,7 +28,7 @@ import { getUnitImageUrl } from "../../../data/unitImages";
 import { cachedUnitTypes } from "../../../data/unitCatalog";
 import { advanceChargedOnCommit, netDelta } from "./netCost";
 import { cartCommitSignature } from "./commitSignature";
-import { syncCartBuildings } from "./syncedBuildings";
+import { syncCartBuildings, withFreshPlacementStaffing } from "./syncedBuildings";
 import { BuildingMenu, type BuildingMenuOptions, type BuildingMenuWorkforce } from "./buildingMenu";
 import { BuildingPlacer } from "./buildingPlacer";
 import { BuildingSelectionMenu, type SelectedBuildingEntry } from "./buildingSelectionMenu";
@@ -1212,14 +1213,18 @@ export class CityView {
     );
   }
 
-  /** Cart buildings with construction/level/style/bank re-synced from live state -- EndTurn's round wrap replaces state objects, so the cart snapshot goes stale otherwise. */
+  /** Cart buildings with construction/level/style/bank re-synced from live state -- EndTurn's round wrap replaces state objects, so the cart snapshot goes stale otherwise. A cart entry with NO live twin is a FRESH placement, and its staffing is the engine's own new-placement verdict (`freshPlacementWorkers`): this list is what the client writes into its own state ahead of the engine's commit, so an unstamped entry would make the reducer read the placement as a building that already exists and keep the cart's missing count -- the site the menu drew as a 2.00x crew while the server held 0 (see withFreshPlacementStaffing). */
   private syncedBuildings(): BuildingDef[] {
     const live = this.getSettlement();
     if (!live) return this.placer.buildings;
     const liveBuildings = this.openDistrict
       ? (live.districts?.[districtKey(this.openDistrict.q, this.openDistrict.r)]?.buildings ?? [])
       : live.buildings;
-    return syncCartBuildings(this.placer.buildings, liveBuildings);
+    return withFreshPlacementStaffing(
+      syncCartBuildings(this.placer.buildings, liveBuildings),
+      liveBuildings,
+      freshPlacementWorkers(live),
+    );
   }
 
   private pendingNetDelta(): Partial<Record<ResourceType, number>> {
