@@ -1646,6 +1646,10 @@ test("BankGold rejects a cell that isn't a bank", async () => {
 test("PlaceBuildings preserves a bank pot through an unrelated build commit", async () => {
   const row = makeRow([makeHero("h0", 0, 2, 2)], [
     makeSettlement("s0", 0, 2, 2, {
+      // Level 2: the commit below places a NEW bank, and a bank is a level-2
+      // kind (the tier gate in applyPlaceBuildings). The settlement level is not
+      // what this spec is about -- the bank pot surviving the round-trip is.
+      level: 2,
       gold: 5000,
       warehouse: { wood: 100, stone: 100, iron: 0, arcane: 0, food: 0 },
       buildings: [

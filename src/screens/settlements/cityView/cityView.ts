@@ -230,6 +230,11 @@ export class CityView {
       },
     });
     this.placer = new BuildingPlacer();
+    // The palette's tier gate reads the open settlement's LIVE level (a
+    // settlement can be upgraded while its city view is open), through the same
+    // `getSettlement` hook the output readouts use. The engine re-checks the
+    // same registry rule on commit, so this is the sentence, not the gate.
+    this.placer.setSettlementLevelSource(() => this.getSettlement()?.level ?? 1);
     this.getSettlementFaction = opts.getSettlementFaction ?? (() => undefined);
     this.getGameMode = opts.getGameMode ?? (() => undefined);
     this.selectionMenu = new BuildingSelectionMenu({

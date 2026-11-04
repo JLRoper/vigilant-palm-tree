@@ -232,6 +232,10 @@ test("generateDistrictSpots: a normal forest hex touching a dense forest gets on
 
 test("applyPlaceBuildings in district mode: allows (2,2), forbids townHall, validates 5x5 & overlaps, charges full cost, and cleans up empty districts", () => {
   const settlement = makeSettlement("s0", 0, 2, 2, {
+    // Level 2: one of the out-of-bounds fixtures below is a warehouse, and a
+    // 2x2 warehouse is a level-2 kind -- without the level the tier gate would
+    // answer first and this spec would be measuring the wrong rule.
+    level: 2,
     gold: 2000,
     warehouse: emptyWarehouse({ wood: 50, stone: 50, iron: 20, arcane: 20 }),
     buildings: [],
@@ -754,7 +758,10 @@ test("handleCommand: PlaceBuildings, BankGold, UpgradeBuilding, and RecruitUnits
   assert.equal(found, true, "found passable center and adjacent hex on small map");
 
   const s0 = makeSettlement("s0", 0, centerQ, centerR, {
-    level: 1,
+    // Level 2: the district commit below places a bank, and a bank is a
+    // level-2 kind (the tier gate in applyPlaceBuildings). The level is not
+    // what this spec is about, so it declares one that admits the fixture.
+    level: 2,
     gold: 5000,
     warehouse: emptyWarehouse({ wood: 100, stone: 100, iron: 50, arcane: 50 }),
     buildings: [makeBuilding("townHall", 2, 2, 1)],
@@ -1273,6 +1280,9 @@ test("applyPlaceBuildings: strips forged level > 1 and bank on new placements, p
   };
   const settlement: SettlementState = {
     ...makeSettlement("s0", 0, 2, 2, {
+      // Level 2: this spec places NEW banks (a level-2 kind) and asserts the
+      // server's own sanitizing of them.
+      level: 2,
       gold: 5000,
       warehouse: emptyWarehouse({ wood: 200, stone: 200, iron: 100, arcane: 100 }),
       buildings: [],

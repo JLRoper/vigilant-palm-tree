@@ -13,6 +13,14 @@ export interface BuildingEffect {
   faction?: FactionId;
   label: string;
   description: string;
+  /**
+   * Settlement level a NEW placement of this kind requires (default 1: a
+   * level-1 keep may place it). Declared WITH the building so the gate has one
+   * source of truth -- `applyPlaceBuildings` reads it beside
+   * `buildingAllowedForFaction`, and the city view's palette states the same
+   * rule before the click. See the level bands in docs/settlements.md.
+   */
+  requiredLevel?: CastleLevel;
   footprint: { w: number; h: number };
   buildDays: number;
   placementCost: Partial<Record<ResourceType, number>>;
@@ -112,6 +120,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   mageGuild: {
     kind: "mageGuild",
+    requiredLevel: 3,
     faction: "human",
     label: "Mage Guild",
     description: "Arcane research and spellcraft. Recruits monks and mages.",
@@ -183,6 +192,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   barracks: {
     kind: "barracks",
+    requiredLevel: 2,
     faction: "human",
     label: "Barracks",
     description: "Trains melee infantry. Recruits swordsmen.",
@@ -216,6 +226,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   apartment: {
     kind: "apartment",
+    requiredLevel: 2,
     label: "Apartment",
     description: "Multi-level living quarters.",
     footprint: { w: 2, h: 2 },
@@ -258,6 +269,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   archeryRange: {
     kind: "archeryRange",
+    requiredLevel: 2,
     faction: "human",
     label: "Archery Range",
     description: "Train and recruit ranged units. Recruits archers.",
@@ -277,6 +289,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   stables: {
     kind: "stables",
+    requiredLevel: 2,
     faction: "human",
     label: "Stables",
     description: "Mounts and trains cavalry.",
@@ -293,6 +306,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   huntingLodge: {
     kind: "huntingLodge",
+    requiredLevel: 2,
     faction: "human",
     label: "Hunting Lodge",
     description: "Kennels and hunting grounds; raises fierce warhounds for the crown.",
@@ -309,6 +323,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   eyrie: {
     kind: "eyrie",
+    requiredLevel: 3,
     faction: "human",
     label: "Eagle Eyrie",
     description: "Cliffside aeries where the realm's giant eagles nest; a bonded prince leads the eyerie.",
@@ -341,6 +356,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   warehouse: {
     kind: "warehouse",
+    requiredLevel: 2,
     label: "Warehouse",
     description: "Walled storehouses with cellars and lofts, raising the settlement's stockpile capacity for every resource.",
     // 2x2 (not 1x1) so a warehouse is a real space commitment. That is also
@@ -360,6 +376,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   bank: {
     kind: "bank",
+    requiredLevel: 2,
     label: "Bank",
     description:
       "A vaulted strongroom that holds a bank pot of its own, and widens the settlement's treasury so more gold can be held at all. The treasury-cap role is shared with the treasury; the pot is the bank's own.",
@@ -379,6 +396,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   treasury: {
     kind: "treasury",
+    requiredLevel: 2,
     label: "Treasury",
     description:
       "A great counting-house that raises the settlement's treasury capacity, letting it hold more gold. It does nothing else.",
@@ -421,6 +439,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   arcaneFont: {
     kind: "arcaneFont",
+    requiredLevel: 2,
     label: "Arcane Font",
     description: "Draws raw power from a settled font of magic, condensing it into arcane dust each turn.",
     footprint: { w: 1, h: 1 },
@@ -434,6 +453,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   shipyard: {
     kind: "shipyard",
+    requiredLevel: 2,
     label: "Shipyard",
     description:
       "A waterfront yard of slips, cranes and timber for hulls under construction. Water-only: it can be built on nothing but a water hex, and it is what lets a district across the water stay part of the settlement.",
@@ -468,6 +488,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   ossuary: {
     kind: "ossuary",
+    requiredLevel: 2,
     faction: "ashen",
     label: "Ossuary",
     description: "Sorted bone-houses where revenant ranks are wired and drilled; bowmen above, pikemen below.",
@@ -487,6 +508,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   wraithBarrows: {
     kind: "wraithBarrows",
+    requiredLevel: 2,
     faction: "ashen",
     label: "Wraith Barrows",
     description: "Grave-mounds where grief pools and hardens into form; wraiths drift from the barrows and dread knights stable beneath them.",
@@ -506,6 +528,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   spireOfAsh: {
     kind: "spireOfAsh",
+    requiredLevel: 3,
     faction: "ashen",
     label: "Spire of Ash",
     description: "The Court's cold crown: a cinder-black spire whose halls seat the long night's aristocracy and its magisters.",
@@ -525,6 +548,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   forgeHall: {
     kind: "forgeHall",
+    requiredLevel: 2,
     faction: "ironmark",
     label: "Forge Hall",
     description: "The hold's ringing heart, where clan axemen are mustered and shield bearers are fitted for the wall.",
@@ -545,6 +569,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   gunnersRedoubt: {
     kind: "gunnersRedoubt",
+    requiredLevel: 2,
     faction: "ironmark",
     label: "Gunners' Redoubt",
     description: "A powder-scarred bastion where the Holds' hand gunners drill thunder into the mountain's echo.",
@@ -561,6 +586,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   golemFoundry: {
     kind: "golemFoundry",
+    requiredLevel: 3,
     faction: "ironmark",
     label: "Golem Foundry",
     description: "A rune-etched casting pit that arms the ironsworn and raises obedient golems from the hold's best ore.",
@@ -580,6 +606,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   deepAnvil: {
     kind: "deepAnvil",
+    requiredLevel: 3,
     faction: "ironmark",
     label: "Deep Anvil",
     description: "The oldest forge under the peaks, where runesmiths sing to hot metal and forge lords are crowned.",
@@ -599,6 +626,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   groveSanctum: {
     kind: "groveSanctum",
+    requiredLevel: 2,
     faction: "verdant",
     label: "Grove Sanctum",
     description: "A living-wood shrine where the Wild's scouts and thorn archers learn to read the canopy.",
@@ -619,6 +647,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   warrenLodge: {
     kind: "warrenLodge",
+    requiredLevel: 2,
     faction: "verdant",
     label: "Warren Lodge",
     description: "A den-mound hall of the beastkin lodges; wardens stand watch and the warbeasts den below.",
@@ -639,6 +668,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   sylvanStables: {
     kind: "sylvanStables",
+    requiredLevel: 2,
     faction: "verdant",
     label: "Sylvan Stables",
     description: "Living-wood paddocks where the great elk are saddled; the forest's cavalry musters here.",
@@ -658,6 +688,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   worldrootGrove: {
     kind: "worldrootGrove",
+    requiredLevel: 3,
     faction: "verdant",
     label: "Worldroot Grove",
     description: "A vaulted hall grown through the world's oldest roots; the elder treants answer from it.",
@@ -674,6 +705,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   blackChapel: {
     kind: "blackChapel",
+    requiredLevel: 3,
     faction: "ashen",
     label: "Black Chapel",
     description: "A candleless chapel where dark acolytes tend the dead and necromancers master their craft.",
@@ -693,6 +725,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   dragonBoneyard: {
     kind: "dragonBoneyard",
+    requiredLevel: 3,
     faction: "ashen",
     label: "Dragon Boneyard",
     description: "Ancient dragon bones rise again beneath the watch of the Court.",
@@ -730,6 +763,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   hearthTemple: {
     kind: "hearthTemple",
+    requiredLevel: 3,
     faction: "ironmark",
     label: "Hearth Temple",
     description: "A warm mountain shrine where hearth priests tend the clans.",
@@ -748,6 +782,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   ramPens: {
     kind: "ramPens",
+    requiredLevel: 2,
     faction: "ironmark",
     label: "Ram Pens",
     description: "Stone-walled pens where mountain rams are trained for the charge.",
@@ -785,6 +820,7 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
   },
   druidCircle: {
     kind: "druidCircle",
+    requiredLevel: 3,
     faction: "verdant",
     label: "Druid Circle",
     description: "An ancient woodland circle where druids gather the forest's magic.",
@@ -806,6 +842,22 @@ const REGISTRY: Record<BuildingKind, BuildingEffect> = {
 export function buildingAllowedForFaction(kind: BuildingKind, factionId?: FactionId): boolean {
   const faction = REGISTRY[kind].faction;
   return factionId === undefined || faction === undefined || faction === factionId;
+}
+
+/**
+ * The settlement level a NEW placement of this kind requires: the registry's
+ * own `requiredLevel`, defaulting to 1 so a kind that declares nothing is
+ * placeable in a level-1 keep (every kind the engine places itself at tier 1 --
+ * the starter layout, the district seed pool, each faction's starter troop
+ * building -- therefore needs no declaration at all).
+ */
+export function buildingRequiredLevel(kind: BuildingKind): CastleLevel {
+  return REGISTRY[kind].requiredLevel ?? 1;
+}
+
+/** Whether a settlement at `settlementLevel` may place this kind at all. */
+export function buildingLevelAllowed(kind: BuildingKind, settlementLevel: CastleLevel): boolean {
+  return settlementLevel >= buildingRequiredLevel(kind);
 }
 
 export function getBuildingEffect(kind: BuildingKind): BuildingEffect {

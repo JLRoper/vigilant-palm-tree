@@ -8,7 +8,7 @@
 
 import { registerHooks } from "node:module";
 import { cellToScreen, cityLayout } from "../../../src/core/cityGrid";
-import type { BuildingDef } from "@heroes/contracts";
+import type { BuildingDef, CastleLevel } from "@heroes/contracts";
 
 // buildingPlacer's import chain reaches src/render/assetDescriptors.ts (via
 // @screens/shared/panel), which is Vite-?url / import.meta.glob-coupled.
@@ -223,11 +223,24 @@ export function pointFor(gx: number, gy: number, size = 5): { x: number; y: numb
   };
 }
 
-/** A placer with the palette open on a 5x5 grid whose centre cell is reserved. */
-export function openPlacer(initialBuildings: BuildingDef[] = [], gold = RICH.gold): { placer: Placer; body: MockElement } {
+/**
+ * A placer with the palette open on a 5x5 grid whose centre cell is reserved.
+ *
+ * `level` is the settlement level the palette states its tier gate against
+ * (a kind declared with a higher registry `requiredLevel` is disabled with a
+ * reason). It defaults to 3 -- the specs sharing this harness are about the
+ * grid/affordance rules, so they declare a level that unlocks every row; the
+ * tier gate has its own spec (paletteLevelGateRow.test.ts).
+ */
+export function openPlacer(
+  initialBuildings: BuildingDef[] = [],
+  gold = RICH.gold,
+  level: CastleLevel = 3,
+): { placer: Placer; body: MockElement } {
   const body = installDom();
   const placer = new BuildingPlacer();
   placer.setAffordability({ gold, warehouse: { ...RICH.warehouse } });
+  placer.setSettlementLevelSource(() => level);
   placer.init(5, { gx: 2, gy: 2 }, initialBuildings);
   placer.showPalette(body as unknown as HTMLElement, 10, 10);
   return { placer, body };

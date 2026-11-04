@@ -1,5 +1,5 @@
-import type { BuildingDef, BuildingKind } from "@heroes/contracts";
-import { buildRate, buildingBuildDays, buildingPlacementCost, buildingUpkeep, CONSTRUCTION_MAX_BUILDERS } from "@heroes/engine";
+import type { BuildingDef, BuildingKind, CastleLevel } from "@heroes/contracts";
+import { CONSTRUCTION_MAX_BUILDERS, buildRate, buildingBuildDays, buildingPlacementCost, buildingRequiredLevel, buildingUpkeep } from "@heroes/engine";
 import { coversCell } from "../../../core/cityGrid";
 import type { NetCost } from "./netCost";
 import { footprintCells, footprintLine } from "./footprint";
@@ -49,6 +49,14 @@ export interface BuildEntryStatusOptions {
    * rules are not.
    */
   space?: BuildEntrySpaceOptions | null;
+  /**
+   * The open settlement's own level (`SettlementState.level`). With it, a kind
+   * whose registry `requiredLevel` is higher states the tier gate as a blocking
+   * reason, so the palette says what the next upgrade buys instead of offering
+   * a row the engine will refuse. Omit when the caller has no level: the rule
+   * is then simply not stated, exactly as the terrain rules are not.
+   */
+  settlementLevel?: CastleLevel;
 }
 
 /** The grid a palette row would place into. */
@@ -81,6 +89,8 @@ export function buildEntryStatus(opts: BuildEntryStatusOptions): BuildEntryStatu
   }
   const terrainNote = districtTerrainBlock(opts.districtTerrain, opts.kind);
   if (terrainNote) blocking.push(terrainNote);
+  const levelNote = levelBlock(opts.settlementLevel, opts.kind);
+  if (levelNote) blocking.push(levelNote);
   const spaceNote = footprintSpaceBlock(opts.space, opts.kind);
   if (spaceNote) blocking.push(spaceNote);
   const reasons = [...blocking];
@@ -121,6 +131,29 @@ export function districtTerrainBlock(terrain: string | null | undefined, kind: B
   }
   return kind === "shipyard" ? "Shipyard must be built on water" : null;
 }
+
+/**
+ * The tier gate a palette row states: a kind declared with a higher registry
+ * `requiredLevel` than the settlement's own level cannot be placed until the
+ * settlement is upgraded. The row stays in the list -- the tiers are what buy
+ * it -- but reads as disabled, in the same voice as the other refusals, so the
+ * player sees what the next tier is FOR instead of meeting a server refusal.
+ * Returns null when the caller has no settlement level ("unknown" must never
+ * read as "blocked").
+ */
+export function levelBlock(settlementLevel: CastleLevel | undefined, kind: BuildingKind): string | null {
+  if (settlementLevel === undefined) return null;
+  const required = buildingRequiredLevel(kind);
+  if (settlementLevel >= required) return null;
+  return `Requires a level ${required} ${SETTLEMENT_TIER_NAME[required]} \u2014 upgrade this settlement to place it`;
+}
+
+/** The tier vocabulary the city sizes already use (5 = settlement, 10 = town, 15 = castle). */
+const SETTLEMENT_TIER_NAME: Record<CastleLevel, string> = {
+  1: "settlement",
+  2: "town",
+  3: "castle",
+};
 
 function upkeepLine(kind: BuildingKind): string {
   const upkeep = buildingUpkeep(kind, 1);

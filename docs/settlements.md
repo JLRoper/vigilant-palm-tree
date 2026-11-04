@@ -60,9 +60,27 @@ If the hero is defeated during travel or construction, all costs are forfeited.
 
 These figures are the **level base** cap (`POP_BY_LEVEL`, `packages/engine/src/economy/settlementRates.ts`). The cap a settlement actually grows to is the level base **plus** the population every completed house / farmhouse / apartment standing in its **districts** grants (+300 / +1,000 / +1,500 for a House at L1/L2/L3, `populationByLevel` in the building registry) — `settlementPopulationCap` in `packages/engine/src/settlement/populationGrowth.ts`, the same function the settlement panel prints and the weekly growth clamps to. Housing inside the **main city grid** raises no cap: `districtPopulationBonus` walks `s.districts` only. So a level-1 town is capped at 500 with an empty district and at 800 with a single house in one.
 
-Charter-founded settlements always start at Level 1 with population 50 (not 500).
+Charter-founded settlements always start at Level 1 with population 50 (not 500). The level also gates **which buildings the settlement may place** — see *Building tier gates* below.
 
 Resource rates scale with settlement level and nearby map resource tiles. Source: [`packages/engine/src/economy/settlementRates.ts`](../packages/engine/src/economy/settlementRates.ts) and the engine settlement reducers; client visual settlement entities remain under `src/entities/`.
+
+### Building tier gates (2026-11-03)
+
+A settlement's level gates which buildings it may place. The requirement is **declared with the building** (`requiredLevel` on its registry entry, default 1 — `packages/engine/src/buildingRegistry.ts`) and enforced in the one placement gate, beside the faction rule: `applyPlaceBuildings` (`packages/engine/src/settlement/placeBuildings.ts`) refuses a NEW placement with reason `settlement_level_too_low` when `buildingLevelAllowed(kind, s.level)` is false. `buildingRequiredLevel` / `buildingLevelAllowed` are the accessors. The server's command handler, the client's optimistic commit and the AI driver all reach it through that one reducer; the city view's palette states the same rule on the row (*"Requires a level 2 town — upgrade this settlement to place it"*, `src/screens/settlements/cityView/buildEntryStatus.ts`) and leaves the row in the list, because the tier is what buys it.
+
+Only a **new** placement is gated. A building already standing in the settlement round-trips untouched — the city view's cart re-sends the whole set on every commit, so refusing what the settlement already holds would make it unbuildable, and a save written before this rule keeps working. A **district** is gated by the level of the settlement that owns it, so a level-3 castle's district may hold a level-3 building and a level-1 keep's may not.
+
+The bands, over the 44 registry entries (16 / 18 / 10):
+
+| Tier | `requiredLevel` | Buildings |
+|---|---|---|
+| 1 — Settlement (5×5 grid) | 1 (default; no declaration) | townHall, house, tower, farmField, farmhouse, granary, market, smithy, mine, stoneMine, ironMine, goldMine, woodcutterHut, + each faction's starter troop building (crypt / delversHall / seedlingGrove) |
+| 2 — Town (10×10) | 2 | apartment, warehouse, bank, treasury, arcaneFont, shipyard, + the middle troop buildings (barracks, archeryRange, stables, huntingLodge / ossuary, wraithBarrows / forgeHall, gunnersRedoubt, ramPens / groveSanctum, warrenLodge, sylvanStables) |
+| 3 — Castle (15×15) | 3 | mageGuild, eyrie, spireOfAsh, blackChapel, dragonBoneyard, golemFoundry, deepAnvil, hearthTemple, worldrootGrove, druidCircle |
+
+What the rule closes, measured on `main` `5df1580` (where the faction rule was the engine's only placement gate): a level-1 keep could place its whole **faction-legal** set — 25 kinds for a human or ironmark seat, 24 for ashen or verdant — including the entire grand row (mageGuild 400g, eyrie 500g, spireOfAsh 500g, blackChapel 400g, dragonBoneyard 500g, golemFoundry 500g, deepAnvil 500g, hearthTemple 400g, worldrootGrove 500g, druidCircle 400g — every one of them 6 build days) inside its 25-cell grid. At the far end, an L3 castle's control reach (level 3, plus its own town hall's +3) is **6 hexes**: 127 hexes, 126 of which can carry a district, i.e. **3,150 district city-grid cells** beside its **225-cell** main grid — before the rule every one of them could take a grand building from turn 0. The gate is what makes the tier the price of the building.
+
+The tier-1 band is not a taste call: it is exactly what the engine itself places at tier 1 (the free starter layout `STARTER_BUILDING_KINDS`, the startup district pool `DISTRICT_BUILDING_POOL`) plus the producers that keep the settlement upgrades payable — the L1→L2 upgrade costs 20 iron and the L2→L3 upgrade 20 arcane, so gating `ironMine` or `arcaneFont` above those tiers would make the upgrade unpayable and the tier unreachable. The 2/3 split follows the registry's own rows: a faction's troop ladder reads starter (80–150g, 2 days) → middle (250–350g) → grand (400–500g, 6 days). Test: `test/engine/buildingLevelGate.test.ts` (the engine gate and the exact bands), `test/engine/buildingLevelAcceptance.test.ts` (the measurements above and the thresholds the gate leaves alone) and `test/screens/settlements/paletteLevelGateRow.test.ts` (the row a player sees).
 
 ## Population growth (✅ implemented)
 
