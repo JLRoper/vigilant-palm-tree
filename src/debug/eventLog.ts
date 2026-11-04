@@ -40,7 +40,6 @@ export const DEFAULT_BUS_EVENT_TYPES: ReadonlyArray<string> = [
   "round:changed",
   "day:changed",
   "economy:goldChanged",
-  "economy:warehouseChanged",
 ];
 
 export class EventLog {
