@@ -1,88 +1,53 @@
-# .kilo/setup-script.ps1 - per-worktree setup for heroes-js.
+# .kilo/setup-script.ps1 - thin hook for `kilo worktree create`.
 #
-# Intended to be run automatically by the Kilo CLI after `kilo worktree create`
-# makes this checkout (worktree-workflow Phase 04; verified empirically in this
-# phase). Safe to run manually from any checkout of this repo at any time.
+# The per-worktree preparation itself lives in ONE place now:
+# `scripts/worktree-setup.mjs`, run as `npm run worktree:setup`. That path is
+# repo-owned, cross-platform, and is the one the Tier-3 recipe and
+# docs/operations.md name, so a `git worktree add` checkout and a Kilo-created
+# checkout are prepared by the same code -- one rule for the database name, one
+# for the launchers, one for the ports.
 #
-# What it does (and nothing else):
-#   1. Derives the current branch from this script's own location (no CLI-arg
-#      or environment assumptions).
-#   2. Ensures a dedicated Postgres database for this worktree exists inside
-#      the SHARED game_db container: game_poc_<branch-slug>. Idempotent.
-#   3. Merges PGDATABASE=<that db> into this worktree's .env (only if the key
-#      is not already defined there) so `npm run dev` in this worktree is
-#      isolated by default.
+# This file only forwards to it. It is safe to run manually from any checkout at
+# any time, it is idempotent, and it never fails the checkout (exit 0 always).
 #
-# What it deliberately does NOT do:
-#   - No schema/migration work here: server/index.ts runs initSchema() on every
-#     API boot (including the test harness's own API), which applies the schema
-#     idempotently to whatever PGDATABASE points at.
-#   - No DROP, no TRUNCATE, no data copies, nothing destructive. Failures are
-#     logged and never fail the checkout (exit 0 always).
+# What it used to do on its own -- derive game_poc_<branch-slug>, create that
+# database in the shared game_db container, merge PGDATABASE into .env -- is now
+# steps 1-2 of the setup path, with the same slug rule (lowercased branch, runs
+# of non-alphanumerics to `_`, trimmed, capped at 40). On top of that the setup
+# path also seeds .env from .env.example, allocates this worktree's ports through
+# scripts/allocate-ports.ts, and makes node_modules/.bin resolve -- a freshly cut
+# worktree has neither .env nor node_modules, so `tsx`/`tsc`/`vite` are not
+# found until something lays them down.
 #
-# Test runs must pass the database as a REAL process-env variable
-# (PGDATABASE=... npm test): .env.test pins PGDATABASE=game_poc and is loaded
-# after .env, so only the process environment wins over it.
+# Schema/migration work is still deliberately NOT done here: server/index.ts runs
+# initSchema() on every API boot. Nothing is dropped, truncated or copied.
 
-$ErrorActionPreference = "Stop"
-$script:logLines = @()
+$ErrorActionPreference = "Continue"
+$kiloDir = Split-Path -Parent $PSCommandPath   # <checkout>\.kilo
+$root = Split-Path -Parent $kiloDir            # <checkout>
+$logPath = Join-Path $kiloDir "setup-script.log"
+$script = Join-Path $root "scripts\worktree-setup.mjs"
+
 function Write-SetupLog([string]$message) {
-    $script:logLines += $message
     Write-Host "[setup-script] $message"
+    try {
+        $stamp = (Get-Date).ToUniversalTime().ToString("o")
+        Add-Content -LiteralPath $logPath -Value "[$stamp] $message"
+    } catch {}
 }
 
-$logPath = Join-Path (Split-Path -Parent $PSCommandPath) "setup-script.log"
-
 try {
-    $kiloDir = Split-Path -Parent $PSCommandPath   # <checkout>\.kilo
-    $root = Split-Path -Parent $kiloDir            # <checkout>
-
-    $branch = $null
-    try { $branch = (& git -C $root rev-parse --abbrev-ref HEAD 2>$null) } catch {}
-    if (-not $branch) { $branch = "unknown" }
-
-    $slug = ($branch.ToLower() -replace '[^a-z0-9]+', '_').Trim('_')
-    if (-not $slug) { $slug = "wt" }
-    if ($slug.Length -gt 40) { $slug = $slug.Substring(0, 40) }
-    $dbName = "game_poc_$slug"
-
-    if ($branch -eq "main" -or $branch -eq "master") {
-        Write-SetupLog "branch '$branch' is the primary branch; no per-worktree database created"
+    if (-not (Test-Path -LiteralPath $script)) {
+        Write-SetupLog "scripts/worktree-setup.mjs not found in $root; nothing to do"
     }
     else {
-        $exists = docker exec game_db psql -U gameuser -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$dbName';" 2>$null
-        if ("$exists".Trim() -eq "1") {
-            Write-SetupLog "database $dbName already exists in shared container game_db (idempotent no-op)"
-        }
-        else {
-            docker exec game_db psql -U gameuser -d postgres -c "CREATE DATABASE $dbName OWNER gameuser;" | Out-Null
-            Write-SetupLog "created database $dbName (owner gameuser) in shared container game_db"
-        }
-
-        $envPath = Join-Path $root ".env"
-        $hasKey = $false
-        if (Test-Path -LiteralPath $envPath) {
-            $hasKey = (Select-String -LiteralPath $envPath -Pattern '^\s*PGDATABASE\s*=' -Quiet)
-        }
-        if ($hasKey) {
-            Write-SetupLog ".env already defines PGDATABASE; left unchanged"
-        }
-        else {
-            Add-Content -LiteralPath $envPath -Value "PGDATABASE=$dbName"
-            Write-SetupLog "wrote PGDATABASE=$dbName to $envPath (dev isolation; tests pass it as process env)"
-        }
-
-        Write-SetupLog "usage in this worktree: dev reads .env automatically; test runs: set PGDATABASE=$dbName in the invoking shell"
+        $output = & node $script 2>&1
+        $code = $LASTEXITCODE
+        $flat = (($output | Out-String).Trim()) -replace "`r?`n", " | "
+        Write-SetupLog "worktree-setup.mjs exited $code | $flat"
     }
 }
 catch {
     Write-SetupLog ("ERROR (non-fatal, checkout continues): " + $_.Exception.Message)
-    try { Write-SetupLog ("detail: " + $_.ErrorDetails.Message) } catch {}
-}
-finally {
-    try {
-        $stamp = (Get-Date).ToUniversalTime().ToString("o")
-        Add-Content -LiteralPath $logPath -Value "[$stamp] $($script:logLines -join ' | ')"
-    } catch {}
 }
 exit 0

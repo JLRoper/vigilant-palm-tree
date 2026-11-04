@@ -1,7 +1,7 @@
 {
   "name": "heroes-js",
   "private": true,
-  "version": "0.53.5",
+  "version": "0.53.6",
   "type": "module",
   "engines": {
     "node": ">=22 <23"
@@ -12,6 +12,7 @@
   "scripts": {
     "postinstall": "node -e \"require.resolve('playwright')\" && playwright install chromium || true",
     "cleanup": "pwsh -NoProfile -NonInteractive -File scripts/cleanup.ps1",
+    "worktree:setup": "node scripts/worktree-setup.mjs",
     "predev": "tsx scripts/allocate-ports.ts",
     "dev": "concurrently -n web,api -c green,cyan \"vite\" \"tsx watch --env-file=.env server/index.ts\"",
     "dev:web": "vite",
