@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.53.7] - 2026-11-04
+
+docs: a junctioned node_modules makes `git worktree remove` delete the shared install
+
 ## [0.53.6] - 2026-11-04
 
 chore(tooling): a fresh worktree prepares itself
