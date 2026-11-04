@@ -5,6 +5,7 @@ import { pickupRefusalToast } from "@screens/adventure/clickIntent";
 import type { ManualBattleOutcome } from "@screens/combat/arena/openManualBattleArena";
 import { ARENA_HEARTBEAT_PHASE, type BattleActionRowPhase } from "@screens/combat/arena/state";
 import { startArenaHeartbeat } from "@screens/combat/arena/arenaHeartbeat";
+import { heroBattleArenaChrome, type HeroBattleSide } from "@screens/combat/arena/heroBattleChrome";
 import { canEndTurn, cleanupDefeatedHeroCharters, endBattlePhase, platoonsHaveTroops, settlementStacks, spellLoadoutForHero, SETTLEMENT_BATTLE_MIN_RETREAT_ROUND, type BattleResult } from "@heroes/engine";
 import type { GameState, HeroBattleVerdict, HeroState } from "@heroes/contracts";
 import { bus } from "../core/eventBus";
@@ -112,8 +113,12 @@ export class GameActions {
     this.battleInFlight = true;
     try {
       const { attackerId, defenderId } = gs.phase;
-      const attackerName = this.state.getHero(attackerId)?.id ?? attackerId;
-      const defenderName = this.state.getHero(defenderId)?.id ?? defenderId;
+      // The hero's own NAME, not its id: this string is what the battle modal,
+      // the arena and the result card call the fighter (F5, playthrough round
+      // 4 — "Hero p0-hero" named nobody the player could see). Falls back to
+      // the id only for a hero the client has not hydrated.
+      const attackerName = this.state.getHero(attackerId)?.name ?? attackerId;
+      const defenderName = this.state.getHero(defenderId)?.name ?? defenderId;
       const attacker = gs.heroes[attackerId];
       const defender = gs.heroes[defenderId];
       if (!attacker || !defender) return;
@@ -342,6 +347,13 @@ export class GameActions {
     });
 
     const { openManualBattleArena } = await import("@screens/combat/arena/openManualBattleArena");
+    // A real hero battle names itself (F5, playthrough round 4): the arena's
+    // top bar and the player's own rail read these, and the settlement assault
+    // beside it already passes "Assault on <name>" / "<name> Garrison". Each
+    // phase id is whichever of the two heroes the caller handed in.
+    const sideById = (id: string): HeroBattleSide =>
+      id === humanHero.id ? humanHero : id === enemyHero.id ? enemyHero : { id };
+    const arenaChrome = heroBattleArenaChrome(sideById(attackerId), sideById(defenderId));
     let closeArena: () => void = () => {};
     const arenaOutcome = new Promise<ManualBattleOutcome>((resolve) => {
       const handle = openManualBattleArena(
@@ -358,6 +370,7 @@ export class GameActions {
           heroSpell: spellLoadoutForHero(humanHero),
           onComplete: resolve,
           telemetry,
+          ...arenaChrome,
         },
       );
       closeArena = () => {
