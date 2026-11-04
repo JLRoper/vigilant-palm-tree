@@ -4,20 +4,17 @@ import { buildingPlayerEffects } from "./buildingRegistry";
 export interface PlayerBonuses {
   controlRangeBonus: number;
   heroSpeedBonus: number;
-  heroAttackBonus: number;
 }
 
 export function computeSettlementBonuses(buildings: BuildingDef[]): PlayerBonuses {
   let controlRangeBonus = 0;
   let heroSpeedBonus = 0;
-  let heroAttackBonus = 0;
   for (const b of buildings) {
     const pe = buildingPlayerEffects(b.kind, b.level);
     controlRangeBonus += pe.controlRangeBonus;
     heroSpeedBonus += pe.heroSpeedBonus;
-    heroAttackBonus += pe.heroAttackBonus;
   }
-  return { controlRangeBonus, heroSpeedBonus, heroAttackBonus };
+  return { controlRangeBonus, heroSpeedBonus };
 }
 
 export function computePlayerBonuses(
@@ -25,18 +22,15 @@ export function computePlayerBonuses(
 ): PlayerBonuses {
   let controlRangeBonus = 0;
   let heroSpeedBonus = 0;
-  let heroAttackBonus = 0;
   for (const s of allSettlements) {
     const b = computeSettlementBonuses(s.buildings);
     controlRangeBonus += b.controlRangeBonus;
     heroSpeedBonus += b.heroSpeedBonus;
-    heroAttackBonus += b.heroAttackBonus;
     for (const d of Object.values(s.districts ?? {})) {
       const db = computeSettlementBonuses(d.buildings);
       controlRangeBonus += db.controlRangeBonus;
       heroSpeedBonus += db.heroSpeedBonus;
-      heroAttackBonus += db.heroAttackBonus;
     }
   }
-  return { controlRangeBonus, heroSpeedBonus, heroAttackBonus };
+  return { controlRangeBonus, heroSpeedBonus };
 }

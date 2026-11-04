@@ -10,6 +10,19 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.53.2] - 2026-11-04
+
+stop the Archery Range's build card selling a hero attack bonus no code applied
+
+The Archery Range's registry entry declared `playerEffects: { heroAttackBonus: 1 }`, `buildingPlayerEffects` scaled it by level, `computeSettlementBonuses` / `computePlayerBonuses` summed it, and BOTH build-card surfaces printed `+1 hero attack` — and no code applied it. Re-measured on `19b42e0` (0.53.1): `buildingPlayerEffects("archeryRange", 1|2|3)` returned `heroAttackBonus: 1 | 2 | 3` and `computeSettlementBonuses([archeryRange L1])` returned `heroAttackBonus: 1`, while the only production reader of that aggregation is `control.ts:81` (`range += computeSettlementBonuses(buildings).controlRangeBonus` — `controlRange(2, [archeryRange L1])` = 2) and `computePlayerBonuses` has no production caller at all. A purchased Archery Range therefore widened nothing; a player bought it on the card's word.
+
+- The field is deleted end to end: the registry's `playerEffects` type, the Archery Range's `playerEffects`, the `buildingPlayerEffects` line, `PlayerBonuses` and both aggregators, the `+N hero attack` line on both card surfaces (`buildingMenu.ts`, `buildingSelectionMenu.ts`), and the `hero attack +1` cell in `docs/resource-gathering.md`'s building table.
+- Deleted rather than wired — decided on THIS row's measurement rather than by analogy with the Tower's vision bonus, because here the wiring half is not cheap: a hero has no attack stat to add to (`HeroState` carries none, and the panel's Attack is the flat `HERO_BASE_ATTACK = 2`, `combatConfig.ts:129`), and the battle engine scores PLATOONS, not heroes (`combat/damage.ts:118` sums `unitTypes[...].attack * count` over `Combatant.entries`). Wiring would mean building per-hero combat stats — the progression feature `combatConfig.ts:127` calls explicitly later — plus a balance pass over both battle engines, changing combat outcomes for every settlement holding an Archery Range. Deleting is behaviour-identical to main, because nothing read the value.
+- Pinned by `test/engine/archeryRangeHeroAttack.test.ts` (4 cases: the Archery Range's player effects at L1-L3, both aggregators, a `heroAttackBonus` source scan over `src/` + `packages/`, and both card modules' wording). Against the pre-fix source the same file reads `pass 0 / fail 4`: `buildingPlayerEffects("archeryRange", 1) must not carry a heroAttackBonus`; `computeSettlementBonuses must not carry a heroAttackBonus (got {"controlRangeBonus":0,"heroSpeedBonus":0,"heroAttackBonus":3})`; the scan naming the four files; and the card wording.
+- The other half is RECORDED so it can be reversed by preference: the spec's header names the seam — a `HeroState` attack stat fed by `HERO_BASE_ATTACK`, resolved through `computePlayerBonuses` into `computeDamage`'s attacker side — and the re-declaration sequence that would follow.
+- Measured but deliberately NOT touched, out of this row's scope: `heroSpeedBonus` (declared by no kind at all, so its aggregator term is always 0 and both `+N hero speed` card lines can never fire).
+- Gate: `npm run build`, `npm run lint:deps`, `npm run test:types`, `node tools/docs-check.mjs --changed-from github/main`, `npm run test:unit` and the `test:all` browser entries on a private database.
+
 ## [0.53.1] - 2026-11-04
 
 the Tower's build card no longer sells a vision bonus no code applied

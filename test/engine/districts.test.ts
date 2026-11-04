@@ -1375,7 +1375,7 @@ test("applyPopulationGrowth and computePlayerBonuses: include completed district
           makeBuilding("farmhouse", 3, 0, 2), // +40 (20 * 2)
           makeBuilding("apartment", 0, 2, 3, { construction: { daysRemaining: 2 } }), // in-construction: ignored
           makeBuilding("tower", 4, 0, 2), // no player effect
-          makeBuilding("archeryRange", 4, 1, 1), // heroAttackBonus: 1
+          makeBuilding("archeryRange", 4, 1, 1), // no player effect
         ],
       },
     },
@@ -1398,7 +1398,10 @@ test("applyPopulationGrowth and computePlayerBonuses: include completed district
     !("visionRangeBonus" in playerBonuses),
     "no player-effect field may advertise a vision bonus: the Tower's was declared, aggregated and applied by nothing",
   );
-  assert.equal(playerBonuses.heroAttackBonus, 1);
+  assert.ok(
+    !("heroAttackBonus" in playerBonuses),
+    "no player-effect field may advertise a hero attack bonus: the Archery Range's was declared, aggregated and applied by nothing",
+  );
 });
 
 test("startBuildingUpgrade rejects duplicate_building_ref and applyBuildingUpgrade / advanceSettlementUpgrades never double-increment", () => {

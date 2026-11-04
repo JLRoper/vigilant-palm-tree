@@ -268,7 +268,7 @@ The registry is [`packages/engine/src/buildingRegistry.ts`](../packages/engine/s
 | apartment | 300g 12w 6s | 5 | 2 / 0 | population +150 × level | — | — |
 | farmField | 120g 3w | 2 | 0 / 0 | food +5/turn | — | — |
 | farmhouse | 80g 4w | 2 | 1 / 0 | food +2/turn, population +20 | — | peasant 25g |
-| archeryRange | 350g 8w 5s | 4 | 1 / 1 | defense +1 | hero attack +1 | archer 250g + 2w |
+| archeryRange | 350g 8w 5s | 4 | 1 / 1 | defense +1 | — | archer 250g + 2w |
 | granary | 150g 8w 4s | 3 | 1 / 0 | food +3/turn, food storage +600 | — | — |
 | warehouse **(2×2)** | 500g 16w 12s | 3 | 1 / 1 | storage +600 ×5 resources, treasury +500 | — | — |
 | bank | 400g 6w 8s | 5 | 1 / 1 | treasury +2000 **+ own gold pot** (§6.8) | — | — |
