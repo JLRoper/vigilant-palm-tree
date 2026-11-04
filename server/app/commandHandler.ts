@@ -2246,14 +2246,23 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       if (settlement.ownerId !== command.actor) {
         return { ok: false, reason: "forbidden_not_your_settlement", events: [] };
       }
-      // Faction gate (faction-registry foundation, D5): the server enforces
-      // the acting seat's roster and never trusts the client. Deliberately
-      // checked on the requested unit alone, BEFORE the reducer, so the
-      // reducer's own building/level/construction/cost reason codes stay
-      // exactly as they are. Dormant today: every seat defaults "human"
-      // (playerFactionId), every recruitable unit is human-tagged, and an
-      // unknown catalog id also defaults "human" — so nothing is rejected
-      // until a non-human faction's units exist.
+      // Faction gate (faction-registry foundation, D5). The server enforces
+      // the acting seat's roster and never trusts the client, mirroring the
+      // client's eligibleRecruitSources filter as the authoritative half: it
+      // compares the UNIT's faction to the SEAT's — unitFactionId(catalog[
+      // unitTypeId]) against playerFactionId(acting seat) — so a seat that
+      // requests a unit outside its own roster is refused
+      // `unit_not_in_seat_faction` here. Live, not dormant: the content
+      // rosters landed with migrations 024/025/026, so a Crownlands seat
+      // asking for a `ghoul`, a `dwarf_axeman` or a `forest_scout` is
+      // rejected today (an unknown catalog id still defaults "human", so a
+      // catalog-less comparison never blocks). Deliberately checked on the
+      // requested unit alone, BEFORE the reducer, and never on the building it
+      // would come from, so the reducer's own building/level/construction/cost
+      // reason codes stay exactly as they are — which is why capture retags a
+      // seized troop building to the capturer's own kind (a captured Ashen
+      // crypt would otherwise keep refilling a `ghoul` draft pool that no
+      // Crownlands seat can buy; PR #361).
       if (
         !unitAllowedForSeatFaction(command.unitTypeId, {
           unitTypes: Object.fromEntries(deps.ctx.catalog.unitTypes.map((u) => [u.id, u])),

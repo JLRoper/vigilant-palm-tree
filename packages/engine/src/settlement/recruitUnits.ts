@@ -27,9 +27,11 @@ export interface RecruitSource {
 }
 
 // The faction gate's inputs (faction-registry foundation, D5). Both halves
-// must be present for the gate to act — when either is absent the filter
-// no-ops, which is what keeps every existing caller (AI planner, client
-// paths) byte-identical until factions exist.
+// must be present for the gate to act — when either is absent the call has no
+// seat faction to compare against and lets the unit through, so a caller that
+// passes no opts (the AI's settlement ranking, the engine helpers) is
+// unaffected. The callers that enforce the roster — the server's RecruitUnits
+// case and the client's isUnitRecruitable — pass both.
 export interface RecruitFactionGate {
   unitTypes?: Record<string, UnitType>;
   seatFactionId?: FactionId;
@@ -38,7 +40,11 @@ export interface RecruitFactionGate {
 // Whether one unit id may be recruited by a seat of `opts.seatFactionId`.
 // Unknown unit ids default to "human" (unitFactionId's D3 rule), so a
 // catalog-less comparison never blocks anything. Absent/incomplete opts =
-// allowed (the dormant gate).
+// allowed: with no seat faction there is nothing to compare against, so this
+// call cannot reject — not because the gate is dormant. The gate is live, and
+// the authoritative half is the server's RecruitUnits case
+// (server/app/commandHandler.ts), which refuses a seat that requests a unit
+// outside its own roster with `unit_not_in_seat_faction`.
 export function unitAllowedForSeatFaction(unitTypeId: string, opts?: RecruitFactionGate): boolean {
   if (!opts?.unitTypes || !opts.seatFactionId) return true;
   return unitFactionId(opts.unitTypes[unitTypeId]) === opts.seatFactionId;

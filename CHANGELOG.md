@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.53.3] - 2026-11-04
+
+docs: the RecruitUnits faction gate is live, not dormant -- correct the comment and the copies of the claim
+
 ## [0.53.2] - 2026-11-04
 
 stop the Archery Range's build card selling a hero attack bonus no code applied
