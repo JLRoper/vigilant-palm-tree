@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.53.10] - 2026-11-04
+
+the settlement tier-upgrade row says how much of each missing resource it wants, and it is pinned outside the panel's scrolling body — the round-2 city-view findings F-3 and F-5
+
 ## [0.53.9] - 2026-11-04
 
 widen the fixture-naming rule: one module names every database this repo creates, and the guard recognises each shape
