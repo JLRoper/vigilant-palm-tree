@@ -13,17 +13,21 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   binEntries,
   collectInstalledBins,
   databaseNameForBranch,
+  ensureInstall,
+  hiddenLockfileFrom,
   installState,
+  isInside,
   launchersReady,
   primaryCheckout,
   renderShim,
+  repairHiddenLockfile,
   repairShims,
   slugForBranch,
   withDatabaseKey,
@@ -197,4 +201,227 @@ test("the primary checkout resolves even from a worktree, so the shared install 
   const primary = primaryCheckout();
   assert.ok(primary, "git rev-parse --git-common-dir must resolve from inside the repo");
   assert.ok(existsSync(join(primary, ".git")), "the primary checkout carries the shared .git");
+});
+
+// --- the share is the ancestor chain, never a junction ----------------------
+//
+// A junctioned `node_modules` is what made a routine `git worktree remove`
+// recurse into the shared install and delete `.bin` and `.package-lock.json`
+// (dot-prefixed, first) from inside it. The fix is to create no link at all:
+// a worktree lives under `<primary>/.worktrees/<name>`, and both node's package
+// resolution and npm's PATH rule walk the ancestor chain, so the primary's
+// install is reachable with nothing in the worktree.
+
+const REQUIRED = ["tsx", "tsc", "vite", "concurrently"];
+
+/** A fake primary checkout with a usable shared install, plus a worktree under it. */
+function fakePrimary(root: string): { primary: string; modules: string; worktree: string } {
+  const primary = join(root, "primary");
+  const modules = join(primary, "node_modules");
+  mkdirSync(join(modules, ".bin"), { recursive: true });
+  for (const tool of REQUIRED) writeFileSync(join(modules, ".bin", tool), "");
+  const worktree = join(primary, ".worktrees", "wt");
+  mkdirSync(worktree, { recursive: true });
+  return { primary, modules, worktree };
+}
+
+test("a worktree under the primary shares the install with NO node_modules and NO junction", () => {
+  const dir = scratch("share");
+  try {
+    const { primary, worktree } = fakePrimary(dir);
+    const messages: string[] = [];
+    const result = ensureInstall(worktree, primary, (m) => messages.push(m));
+    assert.equal(result.how, "shared");
+    assert.equal(result.path, join(primary, "node_modules"));
+    assert.equal(existsSync(join(worktree, "node_modules")), false, "nothing is created in the worktree");
+    assert.ok(!messages.some((m) => /link|junction/i.test(m)), "and nothing is linked");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a legacy node_modules junction is unlinked, its target left intact, and the share takes over", () => {
+  const dir = scratch("legacy-link");
+  try {
+    const { primary, modules, worktree } = fakePrimary(dir);
+    const local = join(worktree, "node_modules");
+    symlinkSync(modules, local, process.platform === "win32" ? "junction" : "dir");
+    assert.equal(lstatSync(local).isSymbolicLink(), true, "the tree starts as the trap");
+
+    const result = ensureInstall(worktree, primary, () => {});
+    assert.equal(result.how, "shared");
+    assert.equal(existsSync(local), false, "the junction is gone");
+    assert.ok(existsSync(join(modules, ".bin", "tsx")), "the shared install is untouched");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a real, complete local install is left in place (no link, no reinstall)", () => {
+  const dir = scratch("local-install");
+  try {
+    const { primary, worktree } = fakePrimary(dir);
+    const localBin = join(worktree, "node_modules", ".bin");
+    mkdirSync(localBin, { recursive: true });
+    for (const tool of REQUIRED) writeFileSync(join(localBin, tool), "");
+
+    const result = ensureInstall(worktree, primary, () => {});
+    assert.equal(result.how, "already");
+    assert.equal(result.path, join(worktree, "node_modules"));
+    assert.equal(lstatSync(join(worktree, "node_modules")).isSymbolicLink(), false, "never a link");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("isInside separates a descendant (the ancestor walk works) from an unrelated tree", () => {
+  assert.equal(isInside("C:/a", "C:/a/.worktrees/wt"), true);
+  assert.equal(isInside("C:/a", "C:/a"), true);
+  assert.equal(isInside("C:/a", "C:/b/.worktrees/wt"), false);
+  assert.equal(isInside("C:/a", "C:/a-sibling/wt"), false, "a shared prefix is not a descendant");
+  assert.equal(isInside(null, "C:/a"), false);
+});
+
+test("a worktree whose shared install lost .bin AND the hidden lockfile gets both rebuilt, offline", () => {
+  const dir = scratch("shared-repair");
+  try {
+    const primary = join(dir, "primary");
+    const modules = join(primary, "node_modules");
+    const tools: Array<[string, string]> = [
+      ["tsx", "tsx"],
+      ["typescript", "tsc"],
+      ["vite", "vite"],
+      ["concurrently", "concurrently"],
+    ];
+    const packages: Record<string, unknown> = { "": { name: "heroes-js", version: "0.1.0" } };
+    for (const [pkg, bin] of tools) {
+      mkdirSync(join(modules, pkg), { recursive: true });
+      writeFileSync(join(modules, pkg, "package.json"), JSON.stringify({ name: pkg, bin: { [bin]: "bin/x.js" } }));
+      packages[`node_modules/${pkg}`] = { version: "1.0.0", resolved: `https://x/${pkg}.tgz`, integrity: "sha512-x" };
+    }
+    writeFileSync(
+      join(primary, "package-lock.json"),
+      JSON.stringify({ name: "heroes-js", version: "0.1.0", lockfileVersion: 3, requires: true, packages }),
+    );
+    const worktree = join(primary, ".worktrees", "wt");
+    mkdirSync(worktree, { recursive: true });
+
+    assert.equal(launchersReady(modules), false, "the measured defect: packages extracted, no launchers");
+    assert.equal(existsSync(join(modules, ".package-lock.json")), false, "and no hidden lockfile");
+
+    const result = ensureInstall(worktree, primary, () => {});
+    assert.equal(result.how, "shared");
+    assert.equal(launchersReady(modules), true, "the launchers are rebuilt from the extracted packages");
+    assert.equal(existsSync(join(modules, ".package-lock.json")), true, "and so is the hidden lockfile");
+    assert.equal(existsSync(join(worktree, "node_modules")), false, "still without a link in the worktree");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a missing node_modules/.package-lock.json is regenerated from the tracked lock, additively", () => {
+  const dir = scratch("hidden-lock");
+  try {
+    const primary = join(dir, "install");
+    const modules = join(primary, "node_modules");
+    mkdirSync(join(modules, "tsx"), { recursive: true });
+    writeFileSync(join(modules, "tsx", "package.json"), "{}");
+    writeFileSync(
+      join(primary, "package-lock.json"),
+      JSON.stringify({
+        name: "heroes-js",
+        version: "0.53.7",
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": { name: "heroes-js", version: "0.53.7" },
+          "node_modules/tsx": { version: "4.23.1", resolved: "https://x/tsx.tgz", integrity: "sha512-abc" },
+          "node_modules/gone": { version: "1.0.0", resolved: "https://x/gone.tgz", integrity: "sha512-def" },
+        },
+      }),
+    );
+
+    const result = repairHiddenLockfile(primary);
+    assert.equal(result.repaired, true);
+    assert.equal(result.entries, 1, "only the extracted package is recorded");
+    assert.equal(result.missing, 1, "the locked-but-absent package is reported, not invented");
+
+    const written = JSON.parse(readFileSync(join(modules, ".package-lock.json"), "utf8"));
+    assert.equal(written.name, "heroes-js");
+    assert.equal(written.version, "0.53.7");
+    assert.equal(written.lockfileVersion, 3);
+    assert.equal(written.requires, true);
+    assert.deepEqual(Object.keys(written.packages), ["node_modules/tsx"], "npm's hidden lockfile drops the root entry");
+    assert.deepEqual(
+      written.packages["node_modules/tsx"],
+      { version: "4.23.1", resolved: "https://x/tsx.tgz", integrity: "sha512-abc" },
+      "the entry body is verbatim",
+    );
+
+    // Idempotent: npm's own file is never rewritten.
+    assert.deepEqual(repairHiddenLockfile(primary), { repaired: false, entries: 0, missing: 0 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a worktree whose shared install has .bin but no hidden lockfile still gets the lockfile repaired", () => {
+  const dir = scratch("shared-lock-gone");
+  try {
+    const { primary, modules, worktree } = fakePrimary(dir); // .bin present, no hidden lockfile
+    writeFileSync(
+      join(primary, "package-lock.json"),
+      JSON.stringify({
+        name: "heroes-js",
+        version: "0.1.0",
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          "": { name: "heroes-js", version: "0.1.0" },
+          "node_modules/tsx": { version: "4.23.1", resolved: "https://x/tsx.tgz", integrity: "sha512-x" },
+        },
+      }),
+    );
+    assert.equal(installState(modules), "partial", "launchers present, hidden lockfile gone -- the measured shape");
+    assert.equal(launchersReady(modules), true, "so the launcher check alone would skip the repair");
+
+    const result = ensureInstall(worktree, primary, () => {});
+    assert.equal(result.how, "shared");
+    assert.equal(existsSync(join(modules, ".package-lock.json")), true, "the lockfile is still repaired");
+    assert.equal(installState(modules), "complete");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("npm's hidden lockfile is the tracked lock minus the root, filtered to what is installed", () => {
+  const installRoot = join("C:", "repo");
+  const lock = {
+    name: "heroes-js",
+    version: "9.9.9",
+    lockfileVersion: 3,
+    requires: true,
+    packages: {
+      "": { name: "heroes-js", version: "0.3.0" },
+      "node_modules/a": { version: "1.0.0" },
+      "node_modules/b": { version: "2.0.0" },
+      "packages/contracts": { resolved: "packages/contracts", link: true },
+    },
+  };
+  const installed = (p: string) => !/[\\/]node_modules[\\/]b$/.test(p);
+
+  const out = hiddenLockfileFrom(lock, installRoot, installed);
+  assert.ok(out);
+  assert.equal(out!.name, "heroes-js");
+  assert.equal(out!.version, "0.3.0", "the version is the install-time root entry, not the top-level field");
+  assert.equal(out!.lockfileVersion, 3);
+  assert.equal(out!.requires, true);
+  assert.deepEqual(
+    Object.keys(out!.packages),
+    ["node_modules/a", "packages/contracts"],
+    "the root entry is dropped, the absent package omitted, workspace entries kept",
+  );
+
+  assert.equal(hiddenLockfileFrom(null, installRoot, installed), null);
+  assert.equal(hiddenLockfileFrom({ name: "x" }, installRoot, installed), null);
 });
