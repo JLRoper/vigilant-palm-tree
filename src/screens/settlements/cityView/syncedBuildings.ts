@@ -36,6 +36,44 @@ export function syncCartBuilding(cartB: BuildingDef, liveB: BuildingDef): Buildi
   return merged;
 }
 
+/**
+ * The staffing a cart entry that has NO live twin -- a fresh placement -- must
+ * carry into the client's own commit, as the ENGINE will store it
+ * (`freshPlacementWorkers`: `undefined` for the free auto crew of a bootstrap
+ * town, an explicit `0` once the settlement is being grown).
+ *
+ * `syncCartBuilding` cannot do this: it only ever copies an EXISTING building's
+ * staffing, so a fresh placement left the cart with no `workers` at all. That is
+ * not cosmetic. The city view's commit hands the cart to TWO writers -- UIManager
+ * .onClose writes it into the client's state first (the optimistic resource
+ * settle), and only then does UIManager.onPlaceBuildings run the engine's own
+ * `applyPlaceBuildings` over that already-written state -- and the resolver
+ * treats any entry it finds in the settlement as an EXISTING building whose
+ * staffing must be preserved. So the fresh placement reached the reducer looking
+ * pre-existing, its new-placement branch never ran on the CLIENT, and the row
+ * kept no count at all: `buildersOnSite` read that as the auto crew (the
+ * construction ceiling, 4), and the menu printed `2.00x (4 of 4 builders)` for a
+ * site the server holds at `workers: 0` -- a site that makes no progress. Only
+ * the next EndTurn's wholesale state replace reconciled it (measured in a real
+ * game, 2026-11-03).
+ *
+ * `freshWorkers` is the verdict read off the LIVE settlement before the commit,
+ * so a bootstrap town's placement stays legacy (`undefined`) on both sides.
+ */
+export function withFreshPlacementStaffing(
+  cart: BuildingDef[],
+  live: BuildingDef[],
+  freshWorkers: number | undefined,
+): BuildingDef[] {
+  return cart.map((b) => {
+    if (live.some((m) => m.gx === b.gx && m.gy === b.gy && m.kind === b.kind)) return b;
+    const merged: BuildingDef = { ...b };
+    if (freshWorkers === undefined) delete (merged as { workers?: unknown }).workers;
+    else merged.workers = freshWorkers;
+    return merged;
+  });
+}
+
 /** Every cart building matched to its live twin by (gx, gy, kind); unmatched cart entries pass through untouched. */
 export function syncCartBuildings(cart: BuildingDef[], live: BuildingDef[]): BuildingDef[] {
   return cart.map((b) => {
