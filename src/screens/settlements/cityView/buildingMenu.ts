@@ -226,6 +226,19 @@ export class BuildingMenu {
           return list?.find((b) => b.gx === building.gx && b.gy === building.gy && b.kind === building.kind);
         }
       : undefined;
+    // What this menu is ABOUT, read live, plus the one question the site line
+    // asks of it: is this still a SITE, and how many days has it left. Both are
+    // resolved through the same live accessor rather than off the snapshot the
+    // menu was opened with (2026-11-03). `refreshIfOpen` re-shows an open menu
+    // from `lastShow` whenever the state moves, so a captured day count was
+    // composed once and then re-rendered verbatim for as long as the menu stayed
+    // open: a site progressing underneath it kept reading its open-day number,
+    // and one that COMPLETED under the menu kept its "Under construction" line
+    // (and kept hiding the recruit rows). The caller's own snapshot is used only
+    // when there is no live settlement to read at all.
+    const liveTarget = (): BuildingDef => resolveLive?.() ?? building;
+    const siteDays = (): number | undefined =>
+      resolveLive ? liveTarget().construction?.daysRemaining : constructionDaysRemaining;
     const recruitRefreshers: Array<() => void> = [];
 
     const effects = formatEffectLine(building.kind, building.level);
@@ -270,8 +283,9 @@ export class BuildingMenu {
       this.menu.appendContent(this.buildWorkforceRow(building, workforce, resolveLive, recruitRefreshers));
     }
 
-    if (constructionDaysRemaining !== undefined) {
-      this.menu.appendContent(this.buildSiteStatusLine(building, resolveLive, constructionDaysRemaining));
+    const daysNow = siteDays();
+    if (daysNow !== undefined) {
+      this.menu.appendContent(this.buildSiteStatusLine(liveTarget(), daysNow));
     }
 
     const costStr = formatPlacementCost(building.kind);
@@ -427,7 +441,7 @@ export class BuildingMenu {
       }
     }
 
-    if (constructionDaysRemaining === undefined) {
+    if (siteDays() === undefined) {
       const effect = getBuildingEffect(building.kind);
       const entries = effect.recruits.filter(
         (r) =>
@@ -456,14 +470,14 @@ export class BuildingMenu {
    * all. The sentence itself is `siteStatus` (asserted directly, no DOM), and the
    * `data-*` hooks carry the same crew and rate so a browser pass can read them
    * without parsing the words.
+   *
+   * `building` is the LIVE site and `daysRemaining` its LIVE timer, both resolved
+   * by the caller on every render (2026-11-03): this element used to be composed
+   * once from the snapshot the menu was opened with, so a menu left open read a
+   * frozen crew and a frozen day count until it was closed and reopened.
    */
-  private buildSiteStatusLine(
-    building: BuildingDef,
-    resolveLive: (() => BuildingDef | undefined) | undefined,
-    daysRemaining: number,
-  ): HTMLDivElement {
-    const live = resolveLive?.() ?? building;
-    const status = siteStatus(live, daysRemaining);
+  private buildSiteStatusLine(building: BuildingDef, daysRemaining: number): HTMLDivElement {
+    const status = siteStatus(building, daysRemaining);
     const conEl = document.createElement("div");
     conEl.textContent = status.text;
     conEl.dataset.testid = "site-status";

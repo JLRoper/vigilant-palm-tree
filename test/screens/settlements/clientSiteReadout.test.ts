@@ -60,6 +60,7 @@ registerHooks({
 const { CityView } = await import("../../../src/screens/settlements/cityView/cityView");
 const { siteStatus } = await import("../../../src/screens/settlements/cityView/siteStatus");
 const { SpriteProvider } = await import("../../../src/render/assets");
+const { bus } = await import("../../../src/core/eventBus");
 const { toolbarHeight } = await import("@screens/shared/panelRail");
 
 /** A provider that resolves nothing: this file drives the city view's own state, never a sprite. */
@@ -266,6 +267,11 @@ function building(kind: BuildingDef["kind"], gx: number, gy: number, extra: Part
   return { gx, gy, kind, level: 1, style: "classic", ...extra };
 }
 
+/** The placer's own placement-time copy: a build timer stamped CLIENT-side (`buildingPlacer.place`), no workers. */
+function site(kind: BuildingDef["kind"], gx: number, gy: number, days: number, extra: Partial<BuildingDef> = {}): BuildingDef {
+  return building(kind, gx, gy, { ...extra, construction: { daysRemaining: days } });
+}
+
 /**
  * A settlement in one of the two shapes `newPlacementsAutoCrew` tells apart: a
  * pure BOOTSTRAP (no explicit count, no districts -- new placements stay on the
@@ -446,4 +452,71 @@ test("F-b control: a bootstrap town's fresh placement keeps the free auto crew o
     "Under construction \u2014 2.00\u00d7 (4 of 4 builders) \u00b7 3 days remaining",
     "the free crew is a real 2.00x site, and the line must still say so",
   );
+});
+
+// ── F-c ───────────────────────────────────────────────────────────────
+
+/** The site line the menu is currently showing, or null when it shows none. */
+function siteLine(body: MockNode): MockElement | null {
+  const all = findAll(body, (el) => el.dataset.testid === "site-status");
+  return all.length > 0 ? all[all.length - 1] : null;
+}
+
+/** Open the city view on a settlement whose single building is a site, and open that site's menu. */
+function openSiteMenu(rig: Rig, gx: number, gy: number): MockElement {
+  rig.body = (globalThis as unknown as { document: { body: MockElement } }).document.body;
+  rig.view.open(SETTLEMENT_ID, "Test hold", 5, "#d62828", [], [], rig.live.buildings, SEED);
+  clickCell(rig, gx, gy);
+  const line = siteLine(rig.body);
+  assert.ok(line, "a site's own menu prints its status line");
+  return line;
+}
+
+/** The live settlement with one building replaced -- what a round (and a staffing pass) leaves behind. */
+function withBuilding(rig: Rig, index: number, b: BuildingDef): void {
+  const buildings = rig.live.buildings.map((x, i) => (i === index ? b : x));
+  rig.live = { ...rig.live, buildings };
+}
+
+test("F-c: the site line follows the site while its menu stays open", () => {
+  const rig = makeRig("grown", [site("granary", 3, 3, 4)]);
+  const opened = openSiteMenu(rig, 3, 3);
+  assert.equal(
+    opened.textContent,
+    "Under construction \u2014 2.00\u00d7 (4 of 4 builders) \u00b7 4 days remaining",
+    "an unstaffed site in a legacy district reads as the free crew",
+  );
+
+  // The state moves under the open menu, as a round does: the timer ticks down
+  // AND three builders are put on the site. (AssignWorkers writes only the
+  // building it addresses, so nothing about this menu reconciled itself on that
+  // commit -- the menu has to re-read.)
+  withBuilding(rig, 0, site("granary", 3, 3, 1, { workers: 3 }));
+  bus.emit({ type: "state:committed" });
+
+  const after = siteLine(rig.body);
+  assert.ok(after, "the menu is still open on the same site");
+  assert.equal(
+    after.textContent,
+    "Under construction \u2014 1.67\u00d7 (3 of 4 builders) \u00b7 1 day remaining",
+    "the line must read the site's LIVE crew and its LIVE day count, not the snapshot the menu opened with",
+  );
+  rig.view.close();
+});
+
+test("F-c: a site that COMPLETES under the open menu stops reading as a site", () => {
+  const rig = makeRig("grown", [site("granary", 3, 3, 1)]);
+  const opened = openSiteMenu(rig, 3, 3);
+  assert.ok(opened.textContent.startsWith("Under construction"), "the fixture starts as a site");
+
+  // The last day ticks over: the building is finished, and the menu is still open.
+  withBuilding(rig, 0, building("granary", 3, 3, { workers: 0 }));
+  bus.emit({ type: "state:committed" });
+
+  assert.equal(
+    siteLine(rig.body),
+    null,
+    "a finished building must not keep an 'Under construction' line for as long as the menu stays open",
+  );
+  rig.view.close();
 });
