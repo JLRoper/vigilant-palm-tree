@@ -1402,6 +1402,10 @@ test("applyPopulationGrowth and computePlayerBonuses: include completed district
     !("heroAttackBonus" in playerBonuses),
     "no player-effect field may advertise a hero attack bonus: the Archery Range's was declared, aggregated and applied by nothing",
   );
+  assert.ok(
+    !("heroSpeedBonus" in playerBonuses),
+    "no player-effect field may advertise a hero speed bonus: nothing ever declared it, and no code reads a hero speed stat",
+  );
 });
 
 test("startBuildingUpgrade rejects duplicate_building_ref and applyBuildingUpgrade / advanceSettlementUpgrades never double-increment", () => {

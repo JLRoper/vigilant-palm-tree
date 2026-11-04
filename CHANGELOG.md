@@ -10,6 +10,20 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.53.4] - 2026-11-04
+
+remove the dead heroSpeedBonus field end to end
+
+`heroSpeedBonus` was a field in `PlayerBonuses` and both engine aggregators that NO building kind declared — a dead type member rather than a lying card, because with no declarer the `+N hero speed` line could never fire. Re-measured on `8f781c0` (0.53.2): the type member at `packages/engine/src/buildingRegistry.ts:56` and the scaling accessor at `:912`, plus the member and both locals/accumulations/returns in `packages/engine/src/buildingModifiers.ts` (`:6`, `:11`, `:15`, `:17`, `:24`, `:28`, `:32`, `:35`). All 46 registry entries carry `playerEffects: {}` and the one that carries anything (`townHall`) carries `{ controlRangeBonus: 1 }`, so `buildingPlayerEffects(<kind>, 1|2|3)` returned `heroSpeedBonus: 0` for every kind measured and both aggregators returned a `heroSpeedBonus: 0` member. The only printer, `src/screens/settlements/cityView/buildingMenu.ts:56`, is guarded by the value being truthy and never fires; `buildingSelectionMenu.ts` never read the field at all.
+
+- The field is deleted end to end: the registry's `playerEffects` type member, the `buildingPlayerEffects` scaling line, `PlayerBonuses` and both aggregators (`computeSettlementBonuses` / `computePlayerBonuses`), the `+N hero speed` line on the build card, and the stale "vision/speed/attack" wording in `docs/resource-gathering.md` (vision and attack were already gone from code in 0.53.1/0.53.2).
+- Deleted rather than wired: nothing read the value — the only production consumer of the aggregation, `control.ts:81`, reads `controlRangeBonus` alone, and `computePlayerBonuses` has no production caller at all — and hero movement is the flat `MOVEMENT_PER_TURN` granted wholesale (`hero/move.ts:116`, `hero/recruit.ts:102`, `charter/advance.ts:129`), so there is no speed stat to add a bonus to. Deleting is behaviour-identical to main.
+- Corrects the 0.53.2 entry's claim that "both `+N hero speed` card lines" could fire: measured, there was one (`buildingMenu.ts`); `buildingSelectionMenu.ts` never read the field.
+- Pinned by `test/engine/heroSpeedBonus.test.ts` (4 cases: every kind in the contract union at L1-L3, both aggregators, a `heroSpeedBonus` source scan over `src/` + `packages/`, and both card modules' wording). Against the pre-fix source the same file reads `pass 0 / fail 4`: `buildingPlayerEffects("townHall", 1) must not carry a heroSpeedBonus`; `computeSettlementBonuses must not carry a heroSpeedBonus (got {"controlRangeBonus":1,"heroSpeedBonus":0})`; the scan naming the three files; and the card wording.
+- The other half is RECORDED so it can be reversed by preference: the spec's header names the seam — a hero speed multiplier on `HeroState`, applied to `MOVEMENT_PER_TURN` at the movement grants in `hero/move.ts:116`, `hero/recruit.ts:102` and `charter/advance.ts:129`, resolved through `computePlayerBonuses` — plus the re-declaration sequence.
+- Measured but deliberately NOT touched, out of this row's scope: the `calc:heroSpeed` EVENT name in `src/core/events.ts:24` (already documented as declared-never-emitted in `docs/event-system.md`; an event name, not this field).
+- Gate: `npm run build`, `npm run lint:deps` (543 modules, 0 violations), `npm run test:types` (application 0 errors, test tree no regressions), `node tools/docs-check.mjs --changed-from github/main`, and `npm run test:all`.
+
 ## [0.53.3] - 2026-11-04
 
 docs: the RecruitUnits faction gate is live, not dormant -- correct the comment and the copies of the claim

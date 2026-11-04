@@ -53,7 +53,6 @@ function formatEffectLine(kind: BuildingKind, level: number, effort = 1): string
     }
   }
   if (pe.controlRangeBonus) lines.push(`+${pe.controlRangeBonus} control range`);
-  if (pe.heroSpeedBonus) lines.push(`+${pe.heroSpeedBonus} hero speed`);
 
   if (upkeep.wood > 0 || upkeep.stone > 0) {
     const parts: string[] = [];
