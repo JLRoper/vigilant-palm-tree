@@ -257,7 +257,7 @@ The registry is [`packages/engine/src/buildingRegistry.ts`](../packages/engine/s
 |------|---------------|-----------|---------------------------|--------------------|----------------|----------|
 | townHall | — | 0 | 3 / 2 | — | control range +1 | — |
 | house | 300g 5w | 2 | 2 / 0 | population +300 / +1,000 / +1,500 by level | — | — |
-| tower | 300g 8w 5s | 4 | 1 / 1 | defense +1 | vision +2 | — |
+| tower | 300g 8w 5s | 4 | 1 / 1 | defense +1 | — | — |
 | mageGuild | 400g 5w 8s 2a | 6 | 1 / 1 | arcane yield +3 | — | mage 500g + 2a |
 | mine *(legacy, not in palette)* | 250g 6w 4s | 4 | 2 / 0 | wood/stone/iron yield +3 | — | — |
 | stoneMine | 250g 6w 4s | 4 | 2 / 0 | stone yield +3 | — | — |

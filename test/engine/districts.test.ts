@@ -1374,7 +1374,7 @@ test("applyPopulationGrowth and computePlayerBonuses: include completed district
           makeBuilding("apartment", 1, 0, 1), // +100
           makeBuilding("farmhouse", 3, 0, 2), // +40 (20 * 2)
           makeBuilding("apartment", 0, 2, 3, { construction: { daysRemaining: 2 } }), // in-construction: ignored
-          makeBuilding("tower", 4, 0, 2), // visionRangeBonus: 4
+          makeBuilding("tower", 4, 0, 2), // no player effect
           makeBuilding("archeryRange", 4, 1, 1), // heroAttackBonus: 1
         ],
       },
@@ -1394,7 +1394,10 @@ test("applyPopulationGrowth and computePlayerBonuses: include completed district
   assert.equal(clamped.population, 990);
 
   const playerBonuses = computePlayerBonuses([sWithHousing]);
-  assert.equal(playerBonuses.visionRangeBonus, 4);
+  assert.ok(
+    !("visionRangeBonus" in playerBonuses),
+    "no player-effect field may advertise a vision bonus: the Tower's was declared, aggregated and applied by nothing",
+  );
   assert.equal(playerBonuses.heroAttackBonus, 1);
 });
 
