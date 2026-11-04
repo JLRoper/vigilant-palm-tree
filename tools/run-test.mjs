@@ -27,6 +27,54 @@ const TSX = nodeToolCommand("tsx");
 const REQUEST_TOKEN_ENV = "HEROES_TEST_REQUEST_TOKEN";
 const REQUEST_TOKEN = randomBytes(12).toString("hex");
 
+// Test-run environment files, applied to the child in this order and BEFORE
+// this shell's own environment -- a variable already exported here still wins,
+// which is the same precedence `node --env-file` gives it.
+//
+//   .env.test        tracked. Pins Postgres back to the local docker-compose
+//                    container; the suites delete games, so they must never
+//                    follow a `.env` that points at the gameserver (its own
+//                    header explains that at length).
+//   .env.test.local  gitignored, per box. THIS checkout's test overrides --
+//                    above all PGDATABASE=game_play_<hex>, so a suite run from
+//                    the PRIMARY checkout cannot wipe the games the deployed
+//                    stack is serving while the reader is playing on them.
+//
+// Until this existed the wrapper handed its entry NO env file at all, so
+// PGDATABASE resolved by falling through to server/persistence/db.ts's
+// `game_poc` default -- which is the shared database both the dev stack and
+// the DEPLOYED stack read. Measured 2026-11-03: a browser suite run from the
+// primary resolves its database that way with no export and no file.
+const TEST_ENV_FILES = [".env.test", ".env.test.local"];
+
+function readEnvVarsFrom(name) {
+  const out = {};
+  try {
+    // Split on \n alone: a trailing CR is absorbed by the regexes below.
+    for (const line of readFileSync(resolve(ROOT, name), "utf8").split("\n")) {
+      if (/^\s*(#|$)/.test(line)) continue;
+      const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+      if (m) out[m[1]] = m[2].replace(/^["']|["']$/g, "");
+    }
+  } catch {
+    // Absent is the normal case for the local file.
+  }
+  return out;
+}
+
+// Where PGDATABASE came from, so the run's own log says which database it is
+// about to delete games from instead of leaving it to be discovered.
+function describeDatabaseSource(env) {
+  if (process.env.PGDATABASE) return "this shell's environment";
+  for (const name of [...TEST_ENV_FILES].reverse()) {
+    const vars = readEnvVarsFrom(name);
+    if (vars.PGDATABASE) return name;
+  }
+  if (env.PGDATABASE) return "an env file";
+  return "server/persistence/db.ts default";
+}
+
+
 const ENTRIES = {
   smoke: "test/smoke.ts",
   multiplayer: "test/multiplayer.smoke.ts",
@@ -187,6 +235,26 @@ async function runOne(entry, opts) {
   console.log(`>> [${entry}] request @ ${REQUEST_PATH}`);
   console.log(`>> [${entry}] api=${req.apiPort} client=${req.clientPort} autoClose=${req.autoClose}`);
 
+  const fileEnv = TEST_ENV_FILES.reduce((acc, name) => ({ ...acc, ...readEnvVarsFrom(name) }), {});
+  const childEnv = {
+    ...fileEnv,
+    ...process.env,
+    ...req,
+    [REQUEST_TOKEN_ENV]: REQUEST_TOKEN,
+    API_PORT: String(req.apiPort),
+    CLIENT_PORT: String(req.clientPort),
+    NODE_NO_WARNINGS: "1",
+  };
+  const dbSource = describeDatabaseSource(childEnv);
+  console.log(`>> [${entry}] PGDATABASE=${childEnv.PGDATABASE ?? "(unset -> db.ts default)"} (from ${dbSource})`);
+  if (childEnv.PGDATABASE === "game_poc") {
+    console.log(
+      `>> [${entry}] WARNING: game_poc is the SHARED database -- the dev stack and the DEPLOYED stack ` +
+        `both read it, and these suites delete games. Put PGDATABASE=game_play_<hex> in ${TEST_ENV_FILES[1]} ` +
+        `(gitignored) or export it, to aim this run at a database of its own.`,
+    );
+  }
+
   return await new Promise((resolveRun, rejectRun) => {
     // Uppercase passthrough: vite.config.ts reads API_PORT from the process
     // environment (loadEnv gives process.env precedence over .env), so the
@@ -198,14 +266,7 @@ async function runOne(entry, opts) {
     const child = spawn(TSX.cmd, [...TSX.args, tsFile], {
       cwd: ROOT,
       stdio: "inherit",
-      env: {
-        ...process.env,
-        ...req,
-        [REQUEST_TOKEN_ENV]: REQUEST_TOKEN,
-        API_PORT: String(req.apiPort),
-        CLIENT_PORT: String(req.clientPort),
-        NODE_NO_WARNINGS: "1",
-      },
+      env: childEnv,
       windowsHide: true,
     });
 
