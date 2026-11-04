@@ -17,7 +17,8 @@ the version has not already been bumped in that changeset.
 - Save compatibility, in one line: a site an existing save left at `workers: 0` now FREEZES mid-build where it used to crawl at 1.00x — staff it and it resumes — while a site with no `workers` field at all (a legacy settlement) keeps its free full crew and builds in exactly the time it always did
 - Any building takes up to `CONSTRUCTION_MAX_BUILDERS` (4) builders while it is being built, whatever its kind; on completion the crew is trimmed to the kind's own cap in the same tick, losslessly — no worker deleted and no site auto-staffed
 - The curve's top is deliberately today's full-crew rate, so an untouched building builds in exactly the time it always did (the free auto crew is a full crew)
-- The AI crews its own sites out of its own pool on BOTH placement paths (the server driver and the browser-driven seats), and will not start a site it cannot staff
+- The AI crews its own sites out of its own pool on BOTH placement paths (the server driver and the browser-driven seats), and will not start a site it cannot staff: every placement is charged the 4-builder crew its own staffing pass may put on it (`committedWorkerSlots`), because an unstaffed site's explicit `0` claimed nothing and the seat re-spent the same pool every round — it started a whole pool's worth of fresh sites per round and left its own sites frozen half-built (31 buildings against a 17-slot pool, 22 of 23 sites stalled, measured)
+- The Workers stepper and the grid drag resume from the BUILDING's own auto-crewed state, not the settlement's: on a city holding a single auto-crewed building every `+` wrote 1, so the 2nd-4th builder (1.33x / 1.67x / 2.00x) was unreachable from both steppers and from a drop
 - Upgrades do NOT follow the curve: the upgrade timers keep their own accel (`WORKFORCE_UPGRADE_ACCEL_KINDS`)
 
 ## [0.50.1] - 2026-11-04

@@ -95,6 +95,43 @@ export function stalledConstructionSites(s: SettlementState): number {
   return total;
 }
 
+/**
+ * The pool slots the settlement's buildings have CLAIMED (2026-11-03): a site
+ * claims the crew it may hold while it is being built, a finished building claims
+ * the count it holds.
+ *
+ * This is the accounting a PLACEMENT gate reads, and the reason it cannot be
+ * `assignedWorkersExplicit`: a site nobody has been assigned to yet stores an
+ * explicit `0`, so it contributes nothing there and the seat's idle pool looks
+ * untouched on the next round -- it then starts a second site, and a third,
+ * against slots that are already spoken for (measured: 31 AI buildings against a
+ * 17-slot pool, 22 of 23 sites then frozen half-built).
+ *
+ * A SITE's claim is `CONSTRUCTION_MAX_BUILDERS`, not its kind's own cap: that is
+ * what the crew pass puts on it (`pickAiConstructionStaffing`, stalled site
+ * first, up to the ceiling), so a placement the seat cannot put builders on this
+ * round is a site it cannot start -- charging the smaller pin instead let a seat
+ * open eight sites for a sixteen-slot pool and leave four of them dark for
+ * rounds (seen in a real game). The claim is always at least the crew the
+ * completion trim will pin, because no kind's cap exceeds the ceiling.
+ *
+ * The auto crew (`workers === undefined`) claims nothing -- it is free by
+ * convention, exactly as it is in `assignedWorkersExplicit` and
+ * `autoStaffedSlots`.
+ */
+export function committedWorkerSlots(s: SettlementState): number {
+  let total = 0;
+  const add = (b: BuildingDef): void => {
+    if (b.workers === undefined) return;
+    total += b.construction ? CONSTRUCTION_MAX_BUILDERS : b.workers;
+  };
+  for (const b of s.buildings) add(b);
+  for (const d of Object.values(s.districts ?? {})) {
+    for (const b of d.buildings) add(b);
+  }
+  return total;
+}
+
 /** Worker slots the settlement's auto-staffed (`workers === undefined`) buildings occupy. */
 export function autoStaffedSlots(s: SettlementState): number {
   let total = 0;
@@ -145,6 +182,34 @@ export function hasExplicitStaffing(s: SettlementState): boolean {
 
 export function staffingBase(workers: number | undefined, max: number, legacy: boolean): number {
   return legacy ? 0 : (workers ?? max);
+}
+
+/**
+ * Whether THIS building runs on the legacy auto crew -- its OWN missing count,
+ * not the settlement's (2026-11-03).
+ *
+ * The settlement-wide `hasLegacyStaffing` is the right question for the panel's
+ * header and for `newPlacementsAutoCrew`, and the WRONG one for anything that
+ * steps a single building: a city holding one auto-crewed building (every classic
+ * starter city, and every settlers town whose first placement kept `workers`
+ * undefined) reads as legacy as a whole, so `staffingBase` returned 0 for every
+ * OTHER building too and `+` wrote 1 forever. Measured on a level-2 town holding
+ * a 4-builder site: three clicks on `+` sent three identical
+ * `{"kind":"AssignWorkers","workers":1}` commands and the row stayed `1 / 4`, so
+ * the 1.33x / 1.67x / 2.00x steps this feature introduces were unreachable from
+ * the interface.
+ */
+export function buildingLegacyStaffing(b: { workers?: number }): boolean {
+  return b.workers === undefined;
+}
+
+/** The count a stepper's next `+`/`-` writes for ONE building (`ceiling` is its
+ * `staffingCeiling`): one step (`delta`) from its own resume point, clamped to
+ * the ceiling and never below 0. Shared by the building menu's row and the
+ * workforce panel's rows, so one step is one rule. */
+export function steppedWorkers(b: { workers?: number }, ceiling: number, delta: number): number {
+  const base = staffingBase(b.workers, ceiling, buildingLegacyStaffing(b));
+  return Math.max(0, Math.min(base + delta, ceiling));
 }
 
 /**

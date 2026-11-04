@@ -4,12 +4,16 @@ import {
   advanceSettlementUpgrades,
   assignedWorkersExplicit,
   assignWorkers,
+  buildingLegacyStaffing,
   canAssignWorkers,
+  committedWorkerSlots,
   effortFraction,
   hasExplicitStaffing,
   hasLegacyStaffing,
   producerTurnOutput,
   staffingBase,
+  staffingCeiling,
+  steppedWorkers,
   upgradeAccelEffort,
   workforcePool,
 } from "@heroes/engine";
@@ -725,5 +729,126 @@ test("the source transfer reads the ceiling on both ends: a builder can be dragg
   assert.equal(third.ok, true, "and so can the 3rd");
   const fourth = assignWorkers(third.state, { settlementId: "s0", gx: 3, gy: 0, workers: 4, source: { gx: 0, gy: 0 } });
   assert.equal(fourth.ok, false, "but the source is empty at that point: a worker must come from somewhere");
+});
+
+// ── the build-crew accounting, and the stepper's own legaciness (2026-11-03) ──
+//
+// Two defects the stage-4 browser pass found in the build-crew branch, pinned
+// here as the pair of rules that close them.
+
+test("committedWorkerSlots: a site claims its kind's cap whether or not anyone is on it", () => {
+  const site = building("crypt", 0, 0, { workers: 0, construction: { daysRemaining: 2 } });
+  const overCrewedSite = building("house", 2, 0, { workers: 4, construction: { daysRemaining: 3 } });
+  const settlement: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, {
+      population: 1500,
+      buildings: [
+        site,
+        overCrewedSite,
+        building("market", 4, 0, { workers: 2 }),
+        building("farmField", 6, 0),
+      ],
+    }),
+    districts: {
+      "3,2": {
+        q: 3,
+        r: 2,
+        citySpots: [],
+        buildings: [building("crypt", 0, 0, { workers: 0, construction: { daysRemaining: 2 } })],
+      },
+    },
+  };
+  assert.equal(assignedWorkersExplicit(settlement), 6, "the dark sites are explicit 0s there: 0 + 4 + 2 + 0");
+  assert.equal(
+    committedWorkerSlots(settlement),
+    14,
+    "yet 14 slots are spoken for: 4+4 for the two sites (the crew a site may hold) + market 2 + 4 for the district site; the auto farm claims nothing",
+  );
+  const finished: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, {
+      population: 1500,
+      buildings: [building("crypt", 0, 0, { workers: 0 }), building("market", 4, 0, { workers: 2 })],
+    }),
+  };
+  assert.equal(
+    committedWorkerSlots(finished),
+    2,
+    "a FINISHED dark crypt holds nothing; a finished explicit building holds its own count",
+  );
+});
+
+test("a stepper reaches the 4-builder crew on a settlement that still holds an auto-crewed building", () => {
+  const settlement: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, {
+      population: 1500,
+      buildings: [
+        building("house", 0, 0), // auto crew (workers undefined)
+        building("barracks", 2, 0, { workers: 0, construction: { daysRemaining: 5 } }),
+      ],
+    }),
+  };
+  assert.equal(hasLegacyStaffing(settlement), true, "one auto-crewed building makes the settlement read legacy");
+  const site = settlement.buildings[1];
+  const ceiling = staffingCeiling(site);
+  assert.equal(ceiling, 4, "a site takes up to the construction ceiling whatever its kind (a barracks caps at 4 anyway)");
+
+  let workers = 0;
+  const steps: number[] = [];
+  for (let i = 0; i < 4; i++) {
+    workers = steppedWorkers({ ...site, workers }, ceiling, 1);
+    steps.push(workers);
+  }
+  assert.deepEqual(steps, [1, 2, 3, 4], "four clicks, four DISTINCT counts: 1.00x / 1.33x / 1.67x / 2.00x are reachable");
+  assert.equal(steppedWorkers({ ...site, workers: 4 }, ceiling, 1), 4, "and the ceiling holds a 5th click");
+  assert.equal(steppedWorkers({ ...site, workers: 4 }, ceiling, -1), 3, "the way back down is one step too");
+
+  assert.equal(
+    staffingBase(2, ceiling, hasLegacyStaffing(settlement)),
+    0,
+    "the settlement-wide flag is what pinned every step at 1: it ignores the 2 the site really holds",
+  );
+  assert.equal(
+    staffingBase(2, ceiling, buildingLegacyStaffing(site)),
+    2,
+    "the building's own legaciness resumes from the count it has",
+  );
+  assert.equal(
+    steppedWorkers({ ...site, workers: undefined }, ceiling, 1),
+    1,
+    "an auto-crewed building still writes its FIRST explicit count as 1, never max + 1",
+  );
+});
+
+test("a builder can be dragged onto a site in a city that still holds an auto-crewed building", () => {
+  // The same defect on the engine's own transfer path: the DESTINATION's resume
+  // point asked the settlement-wide flag, so a city with one auto-crewed building
+  // anywhere accepted only `workers: 1` on any target and refused the rest of the
+  // crew -- 3 identical commands on a real settlement, row stuck at `1 / 4`.
+  const settlement: SettlementState = {
+    ...makeSettlement("s0", 0, 2, 2, {
+      population: 1500,
+      buildings: [
+        building("farmField", 0, 0), // auto crew: makes the city read legacy
+        building("market", 2, 0, { workers: 3 }),
+        building("barracks", 4, 0, { workers: 2, construction: { daysRemaining: 5 } }),
+      ],
+    }),
+  };
+  assert.equal(hasLegacyStaffing(settlement), true, "the city as a whole reads legacy");
+
+  const r = assignWorkers(stateWithSettlement(settlement), {
+    settlementId: "s0",
+    gx: 4,
+    gy: 0,
+    workers: 3,
+    source: { gx: 2, gy: 0 },
+  });
+
+  assert.equal(r.ok, true, "the 3rd builder lands on the site: its own count is where the drag resumes from");
+  assert.deepEqual(
+    r.state.settlements.s0.buildings.map((b) => b.workers),
+    [undefined, 2, 3],
+    "the market gave one up, the site took it, and the auto-crewed farm is untouched",
+  );
 });
 

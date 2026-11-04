@@ -14,6 +14,7 @@ import {
   assignedWorkersExplicit,
   autoStaffedCount,
   autoStaffedSlots,
+  buildingLegacyStaffing,
   canAssignWorkers,
   isProducerKind,
   isRecruitBuilding,
@@ -993,7 +994,11 @@ export class CityView {
     if (!cell) return;
     const target = this.workforceBuildingAt(cell.gx, cell.gy);
     if (!target) return;
-    const legacy = hasLegacyStaffing(live);
+    // The TARGET's own legaciness, not the settlement's (2026-11-03): the
+    // settlement-wide flag made a drop on any explicitly-crewed building in a
+    // city holding one auto-crewed building resolve to 1, so the rest of the
+    // crew was unreachable by drag as well as by the steppers.
+    const legacy = buildingLegacyStaffing(target.building);
     const targetMax = staffingCeiling(target.building);
     const nextTarget = staffingBase(target.building.workers, targetMax, legacy) + 1;
     if (nextTarget > targetMax) return;

@@ -2978,9 +2978,10 @@ test("the AI crews the sites it places, and does not start more sites than it ca
   assert.equal(placed.length, 1, "the capacity commit happened");
   const newSites = world.state.settlements["s-home"].buildings.filter((b) => b.construction);
   assert.ok(newSites.length > 0, "the placements are real sites with timers");
-  assert.ok(
-    newSites.length <= 5,
-    `one site per idle pool slot (5 for population 1,500), not one per missing building (got ${newSites.length})`,
+  assert.equal(
+    newSites.length,
+    1,
+    "the pool is the limit, and a site is priced at its kind's own cap: 5 slots buy one barracks (cap 4) and no more",
   );
 
   const assignments = commandsOfKind(harness.commands, "AssignWorkers");
@@ -3019,5 +3020,36 @@ test("the AI crews the sites it places, and does not start more sites than it ca
     staffedSites.every((b) => !b.construction),
     "every site the seat crewed finished within buildDays + 1 ticks",
   );
+});
+
+test("round after round the seat starts only what it can crew: no AI site is ever left dark", async () => {
+  // The stage-4 browser pass found the AI starving itself: an unstaffed site
+  // stored an explicit `0`, so it claimed NOTHING of the pool and the seat
+  // started a fresh pool's worth of sites every round, while the buildings it had
+  // already finished held their trimmed crews forever -- the pool filled up with
+  // them and every later site froze half-built (22 of 23 sites, measured). This
+  // is the same fixture driven over four rounds: whatever the seat starts, it
+  // crews, and all of it finishes.
+  const world = grownArmyWorld();
+  const harness = installHarness(world, { override: buildCrewCommandEffects(world) });
+  const homeBuildings = (): BuildingDef[] => world.state.settlements["s-home"].buildings;
+  const dark = (): string[] =>
+    homeBuildings()
+      .filter((b) => b.construction && !b.workers)
+      .map((b) => `${b.kind}@${b.gx},${b.gy}`);
+
+  for (let i = 0; i < 4; i++) {
+    world.state.round += 1;
+    await scanOnce();
+    assert.deepEqual(dark(), [], `round ${world.state.round}: every site the seat has started has builders on it`);
+    for (let tick = 0; tick < 8; tick++) world.state = advanceBuildingConstructions(world.state);
+  }
+
+  assert.deepEqual(
+    homeBuildings().filter((b) => b.construction).map((b) => `${b.kind}@${b.gx},${b.gy}`),
+    [],
+    "and every site it ever started finished -- it never adds one it will have to leave stalled",
+  );
+  assert.ok(commandsOfKind(harness.commands, "PlaceBuildings").length > 0, "the seat did keep building");
 });
 

@@ -19,9 +19,10 @@ import {
   effortFraction,
   workforcePool,
   assignedWorkersExplicit,
-  hasLegacyStaffing,
+  buildingLegacyStaffing,
   staffingBase,
   staffingCeiling,
+  steppedWorkers,
   TOWN_HALL_COSTS,
   type RecruitEntry,
 } from "@heroes/engine";
@@ -536,23 +537,27 @@ export class BuildingMenu {
       fontSize: "12px",
     });
 
-    // Re-derived from the live settlement on every read: a commit normalizes
-    // the whole city (undefined -> 0), so the menu-open snapshot goes stale.
-    const legacyNow = (): boolean => {
-      const liveSettlement = workforce.getSettlement();
-      return liveSettlement ? hasLegacyStaffing(liveSettlement) : false;
-    };
+    // THE BUILDING's own legaciness, not the settlement's (2026-11-03). A city
+    // holding ONE auto-crewed building reads legacy as a whole, and a
+    // settlement-wide base of 0 made `+` write 1 forever on every other
+    // building -- which is what left the 4-builder site this feature introduces
+    // unreachable from this control (measured: three `+` clicks on a real
+    // level-2 town sent three identical `{"kind":"AssignWorkers","workers":1}`
+    // commands and the row stayed `1 / 4`). The building is still resolved live
+    // on every read: a commit normalizes the whole city, so the menu-open
+    // snapshot goes stale.
+    const baseNow = (live: BuildingDef): number =>
+      staffingBase(live.workers, max, buildingLegacyStaffing(live));
 
     const refresh = (): void => {
       const live = resolveLive?.();
       if (!live) return;
-      const legacy = legacyNow();
-      const base = staffingBase(live.workers, max, legacy);
+      const base = baseNow(live);
       value.textContent = live.workers === undefined ? "Auto (max)" : `${live.workers} / ${max}`;
       const liveSettlement = workforce.getSettlement();
       const pool = liveSettlement ? workforcePool(liveSettlement) : workforce.pool;
       const assigned = liveSettlement ? assignedWorkersExplicit(liveSettlement) : workforce.assigned;
-      const plusDisabled = !canAssignWorkers(staffingBase(live.workers, max, legacy), max, 1, pool, assigned);
+      const plusDisabled = !canAssignWorkers(base, max, 1, pool, assigned);
       plus.disabled = plusDisabled;
       plus.style.opacity = plusDisabled ? "0.4" : "1";
       plus.style.cursor = plusDisabled ? "not-allowed" : "pointer";
@@ -566,16 +571,14 @@ export class BuildingMenu {
     minus.addEventListener("click", () => {
       const live = resolveLive?.();
       if (!live) return;
-      const base = staffingBase(live.workers, max, legacyNow());
-      workforce.onAssignWorkers(building.gx, building.gy, Math.max(0, base - 1), workforce.district ?? undefined);
+      workforce.onAssignWorkers(building.gx, building.gy, steppedWorkers(live, max, -1), workforce.district ?? undefined);
       workforce.onChange();
       refresh();
     });
     plus.addEventListener("click", () => {
       const live = resolveLive?.();
       if (!live) return;
-      const base = staffingBase(live.workers, max, legacyNow());
-      workforce.onAssignWorkers(building.gx, building.gy, Math.min(base + 1, max), workforce.district ?? undefined);
+      workforce.onAssignWorkers(building.gx, building.gy, steppedWorkers(live, max, 1), workforce.district ?? undefined);
       workforce.onChange();
       refresh();
     });

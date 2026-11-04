@@ -4,7 +4,7 @@ import { CHARTER_TARGET_REACH, GARRISON_BACKOFF_ROUNDS, pickAiMove, pickCharterA
 import { GameMap, type TileRow } from "../../src/map/gameMap";
 import type { Terrain } from "../../src/map/terrain";
 import { hexDistance } from "../../src/core/hex";
-import { CHARTER_GOLD_COST, canFoundSettlement, mulberry32, normalizePlatoons, platoonTroopTotal, settlementStacks, type UnitType } from "@heroes/engine";
+import { CHARTER_GOLD_COST, canFoundSettlement, committedWorkerSlots, mulberry32, normalizePlatoons, platoonTroopTotal, settlementStacks, type UnitType } from "@heroes/engine";
 import type { BuildingDef, BuildingKind, SettlementState } from "@heroes/contracts";
 import { coveredWagonIdFor, gameModeSettings } from "@heroes/contracts";
 import { makeHero, makeSettlement, makeState, emptyWarehouse } from "../charter/_helpers";
@@ -1213,10 +1213,29 @@ test("the AI does not start what it cannot staff: a grown city with no idle slot
     "a site the seat could never finish is worse than no site: it banks its resources instead",
   );
 
-  // The gate is the POOL, not the deficit: one idle slot buys exactly one site.
-  const fundedState = stateWith([makeHero("h1", 1, 20, 14, { stacks: [] })], [grownHome(300)]);
+  // The gate is the POOL, and a site's price is the crew its own kind will pin
+  // on it for good, not one idle worker: a 1-slot pool cannot hold a barracks
+  // (cap 4), so the seat starts nothing it would have to leave dark.
+  const oneSlot = stateWith([makeHero("h1", 1, 20, 14, { stacks: [] })], [grownHome(300)]);
+  assert.deepEqual(pickHeroArmyBuildings(oneSlot, 1, ARMY_UNITS), [], "one idle worker does not buy a 4-slot building");
+
+  const fundedState = stateWith([makeHero("h1", 1, 20, 14, { stacks: [] })], [grownHome(1200)]);
   const plan = pickHeroArmyBuildings(fundedState, 1, ARMY_UNITS);
-  assert.equal(plan.length, 1, "one idle worker, one site");
+  assert.equal(plan.length, 1, "a 4-slot pool buys exactly one barracks, and not a second");
+});
+
+test("a site the seat has already started claims its slots, so it starts nothing against them", () => {
+  // One UNSTAFFED site holds its kind's 4 slots out of a 4-slot pool. On a tree
+  // that reads `pool - assignedWorkersExplicit` the site's explicit 0 claimed
+  // nothing, so the seat placed a whole pool's worth of fresh sites every round
+  // (measured in a real game: 31 buildings started against a 17-slot pool, 22 of
+  // 23 sites then frozen half-built because the finished ones held every slot).
+  const home = grownHome(1200);
+  home.buildings.push(site("barracks", 0, 0, { workers: 0, construction: { daysRemaining: 5 } }));
+  const state = stateWith([makeHero("h1", 1, 20, 14, { stacks: [] })], [home]);
+
+  assert.equal(committedWorkerSlots(home), 4, "the stalled site's 4 slots are spoken for, not 0");
+  assert.deepEqual(pickHeroArmyBuildings(state, 1, ARMY_UNITS), [], "so the seat starts nothing new against them");
 });
 
 test("the AI crews its own sites out of its own pool: stalled first, then fewest days left, up to 4 each", () => {

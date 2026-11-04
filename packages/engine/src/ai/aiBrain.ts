@@ -26,6 +26,7 @@ import {
 import {
   assignedWorkersExplicit,
   buildersOnSite,
+  committedWorkerSlots,
   CONSTRUCTION_MAX_BUILDERS,
   newPlacementsAutoCrew,
   workforcePool,
@@ -535,15 +536,22 @@ export function pickHeroArmyBuildings(
     const cells = freeCityCells(settlement, kind, needed);
     // The AI must not start what it cannot staff (2026-11-03). A placement into
     // a GROWN settlement lands at `workers: 0` and freezes until someone is
-    // assigned, so each planned site costs one idle pool slot; with none left
-    // the seat banks its resources instead of adding a building it can never
-    // finish. A bootstrap settlement's placement is auto-crewed (free, and
-    // needs no slot), so the gate does not apply there.
+    // assigned, so a site costs the crew the seat is going to put on it --
+    // `CONSTRUCTION_MAX_BUILDERS`, the ceiling its own staffing pass may fill --
+    // and that is what the budget is charged per placement. The budget is
+    // `workforcePool - committedWorkerSlots`, NOT `pool - assignedWorkersExplicit`:
+    // the latter reads an unstaffed site as an explicit 0, so it looked untouched
+    // on the next round and the seat started a whole pool's worth of fresh sites
+    // every round (measured: 31 buildings started against a 17-slot pool, 22 of
+    // 23 sites then frozen half-built because the buildings it had finished held
+    // every slot). With no slot left the seat banks its resources instead of
+    // adding a site it can never finish. A bootstrap settlement's placement is
+    // auto-crewed (free, and claims nothing), so the gate does not apply there.
     const needsStaffing = !newPlacementsAutoCrew(settlement);
-    let idle = workforcePool(settlement) - assignedWorkersExplicit(settlement);
+    let budget = workforcePool(settlement) - committedWorkerSlots(settlement);
     for (const cell of cells) {
       if (needed <= 0) break;
-      if (needsStaffing && idle <= 0) break;
+      if (needsStaffing && CONSTRUCTION_MAX_BUILDERS > budget) break;
       const cost = buildingPlacementCost(kind);
       if ((cost.gold ?? 0) + GARRISON_GOLD_RESERVE > settlement.gold) break;
       if ((cost.wood ?? 0) > settlement.warehouse.wood) break;
@@ -551,7 +559,7 @@ export function pickHeroArmyBuildings(
       if ((cost.iron ?? 0) > settlement.warehouse.iron) break;
       if ((cost.arcane ?? 0) > settlement.warehouse.arcane) break;
       out.push({ settlementId: settlement.id, kind, gx: cell.gx, gy: cell.gy });
-      idle -= 1;
+      budget -= CONSTRUCTION_MAX_BUILDERS;
       needed -= 1;
     }
   }

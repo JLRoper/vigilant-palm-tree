@@ -6,7 +6,7 @@ import type {
   SettlementState,
 } from "@heroes/contracts";
 import { districtKey } from "../control";
-import { assignedWorkersExplicit, hasLegacyStaffing, staffingCeiling, workforcePool } from "./workforce";
+import { assignedWorkersExplicit, staffingCeiling, workforcePool } from "./workforce";
 
 export interface AssignWorkersOptions {
   settlementId: SettlementId;
@@ -134,9 +134,13 @@ export function assignWorkers(state: GameState, opts: AssignWorkersOptions): Ass
     if (!source || source.building === building) return { state, ok: false, reason: "invalid_source" };
     const sourceMax = staffingCeiling(source.building);
     // A legacy source is auto-staffed at its own cap, so a pick-up takes one
-    // from max -- the same base the client's stepper reads and displays.
+    // from max -- the same base the client's stepper reads and displays. The
+    // DESTINATION's resume point is its OWN legaciness (2026-11-03): asking the
+    // settlement made a drag onto any explicitly-crewed building in a city that
+    // holds one auto-crewed building resolve to 1 and be refused, which is the
+    // same defect the client's stepper had.
     const sourceWorkers = (source.building.workers ?? sourceMax) - 1;
-    const destinationWorkers = hasLegacyStaffing(settlement) ? 1 : (building.workers ?? ceiling) + 1;
+    const destinationWorkers = building.workers === undefined ? 1 : building.workers + 1;
     if (sourceMax < 1 || sourceWorkers < 0 || sourceWorkers > sourceMax || destinationWorkers > ceiling || opts.workers !== destinationWorkers) {
       return { state, ok: false, reason: "invalid_workers" };
     }
