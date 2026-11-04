@@ -27,6 +27,7 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pickFreePorts } from "./allocate-ports";
+import { podDatabaseName } from "./lib/database-name.mjs";
 import { resolveCommitHash } from "./docker-build";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -288,9 +289,9 @@ function containerSummary(pod: Pod): string {
 
 // --- pod naming / env -----------------------------------------------------
 
-function dbNameFor(name: string): string {
-  return `heroes_pod_${name.replace(/-/g, "_")}`;
-}
+// The database name is `scripts/lib/database-name.mjs`'s `podDatabaseName` --
+// the same module that names a worktree's database, so a pod's database is
+// recognised by the same guard a sweep uses.
 
 function slug(s: string): string {
   return s
@@ -329,7 +330,7 @@ function podEnv(name: string, ports: Ports, created?: string): NodeJS.ProcessEnv
     POD_CREATED: created ?? new Date().toISOString(),
     POD_WORKSPACE: ROOT,
     POD_CONTAINER_PREFIX: `${PROJECT_PREFIX}${name}`,
-    POD_DB_NAME: dbNameFor(name),
+    POD_DB_NAME: podDatabaseName(name),
     POD_DB_PORT: ports.db,
     POD_API_PORT: ports.api,
     POD_WEB_PORT: ports.web,
@@ -353,7 +354,7 @@ function printPod(pod: Pod, index: number): void {
       `age ${humanAge(ageMs(pod))}  created ${pod.created ?? "unknown"}`,
   );
   console.log(
-    `   ports       ${ports ? `db ${ports.db} / api ${ports.api} / web ${ports.web}` : "not published (pod not fully up)"}  database ${dbNameFor(pod.name)}`,
+    `   ports       ${ports ? `db ${ports.db} / api ${ports.api} / web ${ports.web}` : "not published (pod not fully up)"}  database ${podDatabaseName(pod.name)}`,
   );
   console.log(`   containers  ${containerSummary(pod)}`);
   console.log(
@@ -471,7 +472,7 @@ async function commandUp(nameArg: string | undefined): Promise<void> {
   console.log(`  web         ${url}`);
   console.log(`  api         http://localhost:${podPortsNow.api}/api/health`);
   console.log(
-    `  db          localhost:${podPortsNow.db}  database ${dbNameFor(name)} (user gameuser, password gamepass)`,
+    `  db          localhost:${podPortsNow.db}  database ${podDatabaseName(name)} (user gameuser, password gamepass)`,
   );
   console.log(`  containers  ${containerSummary(pod)}`);
   console.log(`  workspace   ${ROOT}`);
@@ -480,7 +481,7 @@ async function commandUp(nameArg: string | undefined): Promise<void> {
   console.log("  it stays up: nothing tears a pod down when a run ends -- removal is pod:down or pod:prune.");
   console.log(
     `  point a run at it: API_HOST=127.0.0.1 API_PORT=${podPortsNow.api} CLIENT_PORT=${podPortsNow.web} ` +
-      `PGHOST=127.0.0.1 PGPORT=${podPortsNow.db} PGUSER=gameuser PGPASSWORD=gamepass PGDATABASE=${dbNameFor(name)}`,
+      `PGHOST=127.0.0.1 PGPORT=${podPortsNow.db} PGUSER=gameuser PGPASSWORD=gamepass PGDATABASE=${podDatabaseName(name)}`,
   );
 }
 

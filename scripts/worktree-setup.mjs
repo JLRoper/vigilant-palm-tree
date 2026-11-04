@@ -59,35 +59,21 @@ import { spawnSync } from "node:child_process";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
 
-/** The branches that ARE the shared checkout: they must not get a private database. */
-export const PRIMARY_BRANCHES = ["main", "master"];
-
-/** Postgres truncates identifiers at 63 bytes; `game_poc_` is the prefix every per-worktree name carries. */
-const DB_PREFIX = "game_poc_";
-const SLUG_LIMIT = 40;
-
 /**
- * The per-worktree slug, and the ONLY rule in the repo that names a worktree
- * database. Lowercased branch, every run of non-alphanumerics to `_`, trimmed,
- * capped at 40 so the identifier stays inside Postgres' 63-byte limit.
+ * The naming rule is NOT here any more: it is `scripts/lib/database-name.mjs`,
+ * the one module that owns every database name this repo can create, plus the
+ * guard (`isRepoDatabaseName`) that recognises one. It lives there because
+ * `scripts/pods.ts` (`heroes_pod_<name>`), `tools/run-test.mjs` and the test
+ * tree all need the same rule, and because this script must stay importable in
+ * a worktree with no `node_modules` yet -- the case it exists for -- so the
+ * module it pulls in is plain Node ESM with no dependencies of its own.
  *
- * `wtgui/a-fresh-worktree-arrives-f9c70c` -> `wtgui_a_fresh_worktree_arrives_f9c70c`
+ * `slugForBranch`/`databaseNameForBranch` are re-exported below so the callers
+ * that already reach for them here keep working.
  */
-export function slugForBranch(branch) {
-  const slug = String(branch ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  if (!slug) return "wt";
-  return slug.slice(0, SLUG_LIMIT);
-}
+import { databaseNameForBranch, isRepoDatabaseName } from "./lib/database-name.mjs";
 
-/** `main` -> null (the shared checkout keeps the shared database). */
-export function databaseNameForBranch(branch) {
-  const name = String(branch ?? "").trim().toLowerCase();
-  if (PRIMARY_BRANCHES.includes(name)) return null;
-  return DB_PREFIX + slugForBranch(branch);
-}
+export { PRIMARY_BRANCHES, slugForBranch, databaseNameForBranch } from "./lib/database-name.mjs";
 
 /**
  * Point `.env` text at this worktree's database. Pure, so both halves of the
@@ -434,6 +420,17 @@ function ensureEnv(root, primary, branch, log) {
 
 function ensureDatabase(container, db, log) {
   if (!db) return "skipped";
+  // The guard, at the one place the repo CREATEs a database: a name this
+  // script cannot recognise as the repo's own must never be created, because a
+  // sweep could not tell it apart from a stranger's (the defect two sweeps hit
+  // -- `game_wt_*`, `game_fix3_*`, `game_play_flip_*`, `game_play_meas_*`).
+  // `databaseNameForBranch` is the only producer of `db`, so this is an
+  // invariant check rather than a filter; it fires if a future edit routes a
+  // name around the rule.
+  if (!isRepoDatabaseName(db)) {
+    log(`refusing to create ${db}: it is not a name this repo's rule produces (see scripts/lib/database-name.mjs)`);
+    return "refused";
+  }
   const probe = sh("docker", ["exec", container, "psql", "-U", "gameuser", "-d", "postgres", "-tAc",
     `SELECT 1 FROM pg_database WHERE datname='${db}';`]);
   if (!probe.ok) {
@@ -482,7 +479,7 @@ export function run(argv = process.argv.slice(2), { root = ROOT } = {}) {
   const env = flags.has("--no-db") ? { envPath: join(root, ".env"), db: null } : ensureEnv(root, primary, branch, log);
   const launchers = flags.has("--no-links") ? { how: "skipped", path: join(root, "node_modules") } : ensureLaunchers(root, primary, log);
 
-  if (env.db) ensureDatabase("game_db", env.db, log);
+  const dbResult = env.db ? ensureDatabase("game_db", env.db, log) : "skipped";
 
   const ports = flags.has("--no-ports") ? false : allocatePorts(root, log);
 
@@ -492,6 +489,10 @@ export function run(argv = process.argv.slice(2), { root = ROOT } = {}) {
   console.log(`  database      ${env.db ?? "(shared: the primary checkout)"}`);
   console.log(`  node_modules  ${launchers.how} (${launchers.path})`);
   console.log(`  ports         ${ports ? "allocated by scripts/allocate-ports.ts" : "not allocated"}`);
+  if (dbResult === "refused") {
+    console.log("  NEXT          the database name escaped scripts/lib/database-name.mjs; fix the rule, not the name");
+    return 1;
+  }
   if (launchers.how === "failed" || launchers.how === "unknown") {
     console.log("  NEXT          `npm install` in this worktree, then re-run `npm run worktree:setup`");
     return 1;

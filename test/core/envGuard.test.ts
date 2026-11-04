@@ -26,6 +26,16 @@ const request = (apiPort: number, clientPort: number): TestRequest => ({
 
 const input = (env: Record<string, string | undefined>, req: TestRequest | null = null): TargetInput => ({ env, request: req });
 
+/**
+ * A name the repo does not create -- one of the families two sweeps had to
+ * hand-widen their guard for. Held in a constant rather than written inline:
+ * `test/core/databaseNaming.test.ts` scans this repo for `PGDATABASE` values and
+ * fails on any the naming guard rejects, and a hand-named literal in a test
+ * file is exactly the habit that left 18 databases behind. (The scan reads the
+ * value after `PGDATABASE:`, so it sees `STRAY_DB`, which is not a name.)
+ */
+const STRAY_DB = "game_fix3_all";
+
 test("unset ports and database: refuses, naming every variable and the fallback it refused", () => {
   const report = inspectRunTargets(input({}));
   assert.equal(report.ok, false);
@@ -101,6 +111,17 @@ test("explicitly asking for the deployed ports, or the shared database, is allow
   assert.equal(report.warnings.length, 3);
   assert.match(report.warnings[0], /DEPLOYED stack/);
   assert.match(report.warnings[2], /SHARED dev database/);
+});
+
+test("a database name the repo does not create is allowed, but said out loud with the accepted shapes", () => {
+  const report = inspectRunTargets(input({ API_PORT: "57601", CLIENT_PORT: "57602", PGDATABASE: STRAY_DB }));
+  assert.equal(report.ok, true);
+  assert.equal(report.targets?.database, STRAY_DB);
+  assert.equal(report.warnings.length, 1, "one warning, naming the shapes this repo can create");
+  assert.match(report.warnings[0], new RegExp(`PGDATABASE=${STRAY_DB} is not a name this repo creates`));
+  for (const shape of ["game_poc", "game_poc_<branch-slug>", "game_play_<tag>", "heroes_pod_<pod-name>"]) {
+    assert.ok(report.warnings[0].includes(shape), `the warning names ${shape}`);
+  }
 });
 
 test("the refusal text names the variables, the refused values and that nothing was written", () => {
