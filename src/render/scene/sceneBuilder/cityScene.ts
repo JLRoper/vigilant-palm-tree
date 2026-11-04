@@ -1,5 +1,5 @@
 import type { CityBackdropSignature, CityViewSize } from "@heroes/engine";
-import { buildingConstructionProgress, buildingFootprintFromRegistry, buildingMaxWorkers, constructionStageFor, farmFieldStyleAt, farmPlotVariantAt, upgradeProgress, upgradeRefs } from "@heroes/engine";
+import { buildersOnSite, buildingConstructionProgress, buildingFootprintFromRegistry, constructionStageFor, farmFieldStyleAt, farmPlotVariantAt, upgradeProgress, upgradeRefs } from "@heroes/engine";
 import type { BuildingDef, BuildingKind, UpgradeState } from "@heroes/contracts";
 import { buildingFootprint, cellsInDrawOrder, cellToScreen, cityLayout } from "../../../core/cityGrid";
 import type { ResourceType } from "../../../map/resourceTiles";
@@ -196,14 +196,16 @@ export function buildCityScene(input: CitySceneInput): SceneNode[] {
     });
   }
 
-  // Worker person clusters (population-workforce wave): one node per staffed,
-  // not-under-construction building. Legacy buildings (workers undefined) read
-  // as fully staffed so existing saves keep their look; a visible cap of 4
-  // keeps clusters readable. Emitted after the building run so persons paint
-  // above building bodies and below labels.
+  // Worker person clusters (population-workforce wave): one node per staffed
+  // building, INCLUDING a building under construction (2026-11-03 -- the skip
+  // is gone: builders are people standing on the site, and a stalled site draws
+  // none, which is the visual statement of "nobody is working here"). An absent
+  // count is the auto crew and reads as the building's own ceiling
+  // (`buildersOnSite`), which is the kind's cap once finished and 4 while it is
+  // being built; a visible cap of 4 keeps clusters readable. Emitted after the
+  // building run so persons paint above building bodies and below labels.
   for (const b of orderedBuildings) {
-    if (b.construction) continue;
-    const count = Math.min(b.workers ?? buildingMaxWorkers(b.kind), 4);
+    const count = buildersOnSite(b);
     if (count <= 0) continue;
     const fpSize = buildingFootprintFromRegistry(b.kind, b.level);
     const fp = buildingFootprint(b.gx, b.gy, gridOrigin, screenOrigin, tileScale, fpSize.w, fpSize.h);

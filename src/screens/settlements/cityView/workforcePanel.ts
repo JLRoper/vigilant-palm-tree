@@ -1,7 +1,7 @@
 import { FloatingPanel, styleButton, createPanel } from "@screens/shared/panel";
 import type { PanelGeometryKey } from "@screens/shared/panelLayout";
 import { toolbarHeight } from "@screens/shared/panelRail";
-import { buildingLabel, canAssignWorkers, staffingBase } from "@heroes/engine";
+import { buildingLabel, buildingLegacyStaffing, canAssignWorkers, staffingBase, steppedWorkers } from "@heroes/engine";
 import type { BuildingKind } from "@heroes/contracts";
 import type { CityView, WorkforceBuildingRole, WorkforceSnapshot } from "./cityView";
 
@@ -12,6 +12,7 @@ export interface WorkforcePanelOptions {
 }
 
 const ROLE_LABELS: Record<WorkforceBuildingRole, string> = {
+  building: "Building",
   producer: "Producer",
   market: "Market",
   recruiter: "Recruit",
@@ -226,14 +227,17 @@ export class WorkforcePanel {
     plus.style.padding = "0px 7px";
     plus.style.fontSize = "12px";
 
-    const base = staffingBase(b.workers, max, snapshot.legacy);
+    // The BUILDING's own legaciness, not the settlement's (2026-11-03): one
+    // auto-crewed building in a city made every OTHER row's `+` write 1 forever,
+    // so the 2nd-4th builder was unreachable from this panel too.
+    const base = staffingBase(b.workers, max, buildingLegacyStaffing(b));
 
     const refresh = (): void => {
       value.textContent = b.workers === undefined ? "Auto" : `${b.workers}/${max}`;
       value.title = b.workers === undefined
         ? `Auto crew: full effort (${max} slots), spends no pool — assign a worker to make this building explicit`
         : `Of ${max} worker slots`;
-      const plusDisabled = !canAssignWorkers(staffingBase(b.workers, max, snapshot.legacy), max, 1, snapshot.pool, snapshot.assigned);
+      const plusDisabled = !canAssignWorkers(base, max, 1, snapshot.pool, snapshot.assigned);
       plus.disabled = plusDisabled;
       plus.style.opacity = plusDisabled ? "0.4" : "1";
       plus.style.cursor = plusDisabled ? "not-allowed" : "pointer";
@@ -244,12 +248,12 @@ export class WorkforcePanel {
     };
 
     minus.addEventListener("click", () => {
-      const ok = this.onAssignWorkers(b.gx, b.gy, Math.max(0, base - 1), b.district ?? undefined);
+      const ok = this.onAssignWorkers(b.gx, b.gy, steppedWorkers(b, max, -1), b.district ?? undefined);
       if (ok) this.cityView.notifyWorkforceCommit();
       this.update();
     });
     plus.addEventListener("click", () => {
-      const ok = this.onAssignWorkers(b.gx, b.gy, Math.min(base + 1, max), b.district ?? undefined);
+      const ok = this.onAssignWorkers(b.gx, b.gy, steppedWorkers(b, max, 1), b.district ?? undefined);
       if (ok) this.cityView.notifyWorkforceCommit();
       this.update();
     });

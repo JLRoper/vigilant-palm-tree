@@ -16,12 +16,21 @@ import {
   type RecruitSource,
 } from "../settlement/recruitUnits";
 import {
+  buildingBuildDays,
   buildingDraftMax,
   buildingFootprintFromRegistry,
   buildingPlacementCost,
   getBuildingEffect,
   isRecruitBuilding,
 } from "../buildingRegistry";
+import {
+  assignedWorkersExplicit,
+  buildersOnSite,
+  committedWorkerSlots,
+  CONSTRUCTION_MAX_BUILDERS,
+  newPlacementsAutoCrew,
+  workforcePool,
+} from "../settlement/workforce";
 import { cityViewSizeFor } from "../settlement/citySpots";
 import { RESOURCES } from "../map/resourceTiles";
 import { computeSettlementRates, generateSettlementName } from "../economy/settlementRates";
@@ -394,6 +403,95 @@ export interface HeroArmyPlacement {
   gy: number;
 }
 
+/** One `AssignWorkers` the AI's construction staff should commit: the site, and
+ * the ABSOLUTE builder count to write on it (the command's own shape). */
+export interface AiWorkerAssignment {
+  settlementId: SettlementId;
+  gx: number;
+  gy: number;
+  workers: number;
+  district?: { q: number; r: number };
+}
+
+/**
+ * The AI's construction staff (2026-11-03). An AI seat's settlement is never a
+ * bootstrap (districts are seeded from tier 2 up), so every building it places
+ * lands at `workers: 0` -- and under `buildRate(0) = 0` a site with nobody on it
+ * never finishes. The seat therefore crews its own sites out of its OWN pool,
+ * exactly as a player would: no carve-out, no free labour, the same
+ * `AssignWorkers` command and the same per-site ceiling of 4.
+ *
+ * Order: a fully STALLED site first (it is already paid for and going nowhere),
+ * then the fewest days remaining, and the largest `buildDays` on a tie -- the
+ * site closest to finishing is worth the next slot. Each site takes up to
+ * `CONSTRUCTION_MAX_BUILDERS`; the pass stops when the seat's idle pool is
+ * spent, so it can never over-assign (`pool_exhausted` is not reachable from
+ * here, but callers still tolerate and log rejections as the driver's other
+ * passes do). An auto-crewed site is already at the ceiling and is skipped.
+ *
+ * Shared by BOTH callers of the AI's building programme -- the server driver
+ * (`server/app/aiDriver.ts`) and the client's own turn controller
+ * (`src/state/turnController.ts`, hotseat seats) -- because a seat whose sites
+ * freeze in only one of the two paths is the hardest divergence to notice.
+ */
+export function pickAiConstructionStaffing(state: GameState, seat: number): AiWorkerAssignment[] {
+  const out: AiWorkerAssignment[] = [];
+  for (const settlement of Object.values(state.settlements)) {
+    if (settlement.ownerId !== seat) continue;
+    let left = workforcePool(settlement) - assignedWorkersExplicit(settlement);
+    if (left <= 0) continue;
+    const sites: Array<{
+      gx: number;
+      gy: number;
+      district?: { q: number; r: number };
+      workers: number;
+      missing: number;
+      days: number;
+      total: number;
+    }> = [];
+    const collect = (buildings: BuildingDef[], district?: { q: number; r: number }): void => {
+      for (const b of buildings) {
+        if (!b.construction) continue;
+        const current = buildersOnSite(b);
+        const missing = CONSTRUCTION_MAX_BUILDERS - current;
+        if (missing <= 0) continue;
+        sites.push({
+          gx: b.gx,
+          gy: b.gy,
+          ...(district ? { district } : {}),
+          workers: current,
+          missing,
+          days: b.construction.daysRemaining,
+          total: buildingBuildDays(b.kind),
+        });
+      }
+    };
+    collect(settlement.buildings);
+    for (const d of Object.values(settlement.districts ?? {})) collect(d.buildings, { q: d.q, r: d.r });
+    sites.sort((a, b) => {
+      const stalledA = a.missing === CONSTRUCTION_MAX_BUILDERS ? 0 : 1;
+      const stalledB = b.missing === CONSTRUCTION_MAX_BUILDERS ? 0 : 1;
+      if (stalledA !== stalledB) return stalledA - stalledB;
+      if (a.days !== b.days) return a.days - b.days;
+      return b.total - a.total;
+    });
+    for (const site of sites) {
+      if (left <= 0) break;
+      const give = Math.min(site.missing, left);
+      if (give <= 0) continue;
+      out.push({
+        settlementId: settlement.id,
+        gx: site.gx,
+        gy: site.gy,
+        workers: site.workers + give,
+        ...(site.district ? { district: site.district } : {}),
+      });
+      left -= give;
+    }
+  }
+  return out;
+}
+
 /**
  * Extra recruit buildings for the seat's city, when its recruits alone cannot
  * reach HERO_ARMY_TARGET_POWER.
@@ -436,8 +534,24 @@ export function pickHeroArmyBuildings(
     if (perBuilding <= 0) continue;
     let needed = Math.ceil((deficit - recruitCapacityPower(settlement, unitTypes)) / perBuilding);
     const cells = freeCityCells(settlement, kind, needed);
+    // The AI must not start what it cannot staff (2026-11-03). A placement into
+    // a GROWN settlement lands at `workers: 0` and freezes until someone is
+    // assigned, so a site costs the crew the seat is going to put on it --
+    // `CONSTRUCTION_MAX_BUILDERS`, the ceiling its own staffing pass may fill --
+    // and that is what the budget is charged per placement. The budget is
+    // `workforcePool - committedWorkerSlots`, NOT `pool - assignedWorkersExplicit`:
+    // the latter reads an unstaffed site as an explicit 0, so it looked untouched
+    // on the next round and the seat started a whole pool's worth of fresh sites
+    // every round (measured: 31 buildings started against a 17-slot pool, 22 of
+    // 23 sites then frozen half-built because the buildings it had finished held
+    // every slot). With no slot left the seat banks its resources instead of
+    // adding a site it can never finish. A bootstrap settlement's placement is
+    // auto-crewed (free, and claims nothing), so the gate does not apply there.
+    const needsStaffing = !newPlacementsAutoCrew(settlement);
+    let budget = workforcePool(settlement) - committedWorkerSlots(settlement);
     for (const cell of cells) {
       if (needed <= 0) break;
+      if (needsStaffing && CONSTRUCTION_MAX_BUILDERS > budget) break;
       const cost = buildingPlacementCost(kind);
       if ((cost.gold ?? 0) + GARRISON_GOLD_RESERVE > settlement.gold) break;
       if ((cost.wood ?? 0) > settlement.warehouse.wood) break;
@@ -445,6 +559,7 @@ export function pickHeroArmyBuildings(
       if ((cost.iron ?? 0) > settlement.warehouse.iron) break;
       if ((cost.arcane ?? 0) > settlement.warehouse.arcane) break;
       out.push({ settlementId: settlement.id, kind, gx: cell.gx, gy: cell.gy });
+      budget -= CONSTRUCTION_MAX_BUILDERS;
       needed -= 1;
     }
   }

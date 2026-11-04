@@ -1,6 +1,5 @@
 import type { Axial } from "@heroes/contracts";
 import { hexDistance } from "@heroes/contracts";
-import { buildingMaxWorkers } from "../buildingRegistry";
 import { districtKey } from "../control";
 import type { GameMap } from "../map/gameMap";
 import { computePathCost, findPath } from "../map/pathfinding";
@@ -11,6 +10,7 @@ import {
   type DistrictLike,
   type SettlementDistrictLike,
 } from "./districtConnectivity";
+import { staffingCeiling } from "./workforce";
 
 // District roads -- the adventure map's district road network, as pure data.
 //
@@ -96,12 +96,18 @@ export const WORKFORCE_PER_ROAD = 5;
 /** Hard ceiling on a single route's track count; also the full-workforce count. */
 export const MAX_ROADS_PER_ROUTE = 20;
 
-/** The district's staffing share on a 0..100 scale, from its own job slots. */
+/** The district's staffing share on a 0..100 scale, from its own job slots.
+ *
+ * The slots are `staffingCeiling` (2026-11-03), not `buildingMaxWorkers`: a
+ * district building under construction carries up to 4 builders, so a district
+ * full of sites reads a WIDER road than its finished caps would give it. The
+ * road is a workforce display, not a production one, and the builders really are
+ * there. */
 export function districtWorkforcePercent(district: DistrictLike | undefined): number {
   let assigned = 0;
   let capacity = 0;
   for (const b of district?.buildings ?? []) {
-    const max = buildingMaxWorkers(b.kind);
+    const max = staffingCeiling(b);
     capacity += max;
     // An absent count is the pre-workforce "auto (max)" crew (effortFraction
     // reads it the same way), so it counts as fully staffed.

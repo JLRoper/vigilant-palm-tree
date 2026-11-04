@@ -1,5 +1,5 @@
 import type { BuildingDef, BuildingKind, CastleLevel } from "@heroes/contracts";
-import { buildingBuildDays, buildingPlacementCost, buildingRequiredLevel, buildingUpkeep } from "@heroes/engine";
+import { CONSTRUCTION_MAX_BUILDERS, buildRate, buildingBuildDays, buildingPlacementCost, buildingRequiredLevel, buildingUpkeep } from "@heroes/engine";
 import { coversCell } from "../../../core/cityGrid";
 import type { NetCost } from "./netCost";
 import { footprintCells, footprintLine } from "./footprint";
@@ -180,8 +180,8 @@ function buildTimeLine(kind: BuildingKind): string {
   const days = buildingBuildDays(kind);
   if (days <= 0) return "";
   return (
-    `Build time: ${days} day${days === 1 ? "" : "s"} \u2014 its upkeep is paid while it is under construction, ` +
-    `and it produces nothing until it is finished`
+    `Build time: ${days} day${days === 1 ? "" : "s"} at 1 builder, up to ${buildRate(CONSTRUCTION_MAX_BUILDERS).toFixed(2)}\u00d7 with ${CONSTRUCTION_MAX_BUILDERS} \u2014 its upkeep is paid while it is under ` +
+    `construction, it produces nothing until it is finished, and a site with no builders makes no progress`
   );
 }
 

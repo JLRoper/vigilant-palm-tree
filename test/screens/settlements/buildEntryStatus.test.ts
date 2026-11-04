@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildStarterLayout } from "@heroes/engine";
+import { buildRate, buildStarterLayout, CONSTRUCTION_MAX_BUILDERS } from "@heroes/engine";
 import {
   buildConfirmStatus,
   buildEntryStatus,
@@ -15,9 +15,16 @@ const FULL: BuildEntryAffordability = {
 // E5 (playthrough round 2b): every row that is not instant carries its build
 // time AND the fact that its upkeep is charged while it builds, in the row's
 // own tooltip. `days` comes from the registry (`buildingBuildDays`), which is
-// why each expectation below names its kind's own number.
+// why each expectation below names its kind's own number. Since 2026-11-03 the
+// line also prices the CREW: `buildDays` is the number of ticks at ONE builder,
+// the top of the crew curve is stated, and so is the stall. The rate and the
+// ceiling are read from the engine's own constants here too, so the sentence and
+// the mechanic cannot drift apart.
 function buildTime(days: number): string {
-  return `Build time: ${days} day${days === 1 ? "" : "s"} \u2014 its upkeep is paid while it is under construction, and it produces nothing until it is finished`;
+  return (
+    `Build time: ${days} day${days === 1 ? "" : "s"} at 1 builder, up to ${buildRate(CONSTRUCTION_MAX_BUILDERS).toFixed(2)}\u00d7 with ${CONSTRUCTION_MAX_BUILDERS} \u2014 its upkeep is paid while it is under ` +
+    `construction, it produces nothing until it is finished, and a site with no builders makes no progress`
+  );
 }
 
 const NONE: BuildEntryAffordability = {

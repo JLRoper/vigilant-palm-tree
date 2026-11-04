@@ -1,7 +1,8 @@
 import type { BuildingDef, DistrictState, GameState, SettlementId, SettlementState } from "@heroes/contracts";
 import { districtKey } from "../control";
 import { pickStyleForBuilding } from "../styleResolver";
-import { effortFraction } from "./workforce";
+import { buildingMaxWorkers } from "../buildingRegistry";
+import { buildRate, buildersOnSite } from "./workforce";
 
 export interface AdvanceUpgradesOptions {
   accel?: (s: SettlementState) => number;
@@ -117,16 +118,29 @@ export function advanceBuildingConstructions(state: GameState): GameState {
   const newSettlements: Record<SettlementId, SettlementState> = { ...state.settlements };
   const stepBuilding = (b: BuildingDef): BuildingDef => {
     if (!b.construction) return b;
-    // Construction is staffed work: the daily decrement is 1 + effortFraction,
-    // so an idle site advances 1 day and a fully staffed one (effortFraction 1)
-    // advances 2 -- a fresh placement in a normalized settlement carries
-    // workers 0 and builds at 1x. A legacy settlement (workers undefined =
-    // auto-staffed at full effort) keeps the 2x its other effects already get.
-    const daysRemaining = b.construction.daysRemaining - (1 + effortFraction(b));
+    // Construction is staffed work (2026-11-03): the daily decrement is
+    // `buildRate(buildersOnSite(b))` -- 0 with no builders, then 1.00 / 1.33 /
+    // 1.67 / 2.00 up to the construction ceiling of 4. A site nobody is working
+    // on therefore does not advance at all (the stall is an absence of
+    // decrement; nothing is stored as negative progress), while the auto crew
+    // (`workers === undefined`) reads as a full 4-builder crew and so advances
+    // exactly the 2 days per tick it advances today. A 0-day site (townHall)
+    // still completes on this first tick whatever the rate, because the
+    // `daysRemaining > 0` test below is already false.
+    const daysRemaining = b.construction.daysRemaining - buildRate(buildersOnSite(b));
     changed = true;
     if (daysRemaining > 0) return { ...b, construction: { daysRemaining } };
+    // Completion. The construction crew is trimmed to the kind's operational
+    // cap in this same tick, BEFORE anything else reads the crew (production in
+    // this tick already reads the trimmed count). The trim is deterministic and
+    // lossless: `BuildingDef.workers` is an anonymous integer, so "trim" means
+    // only "reduce the count to the cap" -- the surplus is released as idle
+    // workers in the settlement's pool (the pool is derived from the counts, so
+    // the `assigned` total simply drops by it), no worker is deleted, and no
+    // site is ever auto-staffed by it (an auto crew stays `undefined`).
     const { construction: _completed, ...finished } = b;
-    return finished as BuildingDef;
+    if (b.workers === undefined) return finished as BuildingDef;
+    return { ...finished, workers: Math.min(b.workers, buildingMaxWorkers(b.kind)) } as BuildingDef;
   };
   for (const [id, s] of Object.entries(newSettlements)) {
     const hasMainConstruction = s.buildings.some((b) => b.construction);

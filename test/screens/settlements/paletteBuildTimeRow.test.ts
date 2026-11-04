@@ -39,8 +39,8 @@ test("E5: the build-time glyph and its digit are labelled, and the row tooltip s
 
   assert.match(
     row.title,
-    /Build time: 2 days \u2014 its upkeep is paid while it is under construction, and it produces nothing until it is finished/,
-    "the row's tooltip prices the wait before the click",
+    /Build time: 2 days at 1 builder, up to 2\.00\u00d7 with 4 \u2014 its upkeep is paid while it is under construction, it produces nothing until it is finished, and a site with no builders makes no progress/,
+    "the row's tooltip prices the wait, the crew and the stall before the click",
   );
 
   const glyphs = findAll(row, (el) => el.tagName === "IMG" && (el.alt ?? "").includes("Build time"));

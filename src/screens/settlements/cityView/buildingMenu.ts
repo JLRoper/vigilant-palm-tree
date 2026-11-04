@@ -1,6 +1,7 @@
 import { FloatingPanel, styleButton } from "@screens/shared/panel";
 import type { BuildingDef, BuildingKind } from "@heroes/contracts";
 import type { SettlementState } from "../../../state/gameState";
+import { siteStatus } from "./siteStatus";
 import { catalogFailed, catalogReady, getCachedUnit, loadUnitCatalog } from "../../../data/unitCatalog";
 import { getUnitImageUrl } from "../../../data/unitImages";
 import {
@@ -12,15 +13,16 @@ import {
   buildingUpkeep,
   buildingUpgradeCost,
   getBuildingEffect,
-  buildingMaxWorkers,
   buildingDraftMax,
   canAssignWorkers,
   districtKey,
   effortFraction,
   workforcePool,
   assignedWorkersExplicit,
-  hasLegacyStaffing,
+  buildingLegacyStaffing,
   staffingBase,
+  staffingCeiling,
+  steppedWorkers,
   TOWN_HALL_COSTS,
   type RecruitEntry,
 } from "@heroes/engine";
@@ -264,20 +266,12 @@ export class BuildingMenu {
       this.menu.appendContent(prodEl);
     }
 
-    if (workforce && buildingMaxWorkers(building.kind) >= 1) {
+    if (workforce && staffingCeiling(building) >= 1) {
       this.menu.appendContent(this.buildWorkforceRow(building, workforce, resolveLive, recruitRefreshers));
     }
 
     if (constructionDaysRemaining !== undefined) {
-      const conEl = document.createElement("div");
-      conEl.textContent = `Under construction — ${constructionDaysRemaining} day${constructionDaysRemaining === 1 ? "" : "s"} remaining`;
-      Object.assign(conEl.style, {
-        fontSize: "11px",
-        color: "#f0c860",
-        lineHeight: "1.5",
-        marginBottom: "4px",
-      });
-      this.menu.appendContent(conEl);
+      this.menu.appendContent(this.buildSiteStatusLine(building, resolveLive, constructionDaysRemaining));
     }
 
     const costStr = formatPlacementCost(building.kind);
@@ -453,13 +447,48 @@ export class BuildingMenu {
     }
   }
 
+  /**
+   * The site's own line (design §6.1). Same element, same colour, same raw day
+   * number as before -- fractions included -- with the CREW and the RATE added:
+   * `Under construction — 1.33× (2 of 4 builders) · 4 days remaining`, or
+   * `Under construction — stalled: no builders · 4 days remaining` when nobody
+   * is on the site, which under the build-crew rule means it is not advancing at
+   * all. The sentence itself is `siteStatus` (asserted directly, no DOM), and the
+   * `data-*` hooks carry the same crew and rate so a browser pass can read them
+   * without parsing the words.
+   */
+  private buildSiteStatusLine(
+    building: BuildingDef,
+    resolveLive: (() => BuildingDef | undefined) | undefined,
+    daysRemaining: number,
+  ): HTMLDivElement {
+    const live = resolveLive?.() ?? building;
+    const status = siteStatus(live, daysRemaining);
+    const conEl = document.createElement("div");
+    conEl.textContent = status.text;
+    conEl.dataset.testid = "site-status";
+    conEl.dataset.builders = String(status.builders);
+    conEl.dataset.rate = status.rate;
+    Object.assign(conEl.style, {
+      fontSize: "11px",
+      color: "#f0c860",
+      lineHeight: "1.5",
+      marginBottom: "4px",
+    });
+    return conEl;
+  }
+
   private buildWorkforceRow(
     building: BuildingDef,
     workforce: BuildingMenuWorkforce,
     resolveLive: (() => BuildingDef | undefined) | undefined,
     recruitRefreshers: Array<() => void>,
   ): HTMLDivElement {
-    const max = buildingMaxWorkers(building.kind);
+    // The CREW CEILING, not the kind's operational cap: a building under
+    // construction takes up to `CONSTRUCTION_MAX_BUILDERS` whatever its kind
+    // (2026-11-03), so the stepper, its `n / max` and its `+` gate would all
+    // disagree with the reducer if this read `buildingMaxWorkers`.
+    const max = staffingCeiling(building);
     const row = document.createElement("div");
     Object.assign(row.style, {
       display: "flex",
@@ -508,23 +537,27 @@ export class BuildingMenu {
       fontSize: "12px",
     });
 
-    // Re-derived from the live settlement on every read: a commit normalizes
-    // the whole city (undefined -> 0), so the menu-open snapshot goes stale.
-    const legacyNow = (): boolean => {
-      const liveSettlement = workforce.getSettlement();
-      return liveSettlement ? hasLegacyStaffing(liveSettlement) : false;
-    };
+    // THE BUILDING's own legaciness, not the settlement's (2026-11-03). A city
+    // holding ONE auto-crewed building reads legacy as a whole, and a
+    // settlement-wide base of 0 made `+` write 1 forever on every other
+    // building -- which is what left the 4-builder site this feature introduces
+    // unreachable from this control (measured: three `+` clicks on a real
+    // level-2 town sent three identical `{"kind":"AssignWorkers","workers":1}`
+    // commands and the row stayed `1 / 4`). The building is still resolved live
+    // on every read: a commit normalizes the whole city, so the menu-open
+    // snapshot goes stale.
+    const baseNow = (live: BuildingDef): number =>
+      staffingBase(live.workers, max, buildingLegacyStaffing(live));
 
     const refresh = (): void => {
       const live = resolveLive?.();
       if (!live) return;
-      const legacy = legacyNow();
-      const base = staffingBase(live.workers, max, legacy);
+      const base = baseNow(live);
       value.textContent = live.workers === undefined ? "Auto (max)" : `${live.workers} / ${max}`;
       const liveSettlement = workforce.getSettlement();
       const pool = liveSettlement ? workforcePool(liveSettlement) : workforce.pool;
       const assigned = liveSettlement ? assignedWorkersExplicit(liveSettlement) : workforce.assigned;
-      const plusDisabled = !canAssignWorkers(staffingBase(live.workers, max, legacy), max, 1, pool, assigned);
+      const plusDisabled = !canAssignWorkers(base, max, 1, pool, assigned);
       plus.disabled = plusDisabled;
       plus.style.opacity = plusDisabled ? "0.4" : "1";
       plus.style.cursor = plusDisabled ? "not-allowed" : "pointer";
@@ -538,16 +571,14 @@ export class BuildingMenu {
     minus.addEventListener("click", () => {
       const live = resolveLive?.();
       if (!live) return;
-      const base = staffingBase(live.workers, max, legacyNow());
-      workforce.onAssignWorkers(building.gx, building.gy, Math.max(0, base - 1), workforce.district ?? undefined);
+      workforce.onAssignWorkers(building.gx, building.gy, steppedWorkers(live, max, -1), workforce.district ?? undefined);
       workforce.onChange();
       refresh();
     });
     plus.addEventListener("click", () => {
       const live = resolveLive?.();
       if (!live) return;
-      const base = staffingBase(live.workers, max, legacyNow());
-      workforce.onAssignWorkers(building.gx, building.gy, Math.min(base + 1, max), workforce.district ?? undefined);
+      workforce.onAssignWorkers(building.gx, building.gy, steppedWorkers(live, max, 1), workforce.district ?? undefined);
       workforce.onChange();
       refresh();
     });

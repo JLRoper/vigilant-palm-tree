@@ -1,11 +1,15 @@
 import { test, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import {
+  advanceBuildingConstructions,
+  buildingBuildDays,
+  CONSTRUCTION_MAX_BUILDERS,
   GameMap,
   HERO_ARMY_TARGET_POWER,
   depositIntoGarrison,
   mulberry32,
   normalizePlatoons,
+  newPlacementsAutoCrew,
   pickAiMove,
   pickCharterAction,
   pickGarrisonRecruitment,
@@ -30,7 +34,7 @@ import {
   type UnitType,
 } from "@heroes/engine";
 import { hexDistance, HEX_DIRECTIONS, MOVEMENT_PER_TURN, coveredWagonIdFor, gameModeSettings, seatHeroIdFor } from "@heroes/contracts";
-import type { Axial, CharterState, Command, HeroId } from "@heroes/contracts";
+import type { Axial, BuildingDef, CharterState, Command, HeroId } from "@heroes/contracts";
 import {
   AI_DEFENDER_OWNER_MISSING_AUDIT_KIND,
   AI_DEFENDER_WAIT_EXPIRED_AUDIT_KIND,
@@ -2892,3 +2896,160 @@ test("settlers mode never recruits an army: a covered wagon is given no troops",
     "the bare-wilderness invariant: a wagon founds, it never fights",
   );
 });
+
+// ── the build crew: the AI's placement is only half of it (2026-11-03) ───────
+//
+// A site with nobody on it makes NO progress, and an AI seat's settlement is
+// never a bootstrap (districts are seeded from tier 2 up), so every building the
+// seat places lands at `workers: 0` and would freeze half-built. The driver must
+// therefore crew what it places, out of its own pool, through the same
+// AssignWorkers command the player uses -- and must not start a site it has no
+// idle slot for. These pins fail on a tree that only staffs the human's sites.
+
+/** A GROWN seat city: one district ends the bootstrap, so its placements land at
+ * `workers: 0` and only the seat's own staffing can move them. */
+function grownArmyWorld(): AiDriverGameSnapshot {
+  const home = {
+    ...makeSettlement("s-home", 1, 20, 14, {
+      level: 2,
+      population: 1500,
+      gold: 5000,
+      warehouse: emptyWarehouse({ wood: 500, stone: 500 }),
+      buildings: [{ gx: 2, gy: 2, kind: "barracks", level: 1, style: "classic" }],
+    }),
+    districts: {
+      "21,14": {
+        q: 21,
+        r: 14,
+        citySpots: [],
+        buildings: [{ gx: 0, gy: 0, kind: "barracks", level: 1, style: "classic" }],
+      },
+    },
+  } as ReturnType<typeof makeSettlement>;
+  return aiTurnWorld([makeHero("h1", 1, 20, 14, { movementRemaining: 0, stacks: [] })], {
+    settlements: [home],
+  });
+}
+
+/**
+ * PlaceBuildings and AssignWorkers as the real handlers apply them: the cart
+ * commit stamps each NEW building's construction timer and its bootstrap-or-0
+ * crew (`placeBuildings.ts`), and an assignment writes one building's explicit
+ * count. The army section's own two commands ride along unchanged.
+ */
+function buildCrewCommandEffects(world: AiDriverGameSnapshot) {
+  const army = armyCommandEffects(world);
+  return (command: Command): AiDriverCommandOutcome | undefined => {
+    if (command.kind === "PlaceBuildings") {
+      const settlement = world.state.settlements[command.settlementId];
+      if (!settlement) return { ok: false, reason: "no_settlement" };
+      const standing = new Set(settlement.buildings.map((b) => `${b.gx},${b.gy},${b.kind}`));
+      const auto = newPlacementsAutoCrew(settlement);
+      settlement.buildings = command.buildings.map((b) => {
+        if (standing.has(`${b.gx},${b.gy},${b.kind}`)) return { ...b };
+        return auto
+          ? { ...b, construction: { daysRemaining: buildingBuildDays(b.kind) } }
+          : { ...b, workers: 0, construction: { daysRemaining: buildingBuildDays(b.kind) } };
+      });
+      return { ok: true };
+    }
+    if (command.kind === "AssignWorkers") {
+      const settlement = world.state.settlements[command.settlementId];
+      if (!settlement) return { ok: false, reason: "no_settlement" };
+      const list = command.district
+        ? settlement.districts?.[`${command.district.q},${command.district.r}`]?.buildings
+        : settlement.buildings;
+      const target = list?.find((b) => b.gx === command.gx && b.gy === command.gy);
+      if (!target || !target.construction) return { ok: false, reason: "no_building" };
+      target.workers = command.workers;
+      return { ok: true };
+    }
+    return army(command);
+  };
+}
+
+test("the AI crews the sites it places, and does not start more sites than it can crew", async () => {
+  const world = grownArmyWorld();
+  const harness = installHarness(world, { override: buildCrewCommandEffects(world) });
+
+  await scanOnce();
+
+  const placed = commandsOfKind(harness.commands, "PlaceBuildings");
+  assert.equal(placed.length, 1, "the capacity commit happened");
+  const newSites = world.state.settlements["s-home"].buildings.filter((b) => b.construction);
+  assert.ok(newSites.length > 0, "the placements are real sites with timers");
+  assert.equal(
+    newSites.length,
+    1,
+    "the pool is the limit, and a site is priced at its kind's own cap: 5 slots buy one barracks (cap 4) and no more",
+  );
+
+  const assignments = commandsOfKind(harness.commands, "AssignWorkers");
+  assert.ok(assignments.length > 0, "the driver crews what it placed -- a dark site never finishes");
+  assert.ok(
+    assignments.every((a) => a.workers >= 1 && a.workers <= CONSTRUCTION_MAX_BUILDERS),
+    "real builders, never more than the construction ceiling of 4",
+  );
+  const staffed = new Set(assignments.map((a) => `${a.gx},${a.gy}`));
+  assert.ok(
+    [...staffed].every((key) => newSites.some((b) => `${b.gx},${b.gy}` === key)),
+    "and only on the sites it just placed",
+  );
+  const totalExplicit = world.state.settlements["s-home"].buildings.reduce((n, b) => n + (b.workers ?? 0), 0);
+  assert.ok(totalExplicit <= 5, `never more than the pool: ${totalExplicit} of 5`);
+
+  // ...and the crews are real on the tick: the staffed sites advance and finish,
+  // the dark ones sit exactly where they are (the same rule the human plays
+  // under -- the pool, not the placement, is the limit).
+  const tick = (): void => {
+    world.state = advanceBuildingConstructions(world.state);
+  };
+  const homeBuildings = (): BuildingDef[] => world.state.settlements["s-home"].buildings;
+  const dark = homeBuildings().filter((b) => b.construction && !b.workers);
+  const darkSnapshot = dark.map((b) => b.construction?.daysRemaining);
+  for (let i = 0; i < 8; i++) tick();
+  for (let i = 0; i < dark.length; i++) {
+    assert.equal(
+      dark[i].construction?.daysRemaining,
+      darkSnapshot[i],
+      "a site the pool could not crew makes no progress, exactly as it does for the player",
+    );
+  }
+  const staffedSites = homeBuildings().filter((b) => b.workers !== undefined && b.workers > 0);
+  assert.ok(
+    staffedSites.every((b) => !b.construction),
+    "every site the seat crewed finished within buildDays + 1 ticks",
+  );
+});
+
+test("round after round the seat starts only what it can crew: no AI site is ever left dark", async () => {
+  // The stage-4 browser pass found the AI starving itself: an unstaffed site
+  // stored an explicit `0`, so it claimed NOTHING of the pool and the seat
+  // started a fresh pool's worth of sites every round, while the buildings it had
+  // already finished held their trimmed crews forever -- the pool filled up with
+  // them and every later site froze half-built (22 of 23 sites, measured). This
+  // is the same fixture driven over four rounds: whatever the seat starts, it
+  // crews, and all of it finishes.
+  const world = grownArmyWorld();
+  const harness = installHarness(world, { override: buildCrewCommandEffects(world) });
+  const homeBuildings = (): BuildingDef[] => world.state.settlements["s-home"].buildings;
+  const dark = (): string[] =>
+    homeBuildings()
+      .filter((b) => b.construction && !b.workers)
+      .map((b) => `${b.kind}@${b.gx},${b.gy}`);
+
+  for (let i = 0; i < 4; i++) {
+    world.state.round += 1;
+    await scanOnce();
+    assert.deepEqual(dark(), [], `round ${world.state.round}: every site the seat has started has builders on it`);
+    for (let tick = 0; tick < 8; tick++) world.state = advanceBuildingConstructions(world.state);
+  }
+
+  assert.deepEqual(
+    homeBuildings().filter((b) => b.construction).map((b) => `${b.kind}@${b.gx},${b.gy}`),
+    [],
+    "and every site it ever started finished -- it never adds one it will have to leave stalled",
+  );
+  assert.ok(commandsOfKind(harness.commands, "PlaceBuildings").length > 0, "the seat did keep building");
+});
+
