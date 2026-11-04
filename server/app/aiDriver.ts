@@ -98,15 +98,38 @@ export const AI_MAX_ROUTES_PER_SEAT = 3;
 
 /**
  * How long an offered defender battle (games.lobby.pendingBattle, dispatched
- * as EnterBattle for a HUMAN defender) may sit before the driver stops
+ * as EnterBattle for a HUMAN defender) may sit IDLE before the driver stops
  * waiting and force-resolves it server-side via ResolveBattle -- the human
  * defender's browser may be closed or the offer stale, and the AI turn must
  * never stall on it.
+ *
+ * The window is measured from the last EVIDENCE THAT THE FIGHT IS STILL BEING
+ * PLAYED, not from the offer itself: the later of the offer's own `since` and
+ * the newest battle_actions row for the pair (every applied arena action is
+ * streamed there as it happens, and the arena keeps its own heartbeat row
+ * fresh while it is open). An actively fought battle therefore stays open
+ * however long it takes, and the result the player actually played is the one
+ * that lands; a browser that is genuinely gone stops refreshing that evidence
+ * and the deadline still fires. Measuring from the offer alone force-resolved
+ * the fight out from under the player 300s after the offer was stamped, no
+ * matter how much they were still playing it.
  */
 export const AI_DEFENDER_WAIT_TIMEOUT_MS = 300_000;
 
 /** Audit kind for the force-resolve above (turn_skipped convention). */
 export const AI_DEFENDER_WAIT_EXPIRED_AUDIT_KIND = "ai_defender_wait_expired";
+
+/**
+ * Where the driver reads the evidence that a pending fight is still being
+ * played: the newest battle_actions.created_at for the pair, epoch ms, or
+ * null when the table holds no row for it. Overridable in tests
+ * (AiDriverOptions.lastBattleActivity).
+ */
+export type LastBattleActivity = (
+  gameName: string,
+  attackerId: HeroId,
+  defenderId: HeroId,
+) => Promise<number | null>;
 
 /** Audit kind for a collision whose defender hero has no owner player in the snapshot. */
 export const AI_DEFENDER_OWNER_MISSING_AUDIT_KIND = "ai_defender_owner_missing";
@@ -245,6 +268,7 @@ interface ResolvedConfig {
   actionBudget: number;
   passDeadlineMs: number;
   defenderWaitTimeoutMs: number;
+  lastBattleActivity: LastBattleActivity;
   driverToken: string;
   now: () => number;
   loadCandidates: () => Promise<AiDriverCandidate[]>;
@@ -324,6 +348,27 @@ async function defaultLoadGame(gameName: string): Promise<AiDriverGameSnapshot |
     pendingBattle: readPendingBattle({ pendingBattle: row.pending_battle }),
     state,
   };
+}
+
+// The arena-activity read behind AI_DEFENDER_WAIT_TIMEOUT_MS: the newest
+// battle_actions row for this exact pair, either orientation (the arena
+// streams rows under the phase's own (attacker, defender) names, which are
+// the marker's). A pair with no rows yet reads null, so the offer's own
+// `since` remains the floor. Read straight from the pool (routes do the same;
+// repositories/ is import-forbidden from server/app/).
+async function defaultLastBattleActivity(
+  gameName: string,
+  attackerId: HeroId,
+  defenderId: HeroId,
+): Promise<number | null> {
+  const r = await pool.query<{ at: Date | null }>(
+    `SELECT max(created_at) AS at FROM battle_actions
+      WHERE game_name = $1
+        AND ((attacker_id = $2 AND defender_id = $3) OR (attacker_id = $3 AND defender_id = $2))`,
+    [gameName, attackerId, defenderId],
+  );
+  const at = r.rows[0]?.at ?? null;
+  return at instanceof Date ? at.getTime() : null;
 }
 
 let liveDepsPromise: Promise<LiveCommandDeps> | null = null;
@@ -459,6 +504,7 @@ function resolveConfig(): ResolvedConfig {
     actionBudget: AI_TURN_ACTION_BUDGET,
     passDeadlineMs: AI_TURN_PASS_DEADLINE_MS,
     defenderWaitTimeoutMs: AI_DEFENDER_WAIT_TIMEOUT_MS,
+    lastBattleActivity: defaultLastBattleActivity,
     driverToken: aiDriverBootToken(),
     now: () => Date.now(),
     loadCandidates: defaultLoadCandidates,
@@ -482,6 +528,11 @@ export interface AiDriverOptions {
   passDeadlineMs?: number;
   /** Override of the defender-offer wait deadline (test seam; default AI_DEFENDER_WAIT_TIMEOUT_MS). */
   defenderWaitTimeoutMs?: number;
+  /**
+   * Override of the arena-activity read (test seam; default real SQL over
+   * battle_actions). null = the table holds no row for this pair.
+   */
+  lastBattleActivity?: LastBattleActivity;
   /** Override of this process's boot token (test seam; default aiDriverBootToken()). */
   driverToken?: string;
   now?: () => number;
@@ -797,6 +848,23 @@ async function runHeroCollect(
   return { collected };
 }
 
+// The anchor AI_DEFENDER_WAIT_TIMEOUT_MS measures from: the later of the
+// offer's own stamp and the newest arena row for the pair. A failed activity
+// read must never resurrect the stall the deadline exists to break, so it
+// degrades to the offer's stamp alone (the pre-activity behaviour) with a warn.
+async function lastActivitySince(gameName: string, pending: PendingBattleMarker): Promise<number> {
+  let activity: number | null = null;
+  try {
+    activity = await cfg.lastBattleActivity(gameName, pending.attackerId, pending.defenderId);
+  } catch (err) {
+    console.warn(
+      `[aiDriver] "${gameName}" arena-activity read failed (measuring the offer alone):`,
+      err,
+    );
+  }
+  return Math.max(pending.since, activity ?? 0);
+}
+
 async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutcome> {
   const gameName = candidate.name;
   let snap = await cfg.loadGame(gameName);
@@ -815,14 +883,20 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
 
   // A battle this pass (or a previous one) offered a HUMAN defender is still
   // pending: wait for their Fight/Auto-resolve choice instead of driving on.
-  // Past the deadline the defender never answered (closed browser, stale
-  // offer) -- force the server auto-resolver so the AI turn cannot stall,
-  // unbudgeted and unpaced (the termination-EndTurn pattern, not dispatch()),
-  // then fall through to the sweep. The handler clears the marker on success
-  // AND on permanent rejection, so a stale marker cannot wedge the pass.
+  // The deadline is measured from the last evidence the fight is still being
+  // PLAYED (the offer's own stamp, or the newest battle_actions row for the
+  // pair -- a played action, or the arena's heartbeat) rather than from the
+  // offer's age, so an actively fought battle stays open and the result the
+  // player played is the one that lands. Past that IDLE window the defender
+  // never answered (closed browser, stale offer) -- force the server
+  // auto-resolver so the AI turn cannot stall, unbudgeted and unpaced (the
+  // termination-EndTurn pattern, not dispatch()), then fall through to the
+  // sweep. The handler clears the marker on success AND on permanent
+  // rejection, so a stale marker cannot wedge the pass.
   if (snap.pendingBattle) {
     const pending = snap.pendingBattle;
-    const waitedMs = cfg.now() - pending.since;
+    const idleSince = await lastActivitySince(gameName, pending);
+    const waitedMs = cfg.now() - idleSince;
     if (waitedMs <= cfg.defenderWaitTimeoutMs) {
       return "waiting_for_defender";
     }
@@ -842,7 +916,10 @@ async function driveGameTurn(candidate: AiDriverCandidate): Promise<AiDriveOutco
       await cfg.appendAudit(gameName, AI_DEFENDER_WAIT_EXPIRED_AUDIT_KIND, {
         attackerId: pending.attackerId,
         defenderId: pending.defenderId,
+        // The IDLE gap that expired the offer (what the deadline measures),
+        // plus the offer's total age, so a report can tell which one fired.
         waitedMs,
+        offerAgeMs: cfg.now() - pending.since,
         round: snap.state.round,
       });
     } catch (err) {

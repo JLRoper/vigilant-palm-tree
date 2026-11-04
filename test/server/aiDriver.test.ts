@@ -173,6 +173,13 @@ function installHarness(
     actionBudget?: number;
     passDeadlineMs?: number;
     defenderWaitTimeoutMs?: number;
+    /**
+     * The harness's arena-activity read (the newest battle_actions row for the
+     * pair). Default null = the table holds no row, which is the pre-heartbeat
+     * behaviour: the offer's own stamp is the only anchor.
+     */
+    lastBattleActivityMs?: number | null;
+    lastBattleActivityThrows?: boolean;
     now?: () => number;
     watchdogStaleMs?: number;
     driverToken?: string;
@@ -199,6 +206,10 @@ function installHarness(
     actionBudget: opts?.actionBudget ?? AI_TURN_ACTION_BUDGET,
     passDeadlineMs: opts?.passDeadlineMs ?? AI_TURN_PASS_DEADLINE_MS,
     defenderWaitTimeoutMs: opts?.defenderWaitTimeoutMs ?? AI_DEFENDER_WAIT_TIMEOUT_MS,
+    lastBattleActivity: async () => {
+      if (opts?.lastBattleActivityThrows) throw new Error("arena-activity read failed");
+      return opts?.lastBattleActivityMs ?? null;
+    },
     watchdogStaleMs: opts?.watchdogStaleMs ?? AI_TURN_HEARTBEAT_STALE_MS,
     now: clock,
     loadCandidates: async () => candidates,
@@ -1317,11 +1328,87 @@ test("pending defender battle past the deadline: one force-resolve, wait-expired
   assert.equal(cap.captured[0], "ended_turn");
   assert.equal(harness.audits.length, 1, "exactly one wait-expired audit row");
   assert.equal(harness.audits[0].kind, AI_DEFENDER_WAIT_EXPIRED_AUDIT_KIND);
-  const payload = harness.audits[0].payload as { attackerId: string; defenderId: string; waitedMs: number; round: number };
+  const payload = harness.audits[0].payload as {
+    attackerId: string;
+    defenderId: string;
+    waitedMs: number;
+    offerAgeMs: number;
+    round: number;
+  };
   assert.equal(payload.attackerId, "h1");
   assert.equal(payload.defenderId, "d0");
   assert.equal(payload.waitedMs, 6_000);
+  assert.equal(payload.offerAgeMs, 6_000, "with no arena rows the idle gap IS the offer's age");
   assert.equal(payload.round, 1);
+});
+
+// The reader's card, half one: the deadline is an IDLE window, measured from
+// the newest battle_actions row for the pair -- not from the offer's stamp.
+// Measuring from the offer alone force-resolved a fight the player was still
+// playing 300s after the offer, however much arena traffic sat inside the
+// window.
+test("pending defender battle with fresh arena activity: the pass keeps waiting however old the offer is", async () => {
+  const world = humanDefenderWorld();
+  world.pendingBattle = { attackerId: "h1", defenderId: "d0", since: 1_000_000_000 };
+  world.state.phase = { kind: "BATTLE", attackerId: "h1", defenderId: "d0" };
+  const harness = installHarness(world, {
+    defenderWaitTimeoutMs: 300_000,
+    // The offer is 400s old; the arena posted a row for the pair 5s ago.
+    now: () => 1_400_000_000,
+    lastBattleActivityMs: 1_399_995_000,
+  });
+  const cap = captureOutcome();
+  configureAiDriver({ withGameLock: cap.withGameLock });
+
+  await scanOnce();
+
+  assert.equal(cap.captured[0], "waiting_for_defender", "an active fight is still waited on");
+  assert.equal(commandsOfKind(harness.commands, "ResolveBattle").length, 0, "no forced resolution while the arena is alive");
+  assert.equal(harness.commands.length, 0, "the pass dispatches nothing while waiting");
+  assert.equal(harness.endTurns.length, 0);
+  assert.equal(harness.audits.length, 0, "a live fight appends no wait-expired audit");
+});
+
+test("the wait-expired audit reports the idle gap AND the offer's total age", async () => {
+  const world = humanDefenderWorld();
+  world.pendingBattle = { attackerId: "h1", defenderId: "d0", since: 1_000_000_000 };
+  world.state.phase = { kind: "BATTLE", attackerId: "h1", defenderId: "d0" };
+  const harness = installHarness(world, {
+    defenderWaitTimeoutMs: 300_000,
+    // The arena stopped 350s before the scan (past the 300s idle window), and
+    // the offer itself is 400s old -- the two numbers must not be conflated.
+    now: () => 1_400_000_000,
+    lastBattleActivityMs: 1_050_000_000,
+  });
+  const cap = captureOutcome();
+  configureAiDriver({ withGameLock: cap.withGameLock });
+
+  await scanOnce();
+
+  const payload = harness.audits[0].payload as { waitedMs: number; offerAgeMs: number };
+  assert.equal(harness.audits.length, 1);
+  assert.equal(payload.waitedMs, 350_000_000, "the deadline measured the idle gap");
+  assert.equal(payload.offerAgeMs, 400_000_000, "the offer's own age rides beside it");
+  assert.equal(commandsOfKind(harness.commands, "ResolveBattle").length, 1, "the idle offer is still force-resolved");
+});
+
+test("a failed arena-activity read degrades to the offer's stamp instead of resurrecting the stall", async () => {
+  const world = humanDefenderWorld();
+  world.pendingBattle = { attackerId: "h1", defenderId: "d0", since: 1_000_000_000 };
+  world.state.phase = { kind: "BATTLE", attackerId: "h1", defenderId: "d0" };
+  const harness = installHarness(world, {
+    defenderWaitTimeoutMs: 300_000,
+    now: () => 1_400_000_000,
+    lastBattleActivityThrows: true,
+  });
+  const cap = captureOutcome();
+  configureAiDriver({ withGameLock: cap.withGameLock });
+
+  await scanOnce();
+
+  assert.equal(commandsOfKind(harness.commands, "ResolveBattle").length, 1, "an unreadable activity table cannot stall the turn");
+  assert.equal(harness.audits.length, 1);
+  assert.equal(cap.captured[0], "ended_turn");
 });
 
 test("resolved defender battle: a snapshot without the marker resumes the normal sweep", async () => {

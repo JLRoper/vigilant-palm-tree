@@ -130,6 +130,29 @@ test("a signed-in seat claim stamps the row's seat from the session, not the bod
   }
 });
 
+test("the arena's heartbeat row is accepted for the pair and lands with the server's own created_at", async () => {
+  const name = uniqueName();
+  try {
+    // "heartbeat" is not a played action: it is the arena's liveness row, the
+    // evidence the AI driver's IDLE wait window (AI_DEFENDER_WAIT_TIMEOUT_MS)
+    // reads so an actively fought battle is not force-resolved out from under
+    // the player. It must be postable through the same fire-and-forget route.
+    const res = await postAction(name, validRow({ seq: 12, phase: "heartbeat", payload: { at: 1_793_746_000_000 } }));
+    assert.equal(res.status, 201, await res.clone().text());
+    const { rows } = await pool.query<{ seq: number; phase: string; payload: Record<string, unknown>; created_at: Date }>(
+      `SELECT seq, phase, payload, created_at FROM battle_actions WHERE game_name = $1 ORDER BY id`,
+      [name],
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].phase, "heartbeat");
+    assert.equal(rows[0].seq, 12);
+    assert.deepEqual(rows[0].payload, { at: 1_793_746_000_000 });
+    assert.ok(rows[0].created_at instanceof Date, "the row carries the server's own created_at (the driver's clock)");
+  } finally {
+    await cleanupGame(name);
+  }
+});
+
 test("malformed rows are rejected with 400 and insert nothing", async () => {
   const name = uniqueName();
   try {

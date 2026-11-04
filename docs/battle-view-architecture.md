@@ -23,7 +23,10 @@ imported by both** the server command handler and the client arena
 > `GameActions.startBattleFlow` opens it as the default collision outcome
 > with the phase's real armies and submits the played-out result through the
 > `SubmitBattleResult` command; every arena action streams to the
-> `battle_actions` table as it happens. Who gets the Fight / Quick Resolve
+> `battle_actions` table as it happens, and a 30 s `heartbeat` row for the
+> pair streams alongside it while the overlay is open (2026-11-03: the
+> liveness evidence behind the AI driver's idle wait window). Who gets the
+> Fight / Quick Resolve
 > modal is decided by `resolveBattleChoice` (`src/screens/combat/battleChoicePolicy.ts`,
 > 2026-10-04 — it replaced the old `maybeAutoResolveBattle` `pvp` predicate):
 > the **local attacker or local defender** gets the modal (the defender's
@@ -72,7 +75,7 @@ flowchart TB
     subgraph STREAM["Action stream (battle_actions)"]
         T1["arena/state.ts wrappers<br/>move/attack/retreat/surrender rows"]
         T2["api.postBattleAction<br/>POST /games/:name/battle-actions<br/>(fire-and-forget, seq per battle)"]
-        T3[("battle_actions table<br/>migration 012 — seed row (seq 0) +<br/>one row per applied action + end row")]
+        T3[("battle_actions table<br/>migration 012 — seed row (seq 0) +<br/>one row per applied action + end row +<br/>a 30 s heartbeat row while the arena is open")]
     end
 
     subgraph HOOKS["Turn hooks (src/game/turnHooks.ts)"]
@@ -83,7 +86,7 @@ flowchart TB
         I["commandHandler.ts<br/>ResolveBattle case<br/>(via POST /games/:name/commands;<br/>actor may be either<br/>combatant's owner)"]
         I2["commandHandler.ts<br/>SubmitBattleResult case<br/>(work item 4 — same shared<br/>post-battle helpers)"]
         I3["commandHandler.ts<br/>EnterBattle case — stamps<br/>games.lobby.pendingBattle +<br/>appends BattleOffered"]
-        I0["aiDriver.ts<br/>(server-driven AI seats:<br/>EnterBattle offer, waits;<br/>force-resolves past<br/>AI_DEFENDER_WAIT_TIMEOUT_MS)"]
+        I0["aiDriver.ts<br/>(server-driven AI seats:<br/>EnterBattle offer, waits;<br/>force-resolves once the pair is<br/>IDLE past AI_DEFENDER_WAIT_TIMEOUT_MS)"]
         J["PG transaction<br/>read unit_types + game row"]
     end
 
@@ -211,8 +214,10 @@ flowchart TB
    from the marker on reload (the client maps the nested marker through
    `src/io/hydrateClientGame.ts` on both `loadGame` and `resync`), and the
    driver's pass returns `waiting_for_defender` (no `EndTurn`) until the
-   battle resolves or its 300 s wait deadline
-   (`AI_DEFENDER_WAIT_TIMEOUT_MS`) force-resolves it. Because that delta is
+   battle resolves or the pair goes IDLE past
+   `AI_DEFENDER_WAIT_TIMEOUT_MS` (300 s, measured from the newest
+   `battle_actions` row for the pair — every played action, and the arena's
+   own 30 s heartbeat, refresh it), which force-resolves it. Because that delta is
    merged through the bridge's `replaceState`, which the rAF loop's change
    detection never sees, the `state:committed` listener itself also calls
    `maybeAutoResolveBattle()` (2026-10-05) — that call is what actually
@@ -259,7 +264,12 @@ flowchart TB
    (fire-and-forget; a dropped row never blocks or fails the arena). The
    seed row (`seq 0`) carries the obstacle seed + initial stacks + sides;
    `arena/state.ts`'s wrappers stream move/attack/retreat/surrender; the
-   terminal `end` row carries outcome + survivors. The engine's AI
+   terminal `end` row carries outcome + survivors. While the arena is open
+   the client also posts a `heartbeat` row for the pair every 30 s
+   (`src/screens/combat/arena/arenaHeartbeat.ts`, `ARENA_HEARTBEAT_PHASE`) —
+   not a played action, but the liveness evidence the AI driver's idle wait
+   window reads, so a fight the player is still in is never force-resolved
+   out from under them. The engine's AI
    (`planAiTurn`) is deterministic — no AI action rows are needed.
 6. **Submit.** The outcome goes back through
    `io/commands.submitBattleResult()` (`SubmitBattleResult`, the 15th
@@ -273,6 +283,13 @@ flowchart TB
    the battle phase, re-mapped to `AI_TURN` on an AI turn) and shows the
    "Couldn't record this battle" card (`battleSubmitFailedCard.ts`) with
    **Return to map**. The settlement-assault submit follows the same rules.
+   **Exception (2026-11-03):** when the server settled this very pair while
+   the arena was open (the offer went idle past the driver's deadline), the
+   client never POSTs at all — `fightInArena` watches the `mp:battleOutcome`
+   stream (`src/screens/combat/serverVoidedBattle.ts`), tears the arena down,
+   adopts the server's world and shows "This fight was voided"
+   (`battleVoidedCard.ts`) instead. A `battle_not_pending` refusal takes the
+   same path as a backstop, so the old dead end is gone.
 7. **Server apply.** The `commandHandler.ts` `SubmitBattleResult` case
    re-derives the live-collision precondition (adjacency — the server never
    persists a BATTLE phase), validates survivor unit ids against the same
@@ -477,6 +494,9 @@ used):
 | `src/screens/combat/battleChoicePolicy.ts` | Policy (pure) | `resolveBattleChoice({ localIsAttacker, localIsDefender, serverDriven })` → `spectate` \| `modal { hideFlee }` \| `autoResolve` — the single who-resolves decision (2026-10-04), unit-tested without a DOM |
 | `src/screens/combat/battleModal.ts` | UI (DOM) | Fight / Quick Resolve / Flee prompt before anything is resolved; `hideFlee` (2026-10-04) omits the Flee button and the flee sentence for a defending seat. Deliberately non-dismissible (2026-10-05): `openDialog(..., closeable: false)` — no × button, because a dismissed choice would leave `battleInFlight` set and stall the AI turn until the 300 s force-resolve; `test/aiDefender.e2e.ts` scenario A covers the auto-open + Quick Resolve path |
 | `src/screens/combat/battleResultCard.ts` | UI (DOM) | Per-platoon survivors + losses summary — used by **both** paths; renders the per-side verdict lines from `battleResultText.ts` under the winner banner |
+| `src/screens/combat/serverVoidedBattle.ts` | Policy (pure) | **New (2026-11-03).** The client half of "the fight I am playing was settled server-side": `isServerVoidOfWatchedBattle` (same game, same pair, a hero battle, an actor that is *not* this client's seat), `watchServerBattleVoid` (latches the first such `mp:battleOutcome` row and exposes `whenVoided()` for `fightInArena`'s race) plus the voided wording. DOM-free, unit-tested |
+| `src/screens/combat/battleVoidedCard.ts` | UI (DOM) | **New (2026-11-03).** "This fight was voided" — the modal shown instead of "Couldn't record this battle", carrying the server's own verdict lines; its close always runs `onReturnToMap` |
+| `src/screens/combat/arena/arenaHeartbeat.ts` | Arena telemetry | **New (2026-11-03).** `startArenaHeartbeat` posts a `heartbeat` `battle_actions` row for the pair every 30 s while the arena is open (`ARENA_HEARTBEAT_INTERVAL_MS`); `GameActions` stops it whenever the arena closes. This is the liveness evidence behind the driver's IDLE wait window |
 | `src/screens/combat/battleResultText.ts` | UI (pure) | Verdict wording (2026-09-29 hero outcomes): `battleVerdictCardLine` / `battleVerdictToastPhrase` / `battleToastMessage` / `settlementNameAt` — "slain" / "retreated to \<name\>" / "surrendered to \<name\>"; an absent verdict (pre-W1 server) renders nothing |
 | `src/screens/combat/arena/openManualBattleArena.ts` | UI (canvas+DOM) | HoMM3-style interactive arena; production callers get `onComplete` (outcome) + `telemetry` (action stream) and a `{ close }` handle |
 | `src/screens/combat/arena/state.ts` | Arena wrappers | Thin wrappers over the engine's apply-functions; stream one `battle_actions` row per applied action (`safeEmit` guard — telemetry can never fail the arena). `moveSelectedTo` returns the walk `path` in `MoveResult`, which the arena glides the player's platoon along (paced by the shared `arenaMoveMsPerHex` setting) |
@@ -490,7 +510,7 @@ used):
 | `src/core/hex.ts` | Geometry | `HEX_DIRECTIONS`, `nearestHexEdge` — canonical direction math |
 | `src/game/turnHooks.ts` | Adapter | `onBattleResolved(state)` → `io/commands.resolveBattle` (Quick Resolve path); since 2026-10-04 the POST's actor is the **local seat whenever it owns either combatant** — on server-driven games the attacker's owner is an AI seat the command route would reject (`ai_seat_command_forbidden`); since 2026-10-05 it also falls back to the live `BATTLE` phase's attacker/defender pair when `lastBattle` is null (set only by `TurnController.enterBattle()`) — a remotely offered battle never calls `enterBattle()`, so without the fallback Quick Resolve no-op'd locally (no POST, server marker stranded until the 300 s force-resolve) |
 | `src/io/commands.ts` | Network | `resolveBattle()` + `submitBattleResult()` (`SubmitBattleResult`) POST wrappers |
-| `src/io/api.ts` | Network | `postBattleAction` — fire-and-forget `battle_actions` POST (short timeout, swallows failures) |
+| `src/io/api.ts` | Network | `postBattleAction` — fire-and-forget `battle_actions` POST (short timeout, swallows failures); its phase union is `BattleActionRowPhase` (the arena's played actions plus `heartbeat`) |
 | `src/core/eventBus.ts` | Telemetry | `battle:resolved` emission is dev-log telemetry only (EventLog whitelist); production result cards/toasts consume command return data + `consumeResolveBattleVerdicts`, not the bus |
 | `packages/engine/src/combat/grid.ts` | Engine | `makeBattleGrid` (odd-r offset), `deploymentPosition`, `columnOf`, `startingEdgeColumn` / `isOnStartingEdge` (the retreat edge) |
 | `packages/engine/src/combat/retreat.ts` | Engine | `retreatSideByEdge` (escapees keep their entries; the rest are zeroed and logged `left_behind`), `retreatOpen`, `isOutmatched` (the `outmatched` policy trigger) |
@@ -505,7 +525,7 @@ used):
 | `packages/engine/src/events/applyEvent.ts` + `packages/engine/src/hydrate.ts` | Engine | `BattleOffered` — sync class `"apply"` (the union is 25 variants: 12 apply / 7 resync / 6 ignore); its replay runs `startBattle` (same-pair replay = `noop`, drift = resync). `PendingBattleMarker` + `readPendingBattle(lobby)` — `hydrateGameState` re-derives the `BATTLE` phase from a valid `games.lobby.pendingBattle` marker (the phase is still never persisted as a phase); malformed markers fall back to the faction-derived phase |
 | `src/io/hydrateClientGame.ts` | Client hydrate | **New (2026-10-05).** `hydrateClientGame(game)` maps the nested `game.lobby.pendingBattle` onto the engine hydrate's top-level `pendingBattle` (via engine `readPendingBattle`) for `GameSessionManager.loadGame` and `multiplayerSync.resync()` — a reload/resync mid-offer re-derives the `BATTLE` phase and re-opens the modal; `GameLobbyState` (`src/io/api.ts`) carries the optional marker field. Unit-tested in `test/io/hydrateClientGame.test.ts` |
 | `server/app/commandHandler.ts` (`ResolveBattle` + `SubmitBattleResult` + `EnterBattle` via `POST /games/:name/commands`) | Server | Loads DB row + `unit_types`; runs `resolveBattleEngine` or applies the submitted outcome — both through the shared `buildPostBattleHeroes`/`applyHeroBattleOutcomes`/`persistBattleOutcome` helpers (verdict application: defeat deletes the hero, retreat/surrender relocate; plan `2026-09-29-hero-outcomes.md`). The `EnterBattle` case (2026-10-04) re-derives adjacency server-side, requires a human defender (`defender_not_human` otherwise), is idempotent on a same-pair re-offer, rejects a different pending pair (`battle_already_pending`), then stamps `games.lobby.pendingBattle` + appends `BattleOffered`. The generic turn-ownership guard **exempts the battle pair** — `ResolveBattle`/`SubmitBattleResult` may be submitted by the owner of either named combatant (the defender resolves from its own seat during the AI's turn); `EnterBattle` and `EndTurn` still require the active player. The marker clears when the battle resolves and on the permanent rejections (stale-offer self-heal); an `EndTurn` clears any marker that survived into the next turn |
-| `server/app/aiDriver.ts` | Server | The defender-offer wait (2026-10-04): a pass finding `lobby.pendingBattle` live returns `waiting_for_defender` — no `EndTurn` while the offer stands; past `AI_DEFENDER_WAIT_TIMEOUT_MS` (300 s) it force-resolves via `ResolveBattle` (unbudgeted/unpaced, the exhaustion-EndTurn pattern) and appends the `ai_defender_wait_expired` audit, so a closed defender browser cannot stall the AI turn. 2026-10-05: an adjacent defender hero whose owner player is missing from the snapshot no longer falls through to a doomed `ResolveBattle` — the pass warns, appends the `ai_defender_owner_missing` audit, and drops the collision for the pass (pinned in `test/server/aiDriver.test.ts`) |
+| `server/app/aiDriver.ts` | Server | The defender-offer wait (2026-10-04): a pass finding `lobby.pendingBattle` live returns `waiting_for_defender` — no `EndTurn` while the offer stands; past `AI_DEFENDER_WAIT_TIMEOUT_MS` (300 s) it force-resolves via `ResolveBattle` (unbudgeted/unpaced, the exhaustion-EndTurn pattern) and appends the `ai_defender_wait_expired` audit, so a closed defender browser cannot stall the AI turn. **2026-11-03:** that 300 s is an IDLE window, not the offer's age — it is measured from the later of the offer's stamp and the newest `battle_actions` row for the pair (`lastBattleActivity`, real SQL over the table; a failed read degrades to the offer's stamp), so an actively fought battle stays open and the played result lands, while a browser that is gone stops refreshing the evidence and the deadline still fires. The audit carries `waitedMs` (the idle gap) beside `offerAgeMs`. 2026-10-05: an adjacent defender hero whose owner player is missing from the snapshot no longer falls through to a doomed `ResolveBattle` — the pass warns, appends the `ai_defender_owner_missing` audit, and drops the collision for the pass (pinned in `test/server/aiDriver.test.ts`) |
 | `packages/engine/src/combat/battleOutcome.ts` | Engine (pure) | `deriveHeroVerdict(sideOutcome, conceded?)` → `defeated`/`retreated`/`surrendered`/`stood`; `nearestOwnedSettlement` (hexDistance min; null when the owner holds nothing — the D1 stay-put edge); `relocateHeroToSettlement` (q/r set, previous*/trail reset, 0 movement); `applyHeroConcession` (relocation + the retreat stun, shared by server and settlement reducer) |
 | `server/http/routes/battleActions.ts` | Server | `POST /games/:name/battle-actions` — telemetry-style insert into `battle_actions` (seat stamped from the session) |
 | `server/migrations/012_battle_actions.sql` | Schema | `battle_actions` table + per-battle replay index |

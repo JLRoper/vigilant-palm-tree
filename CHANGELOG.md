@@ -20,6 +20,20 @@ the version has not already been bumped in that changeset.
 - The AI crews its own sites out of its own pool on BOTH placement paths (the server driver and the browser-driven seats), and will not start a site it cannot staff
 - Upgrades do NOT follow the curve: the upgrade timers keep their own accel (`WORKFORCE_UPGRADE_ACCEL_KINDS`)
 
+## [0.50.1] - 2026-11-04
+
+The fight a player is winning stopped being force-resolved out from under them, and a fight the server does settle now says so.
+
+`AI_DEFENDER_WAIT_TIMEOUT_MS` (300 s) was measured from the offer's own stamp, so the moment an `EnterBattle` offer was 300 s old the server wrote its own `BattleResolved`, cleared `lobby.pendingBattle` and the human's own `SubmitBattleResult` answered `409 battle_not_pending` — with the world keeping the server's troops and the result the player actually played discarded. Arena traffic inside that window changed nothing.
+
+- `server/app/aiDriver.ts`: the deadline is now an **idle** window, measured from the later of the offer's stamp and the newest `battle_actions` row for the pair (`lastBattleActivity`, real SQL; a failed read degrades to the offer's stamp so it cannot resurrect the stall). An actively fought battle stays open however long it takes; a browser that is genuinely gone stops refreshing the evidence and the deadline still fires. The `ai_defender_wait_expired` audit carries `waitedMs` (the idle gap) beside `offerAgeMs`.
+- `src/screens/combat/arena/arenaHeartbeat.ts` + `src/managers/GameActions.ts`: while the arena is open the client posts a `heartbeat` row for the pair every 30 s (a new `ARENA_HEARTBEAT_PHASE`, admitted by `server/http/routes/battleActions.ts`); the timer starts with the arena and stops whenever it closes. That is what keeps a player who is thinking — not moving — from being voided.
+- `src/screens/combat/serverVoidedBattle.ts` + `battleVoidedCard.ts` + `src/managers/GameActions.ts`: when the server **does** settle the pair under the player, the client now sees it in the `mp:battleOutcome` stream, tears the arena down, adopts the server's world and shows **"This fight was voided"** — instead of playing on and POSTing into the refusal, which surfaced as "Couldn't record this battle". A `battle_not_pending` refusal takes the same path as a backstop.
+
+Measured on `github/main` (real handler + real driver, private `PGDATABASE=game_poc_the_manual_fight_pla`): an offer 306779 ms old with an arena row 6779 ms old -> the driver wrote `BattleResolved` `actor=1` `winner=defender` `attackerVerdict=retreated`, `waitedMs=306802`, cleared the marker, and left `p0-hero` at 16 troops after the human's 24 — the human's own submission answered `battle_not_pending`. After the change: zero `BattleResolved`, no audit, marker intact, and the played result lands (one `BattleResolved` `actor=0`, `p0-hero` 24). The contrast path inside the window is unchanged: `200`, one `BattleResolved`, the player's troops.
+
+Pinned by `test/server/pendingBattleActivity.test.ts` (real handler + real driver + Postgres), the idle-window cases in `test/server/aiDriver.test.ts`, the heartbeat row in `test/server/battleActionsRoute.test.ts`, `test/screens/combat/arenaHeartbeat.test.ts`, `test/screens/combat/serverVoidedBattle.test.ts`, and `test/aiDefender.e2e.ts` scenario D (active fight kept; silent fight voided with the notice on screen, and **no** `SubmitBattleResult` ever POSTed).
+
 ## [0.50.0] - 2026-11-03
 
 A building now declares the settlement LEVEL it requires, enforced in the one placement gate that already held the faction rule — settlement level gated nothing before, so every one of the 44 registry entries was placeable in a level-1 town.
