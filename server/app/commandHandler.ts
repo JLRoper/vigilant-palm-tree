@@ -850,8 +850,19 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
       // documented charter-advancement limitation (no DB column for
       // activeCharters yet).
       // Caravans path with A* on the deterministic rebuilt map -- only pay
-      // the generation cost when routes actually exist (plan §5.2).
-      const map = (state.tradeRoutes?.length ?? 0) > 0
+      // the generation cost when routes actually exist (plan §5.2). A
+      // TRAVELING CHARTER needs the same map, and for the same reason the
+      // caravan does: advanceRound()'s charter pass moves a `traveling`
+      // charter one hex per day (packages/engine/src/charter/advance.ts), and
+      // that pass is a reference-stable no-op when it is handed no map. Gating
+      // the build on trade routes alone therefore left every game with no
+      // caravans -- every classic game, the mode the C-BLOCKER-1 repro was
+      // measured in (`trade_routes: []`) -- with a traveling charter nothing
+      // on either side could ever advance: the client's walk had been rejected
+      // or lost, and the server's backstop never ran. The gate is about
+      // avoiding the generation cost, not about who needs the map.
+      const hasTravelingCharter = state.activeCharters.some((c) => c.phase === "traveling");
+      const map = (state.tradeRoutes?.length ?? 0) > 0 || hasTravelingCharter
         ? getOrCreateGameMap(Number(row.seed) || 1, row.map_size as MapSize, resolveSavedMapGenVersion(row.lobby?.mapGenVersion))
         : null;
       // The catalog is already loaded on deps.ctx (createLiveCommandDeps), and

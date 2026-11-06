@@ -12,7 +12,7 @@ import type {
   SettlementState,
 } from "@heroes/contracts";
 import type { HydratableGameRow, UnitType } from "@heroes/engine";
-import { CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS, GameMap, platoonTroopTotal, resolveSavedMapGenVersion, WAGON_GOLD_CAPACITY } from "@heroes/engine";
+import { CAPTURE_GOLD_REWARD, DEFAULT_TREASURY_WAGONS, GameMap, getOrCreateGameMap, platoonTroopTotal, resolveSavedMapGenVersion, WAGON_GOLD_CAPACITY } from "@heroes/engine";
 import { hexDistance } from "@heroes/contracts";
 import { endTurnSeatRefusal, handleCommand, handleCommandTransactional } from "../../server/app/commandHandler";
 import {
@@ -98,12 +98,16 @@ function makeRow(
   };
 }
 
-function makeDeps(row: HydratableGameRow, unitTypes: UnitType[] = []) {
+function makeDeps(
+  row: HydratableGameRow,
+  unitTypes: UnitType[] = [],
+  charters: Record<string, CharterState[]> = {},
+) {
   const gameRepo = createMockGameRepo({ [row.name as string]: row });
   const eventRepo = createMockEventRepo();
   const heroRepo = createMockHeroRepo({ [row.name as string]: row.heroes });
   const settlementRepo = createMockSettlementRepo({ [row.name as string]: row.settlements });
-  const charterRepo = createMockCharterRepo();
+  const charterRepo = createMockCharterRepo(charters);
   return {
     gameRepo,
     eventRepo,
@@ -413,6 +417,71 @@ test("EndTurn wraps the round, advances settlement upgrades, and applies weekly 
     [0, 0, 0, null],
   );
   assert.equal(result.lastEventId, 4);
+});
+
+// BLOCKER-A of the classic second pass: the documented charter repro ("End Turn
+// until it founds") never founded, because `advanceCharters()`'s TRAVEL pass is
+// a reference-stable no-op without a map and the EndTurn handler built one only
+// when `tradeRoutes.length > 0`. A fresh classic game has `trade_routes: []`
+// (the auto-trade flag is off and caravan routes start empty), so a traveling
+// charter whose client-side burst had been rejected or lost was moved by
+// neither side -- the C-BLOCKER-1 state, in the mode that repro was measured
+// in. This is the server's backstop: with no client cooperation at all, the day
+// tick walks the charter one hex.
+test("EndTurn's day tick moves a traveling charter one hex even in a game with NO trade routes", async () => {
+  const from = { q: 2, r: 2 };
+  // The same map the handler reconstructs for this row, so the target hex is
+  // chosen against the terrain the engine will actually path over.
+  const map = getOrCreateGameMap(1, undefined, resolveSavedMapGenVersion());
+  const target = findChartersTarget(map, [from], 4);
+
+  const charter: CharterState = {
+    id: "ch0",
+    heroId: "h0",
+    ownerId: 0,
+    targetQ: target.q,
+    targetR: target.r,
+    settlementName: "Storm hollow",
+    phase: "traveling",
+    daysRemaining: 10,
+    settlementId: "s4",
+    resourceRates: {},
+    foundedOnResource: null,
+    citySpots: [],
+  };
+  const row = makeRow(
+    [
+      makeHero("h0", 0, from.q, from.r, {
+        isChartering: true,
+        charterId: "ch0",
+        // The whole point: the client is not going to do this for us.
+        movementRemaining: 0,
+      }),
+    ],
+    [makeSettlement("s0", 0, from.q, from.r)],
+    // A classic game's own shape -- no caravans, and `trade_routes` present but
+    // empty, exactly what the repro measured.
+    { players: SOLO_PLAYER, day: 1, trade_routes: [] },
+  );
+  const { gameRepo, deps } = makeDeps(row, [], { "test-game": [charter] });
+  const command: Command = { kind: "EndTurn", gameName: "test-game", actor: 0 };
+  const result = await handleCommand(command, deps);
+
+  assert.equal(result.ok, true);
+  // A one-seat game wraps the round, which is when advanceRound() runs its
+  // charter pass at all.
+  assert.equal(result.round, 2, "the round must wrap for the day tick to reach the charter pass");
+
+  const hero = gameRepo.rows["test-game"].heroes.h0;
+  assert.ok(
+    hero.q !== from.q || hero.r !== from.r,
+    `the day tick must move the traveling charter (hero still at ${hero.q},${hero.r})`,
+  );
+  assert.equal(
+    hexDistance({ q: hero.q, r: hero.r }, target),
+    hexDistance(from, target) - 1,
+    "the step must be one hex TOWARD the charter's target, not a random direction",
+  );
 });
 
 test("EndTurn writes one resource_transactions row per auto-trade transfer that actually fired (flag ABSENT -> ON)", async () => {
