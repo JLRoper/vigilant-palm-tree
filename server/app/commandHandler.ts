@@ -238,6 +238,14 @@ export interface CommandResult {
   // EndTurn + PlaceBuildings/CreateTradeRoute/UpdateTradeRoute: the full
   // post-change routes array (caravans move on EndTurn's round wrap).
   tradeRoutes?: TradeRouteState[];
+  // EndTurn: the full post-turn charter list, on the same wholesale rule as
+  // tradeRoutes. The day tick is what decrements a charter's countdown and
+  // founds the settlement it was building, so a client that kept its own copy
+  // went on advertising a charter the server had already completed. Omitted
+  // when the hydration fell back to JSONB (state.activeCharters is [] there
+  // whatever the charters table holds), so a client never wipes a real charter
+  // on a response that could not see one.
+  activeCharters?: CharterState[];
   // PickupResource: the full post-change remaining-amount map, so the acting
   // client reconciles the tile's new number from the response instead of
   // waiting for a resync (the tradeRoutes rule).
@@ -1071,6 +1079,23 @@ export async function handleCommand(command: Command, deps: CommandDeps): Promis
         activePlayerId: finalState.activePlayerId,
         players: final.players,
         tradeRoutes: finalState.tradeRoutes,
+        // The turn's own charter list, on the same wholesale rule as
+        // tradeRoutes above. The day tick (advanceRound -> advanceCharters) is
+        // what counts a `constructing` charter down and founds the settlement
+        // it was building from, so by the time this response is written the
+        // charter that founded a town is gone from finalState.activeCharters --
+        // and only the server knows that. The response used to say nothing
+        // about charters at all, so the client kept its own `constructing` entry
+        // (with a countdown nothing decrements locally) for a charter that no
+        // longer existed, and the founded town's tile panel went on reading
+        // "constructing charter (Nd remaining)" until the game was reloaded.
+        //
+        // Gated on the granular hydration source for exactly the reason the
+        // upsertMany above is: on the JSONB fallback state.activeCharters is []
+        // whatever the charters table holds, so sending it would tell every
+        // client to discard a real in-flight charter. Omitted leaves the
+        // client's own list untouched.
+        ...(source === "granular" ? { activeCharters: finalState.activeCharters } : {}),
       };
     }
     case "EnterBattle": {

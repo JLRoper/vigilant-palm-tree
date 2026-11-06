@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mergeFromEndTurn } from "../../src/game/turnHooks";
 import type { EndTurnResult } from "../../src/io/commands";
-import { makeHero, makeSettlement, makeState, makeTradeRoute } from "../charter/_helpers";
+import { makeCharter, makeHero, makeSettlement, makeState, makeTradeRoute } from "../charter/_helpers";
 import type { GameState, HeroId, SettlementId, TradeRouteState } from "@heroes/contracts";
 
 const S0_TO_S1 = {
@@ -171,4 +171,56 @@ test("S2: no routes anywhere leaves the counter at zero", () => {
   const merged = mergeFromEndTurn(state, buildResult(state));
 
   assert.equal(merged.nextTradeRouteId, 0);
+});
+
+// MAJOR of the classic second pass: after the day tick founded a chartered
+// town, the client kept its own `constructing` charter for good. The countdown
+// and the founding are the SERVER's (advanceRound -> advanceCharters), and the
+// EndTurn response said nothing about charters at all, so the client's copy --
+// with a `daysRemaining` nothing decrements locally -- was never replaced: the
+// founded town's tile panel went on reading "constructing charter (10d
+// remaining)" and the target hex stayed in the engine's charter-target
+// exclusion set until the game was loaded again. The response now carries the
+// turn's own charter list, on the same wholesale rule as its trade routes.
+test("mergeFromEndTurn adopts the turn's own charter list, so a charter the day tick just founded a town from cannot linger", () => {
+  const charter = makeCharter({
+    id: "ch0",
+    heroId: "h0",
+    ownerId: 0,
+    phase: "constructing",
+    daysRemaining: 1,
+  });
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, { isChartering: true, charterId: "ch0" })],
+    activeCharters: [charter],
+  });
+
+  const merged = mergeFromEndTurn(state, buildResult(state, { activeCharters: [] }));
+
+  assert.deepEqual(
+    merged.activeCharters,
+    [],
+    "the day tick founded the town and dropped the charter server-side; the response must take the client's copy with it",
+  );
+});
+
+// The other half of the same rule, so the fix cannot wipe a live charter: the
+// server OMITS the field when hydration fell back to the JSONB row (its
+// state.activeCharters is [] there whatever the charters table holds -- the
+// same hazard EndTurn's upsertMany gate already guards), and an older server
+// never sent it at all. Absent must mean "leave mine alone",
+test("mergeFromEndTurn leaves the local charters alone when the result carries no charter list at all", () => {
+  const charter = makeCharter({ id: "ch0", heroId: "h0", ownerId: 0, phase: "traveling", daysRemaining: 10 });
+  const state = makeState({
+    heroes: [makeHero("h0", 0, 2, 2, { isChartering: true, charterId: "ch0" })],
+    activeCharters: [charter],
+  });
+
+  const merged = mergeFromEndTurn(state, buildResult(state));
+
+  assert.deepEqual(
+    merged.activeCharters,
+    [charter],
+    "an EndTurn response that says nothing about charters must not discard a real in-flight one",
+  );
 });

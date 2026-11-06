@@ -787,6 +787,16 @@ export function mergeFromEndTurn(state: GameState, result: EndTurnResult, localS
   // can regress below the max persisted id after a missed/self-skipped
   // TradeRouteCreated event and the next create collides.
   const tradeRoutes = result.tradeRoutes ?? state.tradeRoutes;
+  // The turn's charters, on the same wholesale rule as the routes above: the
+  // server's day tick is what counts a `constructing` charter down and founds
+  // the settlement, so the response that delivers the new town is also the one
+  // that carries the charter list without it. Keeping the local entry instead
+  // (the old behaviour, since EndTurn never carried charters at all) left a
+  // phantom `constructing` charter -- and with it the founded town's tile panel
+  // reading "constructing charter (Nd remaining)" -- until the game was loaded.
+  // Absent means the server could not read the charters table: leave the local
+  // list untouched rather than wipe a real charter.
+  const activeCharters = result.activeCharters ?? state.activeCharters;
   const merged: GameState = {
     ...state,
     round: result.round,
@@ -798,6 +808,7 @@ export function mergeFromEndTurn(state: GameState, result: EndTurnResult, localS
     // Caravans moved server-side this wrap -- the merged routes replace the
     // client's wholesale, same as heroes/settlements.
     tradeRoutes,
+    activeCharters,
     phase,
     selectedHeroId,
     selectedSettlementId,

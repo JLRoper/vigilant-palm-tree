@@ -484,6 +484,56 @@ test("EndTurn's day tick moves a traveling charter one hex even in a game with N
   );
 });
 
+// MAJOR of the classic second pass: once the day tick founded a chartered
+// town, the client was left holding its own `constructing` charter for good --
+// the countdown and the founding are the server's (advanceRound ->
+// advanceCharters), and the EndTurn response carried no charters at all, so
+// nothing ever replaced the client's copy (its `daysRemaining` is never
+// decremented locally). The founded town's tile panel kept advertising
+// "constructing charter (10d remaining)" and the target hex stayed in the
+// engine's charter-target exclusion set until the game was reloaded. This half
+// is the response's: it must carry the turn's own charter list, on the same
+// wholesale rule as its trade routes, so the client can adopt it.
+test("EndTurn's response carries the turn's own charter list, so the charter it just founded a town from is gone from it", async () => {
+  const at = { q: 5, r: 5 };
+  const charter: CharterState = {
+    id: "ch0",
+    heroId: "h0",
+    ownerId: 0,
+    targetQ: at.q,
+    targetR: at.r,
+    settlementName: "Storm hollow",
+    // The day tick reads the ENTRY phase: a charter that was ALREADY
+    // `constructing` when the day began loses its last day and founds its
+    // settlement on this turn.
+    phase: "constructing",
+    daysRemaining: 1,
+    settlementId: "s4",
+    resourceRates: {},
+    foundedOnResource: null,
+    citySpots: [],
+  };
+  const row = makeRow(
+    [makeHero("h0", 0, at.q, at.r, { isChartering: true, charterId: "ch0" })],
+    [makeSettlement("s0", 0, 2, 2)],
+    { players: SOLO_PLAYER, day: 1, trade_routes: [] },
+  );
+  const { gameRepo, deps } = makeDeps(row, [], { "test-game": [charter] });
+  const command: Command = { kind: "EndTurn", gameName: "test-game", actor: 0 };
+  const result = await handleCommand(command, deps);
+
+  assert.equal(result.ok, true);
+  assert.ok(
+    gameRepo.rows["test-game"].settlements.s4,
+    "fixture check: the day tick must have founded the chartered town, or this test proves nothing",
+  );
+  assert.ok(
+    Array.isArray(result.activeCharters),
+    "the response must carry the post-turn charters (the tradeRoutes rule); omitting the field is exactly what left the client advertising a charter that no longer existed",
+  );
+  assert.deepEqual(result.activeCharters, [], "the completed charter must not come back in the turn's own list");
+});
+
 test("EndTurn writes one resource_transactions row per auto-trade transfer that actually fired (flag ABSENT -> ON)", async () => {
   // s0 has population but zero food in its warehouse (a real deficit);
   // s1, owned by the same player, has food to spare plus gold to pay for
