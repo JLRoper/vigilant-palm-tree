@@ -1,8 +1,8 @@
 {
   "_note": "Known type-check debt of test/**. Produced by `node tools/typecheck-gate.mjs --write-baseline`. The gate fails if any file here grows, if a file outside this list has an error, or if a file here has FEWER errors than recorded (a stale entry is a phantom that hands the next landing free errors). Fix a file and re-record to shrink the debt; never add an entry to silence a regression.",
   "generatedFromProject": "tsconfig.test.json",
-  "totalErrors": 302,
-  "filesWithErrors": 78,
+  "totalErrors": 296,
+  "filesWithErrors": 77,
   "files": {
     "test/citySpots.test.ts": {
       "count": 2,
@@ -399,13 +399,6 @@
         "TS2352"
       ],
       "diagnosis": "cast between types the checker will not relate"
-    },
-    "test/screens/home/newGameModeChoice.test.ts": {
-      "count": 6,
-      "codes": [
-        "TS2345"
-      ],
-      "diagnosis": "argument shape drifted from the callee's signature"
     },
     "test/screens/logistics/logisticsModal.test.ts": {
       "count": 5,

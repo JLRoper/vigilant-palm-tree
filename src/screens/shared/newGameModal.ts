@@ -5,6 +5,7 @@ import type { FactionId, GameMode } from "@heroes/contracts";
 import { seatFactionChoices } from "./factionChoices";
 import { MAP_SIZE_ORDER, mapSizeLabel, resolveMapSize, type MapSize } from "../../map/gameMap";
 import { gameModeHint, gameModeOptions, settings } from "../../state/settings";
+import { UNCHARTED_DEFAULT } from "../../io/unchartedGames";
 
 export type NewGameHandler = (opts: {
   name: string;
@@ -284,11 +285,13 @@ export function openNewGameModal(opts: NewGameModalOptions): void {
   unchartedWrap.style.alignItems = "center";
   unchartedWrap.style.gap = "8px";
   unchartedWrap.style.cursor = "pointer";
-  // Default on: a fresh game starts hidden and reveals as you explore.
-  let uncharted = true;
+  // Default off (ledger #33), from the one shared constant both new-game
+  // surfaces read: a fresh game starts revealed and hidden exploration is the
+  // player's opt-in.
+  let uncharted = UNCHARTED_DEFAULT;
   const unchartedInput = document.createElement("input");
   unchartedInput.type = "checkbox";
-  unchartedInput.checked = true;
+  unchartedInput.checked = UNCHARTED_DEFAULT;
   unchartedInput.addEventListener("change", () => {
     uncharted = unchartedInput.checked;
   });

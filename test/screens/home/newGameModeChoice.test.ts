@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import type { NewGameFormValues } from "../../../src/screens/home/newGameScreen";
 import { gameModeOptions, settings, updateSettings } from "../../../src/state/settings";
+import { UNCHARTED_DEFAULT } from "../../../src/io/unchartedGames";
 import { DEFAULT_GAME_MODE, type GameMode } from "@heroes/contracts";
 
 // The home screen's "Create a New Game" panel (SETTLERS-PLAN.md §4 W4): the
@@ -156,23 +157,48 @@ function restoreDom(): void {
   else Object.defineProperty(globalThis, "localStorage", savedStorage);
 }
 
-function modeChips(root: MockElement): MockElement[] {
+/**
+ * The screen's `root` is typed `HTMLElement` (the real DOM type) while these
+ * specs walk the mock tree. ONE cast per helper, so the call sites contribute
+ * no type debt -- which also retires the debt this file already carried:
+ * tools/typecheck-gate.mjs is exact, not a ceiling, so a file whose count
+ * SHRINKS must be re-recorded or it fails as a STALE BASELINE.
+ */
+function asMock(el: HTMLElement): MockElement {
+  return el as unknown as MockElement;
+}
+
+function modeChips(root: HTMLElement): MockElement[] {
   const out: MockElement[] = [];
   const walk = (el: MockElement): void => {
     if (el.dataset.mode) out.push(el);
     for (const c of el.children) walk(c);
   };
-  walk(root);
+  walk(asMock(root));
   return out;
 }
 
-function findButton(root: MockElement, label: string): MockElement | null {
-  if (root.tagName === "BUTTON" && root.textContent === label) return root;
-  for (const child of root.children) {
-    const match = findButton(child, label);
-    if (match) return match;
-  }
-  return null;
+function findButton(root: HTMLElement, label: string): MockElement | null {
+  const search = (el: MockElement): MockElement | null => {
+    if (el.tagName === "BUTTON" && el.textContent === label) return el;
+    for (const child of el.children) {
+      const match = search(child);
+      if (match) return match;
+    }
+    return null;
+  };
+  return search(asMock(root));
+}
+
+/** Every checkbox in the form's tree (the game has one: the Uncharted mode row). */
+function checkboxInputs(root: HTMLElement): MockElement[] {
+  const out: MockElement[] = [];
+  const walk = (el: MockElement): void => {
+    if (el.tagName === "INPUT" && el.type === "checkbox") out.push(el);
+    for (const c of el.children) walk(c);
+  };
+  walk(asMock(root));
+  return out;
 }
 
 function openScreen(onCreate: (values: NewGameFormValues) => Promise<void> = async () => {}) {
@@ -243,4 +269,40 @@ test("the unanswered pick is the stored default", async () => {
   findButton(screen.root, "Create Game")!.dispatchEvent("click");
   await new Promise((r) => setImmediate(r));
   assert.equal(seen[0].gameMode, "settlers" as GameMode);
+});
+
+// ── Ledger #33: Uncharted mode is not on by default ────────────────────────
+
+test("ledger #33: the home form's Uncharted mode starts OFF, and a form left alone submits it off", async () => {
+  const seen: NewGameFormValues[] = [];
+  const screen = openScreen(async (values) => {
+    seen.push(values);
+  });
+
+  const boxes = checkboxInputs(screen.root);
+  assert.equal(boxes.length, 1, "the form has exactly one checkbox -- the Uncharted mode row");
+  assert.equal(boxes[0].checked, false, "a fresh game must not start hidden unless the player asks");
+
+  findButton(screen.root, "Create Game")!.dispatchEvent("click");
+  await new Promise((r) => setImmediate(r));
+  assert.equal(seen[0].uncharted, false, "…and the submitted form says so");
+});
+
+test("ledger #33: ticking the row still turns uncharted on", async () => {
+  const seen: NewGameFormValues[] = [];
+  const screen = openScreen(async (values) => {
+    seen.push(values);
+  });
+
+  const box = checkboxInputs(screen.root)[0];
+  box.checked = true;
+  box.dispatchEvent("change");
+
+  findButton(screen.root, "Create Game")!.dispatchEvent("click");
+  await new Promise((r) => setImmediate(r));
+  assert.equal(seen[0].uncharted, true, "the opt-in is the player's, and it still works");
+});
+
+test("ledger #33: both new-game surfaces read ONE default", () => {
+  assert.equal(UNCHARTED_DEFAULT, false, "the shared default is OFF, not a second literal per surface");
 });
