@@ -691,6 +691,17 @@ async function run(): Promise<void> {
     // 51,536 px = 5.033% FAIL on diorama -- 99.99% and 100% of it inside the
     // SUBJECT city scene. Restored, 0 px. A re-cut that could no longer go red
     // would be worthless; this one goes red on exactly what the scene pins.
+    //
+    // RE-MEASURED AND RE-CUT AGAIN 2026-11-07, because main moved under this
+    // branch (github/main 4e38cd5 -> 7933049, 0.53.14 -> 0.53.15). 0.53.15's
+    // f7a84e1 ("the tier-upgrade control and the town hall's own upgrade each
+    // name their subject") relabels this panel's control "Upgrade to L2" ->
+    // "Upgrade settlement to L2", which moves all three city-view scenes by
+    // 599 px at [70,734 -> 204,745] -- ONE cluster, entirely inside the left
+    // settlement panel, subject still 0 px. Re-cut again on the merged tree. The
+    // update run's only other rewrite was adventure-overview, 8 px at
+    // [666,15 -> 1259,19], the same toolbar glyph residual as above: restored,
+    // never absorbed.
     await withPageRetry(context, "city-view-parallax-on", async (page) => {
       await dismissHomeAndCreateGame(page, GAME_NAME, SEED);
       await selectHeroAndHover(page);
@@ -889,6 +900,17 @@ async function run(): Promise<void> {
     // lost the 2x2 producer this scene exists to pin (35,368 px = 3.454%,
     // budget 0.5%). Both placements are asserted now so the next price move
     // fails loudly at the scene instead of moving the baseline.
+    //
+    // RE-CUT 2026-11-07 (the decompose-and-settle card, second pass). This scene
+    // is NOT one of that card's four, but it moved while that card was re-cutting
+    // them: github/main advanced to 7933049 (0.53.15) and f7a84e1's
+    // "Upgrade to L2" -> "Upgrade settlement to L2" moves this capture by 599 px
+    // at [70,734 -> 204,745]. Decomposed by region (tolerance 24, off the live
+    // DOM): toolbar 0, left settlement panel 599, left gutter 0, panel bottom
+    // margin 0, right panel rail 0, below rail 0, City Design box 0, and the
+    // SUBJECT district grid 0 px in all four quadrants (sum 599, uncovered 0).
+    // Chrome drifted, the subject did not -> the same rule re-cuts it, so it does
+    // not sit stale-and-green the way the four did.
     await withPageRetry(context, "district-city-view", async (page) => {
       await dismissHomeAndCreateGame(page, `${GAME_NAME}-district-city-view`, SEED);
       await selectHero(page);
