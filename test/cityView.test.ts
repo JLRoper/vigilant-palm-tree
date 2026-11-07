@@ -553,7 +553,7 @@ async function pageScreenshot(page: Page, name: string): Promise<string> {
 }
 
 async function gameName(page: Page): Promise<string> {
-  return page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.activeGameName as string);
+  return page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.activeGameName() as string);
 }
 
 // Open a saved game by NAME through home's Load Game list. The list is the
@@ -603,7 +603,7 @@ async function deleteGameForRun(name: string): Promise<void> {
 async function reloadToGame(page: Page, name: string): Promise<void> {
   await page.evaluate((n) => {
     const dbg = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug;
-    const id = dbg?.activeGameId;
+    const id = dbg?.activeGameId();
     if (id == null) return;
     localStorage.setItem("heroesJs.userGames", JSON.stringify({
       version: 1, games: [{ id, name: n, lastSeenAt: new Date().toISOString() }],
@@ -630,7 +630,7 @@ async function reloadToGame(page: Page, name: string): Promise<void> {
     assert(clicked, `no Open row matched ${name} after reload`);
   }
   await page.waitForFunction(
-    (n) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === n,
+    (n) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() === n,
     name,
     { timeout: 30000 },
   );
@@ -1702,7 +1702,7 @@ async function run() {
     await page.waitForFunction(() => !!(window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug, { timeout: 60000 });
     await openGameFromHome(page, ownGame);
     await page.waitForFunction(
-      (expected) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === expected,
+      (expected) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() === expected,
       ownGame,
       { timeout: 60000 }
     );

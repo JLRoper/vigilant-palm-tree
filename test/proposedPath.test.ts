@@ -89,7 +89,7 @@ async function run(): Promise<void> {
     // and cityView boot-wait 60s) and flaked on a loaded machine once the
     // reload made the boot do its work twice.
     await page.waitForFunction(
-      () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
+      () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() != null,
       null,
       { timeout: 60_000 },
     );

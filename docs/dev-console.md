@@ -179,7 +179,7 @@ definition. **Adding, renaming, or removing a key requires updating that
 interface** (and the attachment object to match) — `test/io/debugContract.test.ts`
 fails if you don't.
 
-All 25 top-level keys, grouped:
+All 26 top-level keys, grouped:
 
 | Key | Kind | Semantics |
 |---|---|---|
@@ -187,8 +187,8 @@ All 25 top-level keys, grouped:
 | `getState()` | function | Controller's state, falling back to the state manager's |
 | `getGameState()` | function | Raw state-manager snapshot |
 | `getTurnController()` | function | The live `TurnController` instance |
-| `phase` | getter | Current turn phase |
-| `round` | getter | Current round number |
+| `phase()` | function | Current turn phase |
+| `round()` | function | Current round number |
 | **Actions** | | |
 | `endTurn()` | function | Ends the turn (fire-and-forget) |
 | `setSelectedHero(id)` | function | Selects a hero on the controller |
@@ -202,15 +202,15 @@ All 25 top-level keys, grouped:
 | `getSettlements()` | function | `DebugSettlementSnapshot[]` — id, q/r, level, owner |
 | **Camera / input** | | |
 | `screenFor(q, r)` | function | Hex → screen coordinates through the live camera |
-| `hover` | getter | Latest hover pointer info, or `null` |
-| `lastClick` | getter | Latest click pointer info, or `null` |
+| `hover()` | function | Latest hover pointer info, or `null` |
+| `lastClick()` | function | Latest click pointer info, or `null` |
 | `isPassable(q, r)` | function | Terrain passability from the game map |
 | `getMoveDurationMs()` | function | Current movement speed (per-seat, from the first hero) |
 | **Session** | | |
-| `activeGameId` | getter | Active game's numeric id, or `null` |
-| `activeGameName` | getter | Active game's name, or `null` |
+| `activeGameId()` | function | Active game's numeric id, or `null` |
+| `activeGameName()` | function | Active game's name, or `null` |
 | **Nested** | | |
-| `eventLog` | property | The `EventLog` instance, or `null` (see `### EventLog`) |
+| `eventLog()` | function | The `EventLog` instance, or `null` (see `### EventLog`) |
 | `events` | property | `GameDebugEvents` (see `### __gameDebug.events`) |
 | `console` | property | `GameDebugConsole` (see `### __gameDebug.console`) |
 | `settings` | property | `GameDebugSettings` — `get()` / `update()` / `reset()` over `state/settings` |
@@ -239,15 +239,17 @@ they use the optional variant with `?.`:
 
 ```ts
 await page.waitForFunction(
-  () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
+  () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() != null,
   { timeout: 20000 }
 );
 ```
 
 **Enforcement.** `test/io/debugContract.test.ts` pins the surface: it asserts the
 attached key set equals the interface's key set **exactly** (an added, renamed, or
-removed key fails) and greps the repo for loose `(window as any).__gameDebug`
-casts, which are banned. Every e2e suite (`test/smoke.ts`, `test/cityView.test.ts`,
+removed key fails), asserts that every readout member is a `function`, and greps
+the repo for loose `(window as any).__gameDebug` casts and for a readout's
+property spelling (`__gameDebug.activeGameName` without the call parentheses) —
+both banned. Every e2e suite (`test/smoke.ts`, `test/cityView.test.ts`,
 `test/dragDrop.test.ts`, `test/proposedPath.test.ts`, …) consumes the API only
 through the typed pattern above.
 
@@ -310,7 +312,7 @@ Pick one or both:
 - **Console (modal)** — for deep inspection:
   ```ts
   import { openDevConsole } from "./debug/devConsole";
-  openDevConsole(__gameDebug.eventLog);
+  openDevConsole(__gameDebug.eventLog());
   ```
   The Developer Settings menu (`src/screens/home/developerSettingsMenu.ts`)
   exposes a "Dev Console" button that does exactly this against the running

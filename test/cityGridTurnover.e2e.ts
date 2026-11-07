@@ -345,7 +345,7 @@ async function createSettlersGame(page: Page, name: string): Promise<void> {
   await page.locator('input[type="checkbox"]').first().uncheck({ force: true }).catch(() => {});
   await page.locator("button").filter({ hasText: /^Create Game$/ }).first().click();
   await page.waitForFunction(
-    (want: string) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === want,
+    (want: string) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() === want,
     name,
     { timeout: 30000 },
   );

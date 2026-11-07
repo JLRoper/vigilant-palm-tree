@@ -163,7 +163,7 @@ async function readLoadRows(page: Page, surface: "landing" | "toolbar"): Promise
 
 function activeGameName(page: Page): Promise<string | null> {
   return page.evaluate(() => {
-    const name = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName;
+    const name = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName();
     return typeof name === "string" ? name : null;
   });
 }
@@ -286,7 +286,7 @@ async function run(): Promise<void> {
       (open as HTMLButtonElement).click();
     }, OWN_GAME);
     await page.waitForFunction(
-      (want: string) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === want,
+      (want: string) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() === want,
       OWN_GAME,
       { timeout: 30000 },
     );

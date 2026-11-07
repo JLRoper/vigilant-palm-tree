@@ -156,13 +156,13 @@ async function openGame(page: Page, name: string, gameId: string): Promise<void>
     assert(clicked, `no Open row matched ${name}`);
   }
   try {
-    await page.waitForFunction((n) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === n, name, { timeout: 30000 });
+    await page.waitForFunction((n) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() === n, name, { timeout: 30000 });
   } catch (err) {
     const dump = await page.evaluate(() => ({
       text: (document.body.innerText ?? "").slice(0, 1200),
       buttons: Array.from(document.body.querySelectorAll("button")).map((b) => b.textContent?.trim()).slice(0, 40),
       debug: Boolean((window as unknown as { __gameDebug?: unknown }).__gameDebug),
-      name: (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName ?? null,
+      name: (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() ?? null,
     }));
     console.error(">> openGame failed:", JSON.stringify(dump, null, 1));
     throw err;
