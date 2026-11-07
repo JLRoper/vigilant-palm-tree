@@ -10,9 +10,21 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
-## [0.53.22] - 2026-11-07
+## [0.53.23] - 2026-11-07
 
 feat(art): the ironmark ram pens get their own building sprite, closing the one cross-faction building collision
+
+## [0.53.22] - 2026-11-07
+
+test(visual): record the district-map road-leg attribution — two movers, and the baseline stays un-re-cut
+
+`district-map` reads 1,455 px = 0.142% against its committed baseline, under the 0.5% budget, and the card that decomposed it left the question open: a grown settlement's second and later districts draw no road leg at all. Re-measured on `github/main` `73b08df` (0.53.19) by reverting ONE behaviour at a time — the frame reproducing the suite's own number to the pixel — the 1,455 px is TWO movers, and the second one MASKS the first:
+
+- **0.49.0's cased band owns 1,017 px** — the ONE leg both frames draw (up, to the first district at (9,6)): the cased 3.55-4.50 px body against the baseline's sub-pixel hairline.
+- **0.51.1's zero-workforce stamp owns 438 px** — the two legs the baseline draws and HEAD does not (171 px to (8,7), 253 px to (8,8), plus a 14 px band edge).
+- Reverting the road stack to pre-0.49.0 reads **438 px**; reverting the engine's staffing rule reads **2,426 px**, to the pixel the number `d9e741a` recorded for the road landing on its merge base; reverting **both** reads **0 px** — byte-identical to the committed baseline — i.e. the baseline is exactly "pre-0.49.0 art + pre-0.51.1 client staffing", and the two movers account for the whole surface with 0 px uncovered.
+- The mechanism, measured on a running settlement: a district placed into a settlement that already has one gets `workers: 0` (the 0.43.0 workforce rebalance, `f15a912`), so `districtWorkforcePercent` reads 0.0%, `roadsForWorkforce(0)` is 0 and `roadNetwork.ts`'s `if (route.roads <= 0) continue;` skips the route — the district is still CONNECTED, it just draws nothing. Staffing it (1 worker on a 4-builder site = 25% = 5 tracks) takes the network from 1 drawn segment to 3, and the leg is visibly back on the map.
+- **It is intended** — `docs/settlements.md` states "0 workforce is no road at all" three times — so the baseline is NOT re-cut and no source or doc file is touched: the scene's own note carries the attribution, and three follow-ups are reported unfixed in `analysis/2026-11-07-district-map-road-leg-attribution.md` (the `roadNetworkTiles` routes-vs-segments divergence that prices an undrawn district's hex at 0.75x, the docs' harbour-pier promise the renderer cannot keep, and a classic L1 town's worker pool of exactly 1).
 
 ## [0.53.21] - 2026-11-07
 
