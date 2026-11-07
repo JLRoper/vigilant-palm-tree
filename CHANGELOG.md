@@ -10,6 +10,20 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.53.13] - 2026-11-07
+
+The ten still-real findings from the town-hall L2 playthrough ledger
+
+- **`⛺ Found Settlement` explains itself** (ledger #7): the button was gated on `canStartCharter()`, so with no wagon selected it was dead AND mute — the toast `openFoundFlow` already owned ("Select one of your covered wagons first") was unreachable. It is live while the seat still owns a wagon, its title names the requirement, and a click answers with that sentence and plants nothing.
+- **The HUD's INCOME is the credit** (ledger #9, measured): the pill read the morale-scaled tax at the settlement's CURRENT morale while the day tick pays it after its own morale step, so a decaying settlement was advertised above what it received (500 projected against 495 credited). `projectedSettlementIncome` now runs the tick's own order — produce, morale step, tax — for the HUD pill and the settlement panel's Income/turn row.
+- **A dropped End Turn press says why** (ledger #13): pressing End Turn while the previous turn was in flight was swallowed by a disabled button (which fires no event at all), and the repeat press went the same way. The control is pressable while a game is loaded and answers with a toast for both the in-flight and not-your-turn cases.
+- **The two "L2" upgrades name their subjects** (ledger #10): the settlement panel's control raises the SETTLEMENT (`Upgrade settlement to L2`), the town hall's own line names the BUILDING (`Town hall L2: 1500g 15w 10s / 7d`).
+- **`__gameDebug.getSettlements()` exposes building levels** (ledger #11): each settlement now carries `buildings[]` with `kind`/`level`/`construction`/`district`, so a town hall at L2 under a still-L1 settlement is readable.
+- **`__gameDebug`'s pointer readouts are calls** (ledger #20): `hover()` and `lastClick()` now follow the same calling convention as every other readout.
+- **Command controls carry an emoji-free `data-label`** (ledger #21), so `[data-label="Build"]` matches exactly where the visible text is `⚒ Build`.
+- **`__gameDebug.cityGrid()`** (ledger #22) hands a driver the open city view's own layout and cell↔screen conversions instead of making it re-derive them from `src/core/cityGrid.ts`.
+- **Uncharted mode is off by default** (ledger #33) on both new-game surfaces, from one shared `UNCHARTED_DEFAULT`.
+
 ## [0.53.12] - 2026-11-06
 
 A charter survives its own founding: the day tick's map, the Load row's charters, and the turn's own charter list
