@@ -308,9 +308,17 @@ function normalizeLedger(groups: readonly (readonly string[])[]): string[][] {
 
 /**
  * The duplicate groups this repository still ships, measured 2026-11-07 against
- * main 0.53.14. Every one is placeholder art copied from another unit
+ * main 0.53.14 and since reduced by the two art waves that have landed: wave 1
+ * closed `grave_hound = warhound` on both surfaces, wave 2 closed the
+ * druid / hearth_priest cluster (arena `druid = hearth_priest = runesmith`, and
+ * the icons `druid = mage` and `hearth_priest = runesmith`). Every remaining one
+ * is placeholder art copied from another unit
  * (design/arena-unit-sprites/roster-parity-placeholder-art.md): closing a group
  * means authoring that unit its own PNG, which is per-unit art work.
+ *
+ * A group LEAVES this list only when no two of its members still share a file:
+ * a three-way collision that loses one member to new art NARROWS, and the row is
+ * rewritten with its surviving members rather than dropped.
  *
  * Each row is one card. The seat-faction rows (human<->ashen, human<->verdant,
  * ironmark<->verdant) are the ones that make two factions visually
@@ -324,7 +332,6 @@ const OUTSTANDING_DUPLICATE_GROUPS: Record<SpriteSurface, readonly (readonly str
     ["bone_pikeman", "skeleton_warrior"],
     ["bramble_blade", "briar_warden"],
     ["dark_acolyte", "wraith"],
-    ["druid", "hearth_priest", "runesmith"],
     ["elk_rider", "ram_rider"],
     ["lich", "necromancer"],
     ["sproutling", "treant_elder"],
@@ -337,9 +344,7 @@ const OUTSTANDING_DUPLICATE_GROUPS: Record<SpriteSurface, readonly (readonly str
     ["bone_pikeman", "skeleton_warrior"],
     ["bramble_blade", "briar_warden"],
     ["dark_acolyte", "wraith"],
-    ["druid", "mage"],
     ["elk_rider", "ram_rider"],
-    ["hearth_priest", "runesmith"],
     ["lich", "necromancer"],
     ["sproutling", "treant_elder"],
     ["thorn_archer", "wildwood_ranger"],
@@ -386,15 +391,57 @@ test("the seat-faction pair this change differentiated ships unique art on both 
   }
 });
 
-// The arena sprites authored to the footprint contract (the first pair). The
-// rest of the family still ships 2-19 rows of transparent bottom pad, which the
-// shared `unit.<id>.<pose>` descriptor (bottom anchor, no anchorOffsetY) floats
-// above the hex's south vertex; normalising the family is follow-up art work, so
-// the contract is pinned per authored asset rather than family-wide.
-const FOOTPRINT_EXACT_ARENA_IDS = ["grave_hound", "warhound"] as const;
+// Wave 2 replaced the two placeholder COPIERS of this cluster and left the
+// originals alone: roster-parity-placeholder-art.md has druid icon <- mage,
+// druid arena idle <- runesmith, and hearth_priest icon + arena idle <-
+// runesmith. The originals (mage, runesmith) keep their art, so every group
+// below is pinned by the paths of the assets this change rewrote.
+const WAVE_2_DIFFERENTIATED_GROUPS: readonly { surface: SpriteSurface; ids: readonly string[] }[] = [
+  { surface: "arena", ids: ["druid", "hearth_priest", "runesmith"] },
+  { surface: "icon", ids: ["druid", "mage"] },
+  { surface: "icon", ids: ["hearth_priest", "runesmith"] },
+];
 
-/** A plinth reads as a base band nearly as wide as the whole figure; the shipped hound's is 17%. */
-const MAX_BASE_BAND_RATIO = 0.5;
+test("the druid / hearth_priest cluster this change differentiated ships unique art on every surface", () => {
+  // Every pair is asserted, not just each group's members against the new file:
+  // a re-collision between ANY two named paths has to fail and name both.
+  for (const { surface, ids } of WAVE_2_DIFFERENTIATED_GROUPS) {
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        assert.notEqual(
+          contentHash(spriteBytes(surface, ids[i])),
+          contentHash(spriteBytes(surface, ids[j])),
+          `${spritePath(surface, ids[i])} and ${spritePath(surface, ids[j])} are still one file — ` +
+            `the ${surface} group [${ids.join(", ")}] must not share bytes`,
+        );
+      }
+    }
+  }
+});
+
+// The arena sprites authored to the footprint contract (wave 1's pair, and
+// wave 2's). The rest of the family still ships 2-19 rows of transparent bottom
+// pad, which the shared `unit.<id>.<pose>` descriptor (bottom anchor, no
+// anchorOffsetY) floats above the hex's south vertex; normalising the family is
+// follow-up art work, so the contract is pinned per authored asset rather than
+// family-wide.
+const FOOTPRINT_EXACT_ARENA_IDS = ["grave_hound", "warhound", "druid", "hearth_priest"] as const;
+
+/**
+ * A plinth reads as a base band nearly as wide as the whole figure. The ceiling
+ * is per authored asset because the band a figure stands on is a property of its
+ * silhouette: wave 1's hounds stand on four thin paws, while a robed upright
+ * figure stands on its own hem — the shipped runesmith measures 0.63 and
+ * shield_bearer 0.77 (the lich's hem reaches 1.00). The wave-2 pair is pinned
+ * just above its own measured band, so a slab that swallows the stance still
+ * trips it.
+ */
+const MAX_BASE_BAND_RATIO: Record<(typeof FOOTPRINT_EXACT_ARENA_IDS)[number], number> = {
+  grave_hound: 0.5,
+  warhound: 0.5,
+  druid: 0.85,
+  hearth_priest: 0.85,
+};
 
 /**
  * A minimal PNG reader: 8-bit, non-interlaced, RGB or RGBA — which is what the
@@ -507,7 +554,7 @@ test("the new arena art is cut to the iso footprint: base on the last row, no pl
       }
     }
     assert.ok(
-      baseBand <= widest * MAX_BASE_BAND_RATIO,
+      baseBand <= widest * MAX_BASE_BAND_RATIO[id],
       `${file}'s base band is ${baseBand}px against a ${widest}px widest row — that is a ground plinth, not a stance`,
     );
 
