@@ -10,6 +10,17 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.53.24] - 2026-11-07
+
+the colliding seat factions get their own unit art — wave 3: the verdant ursine guardian and the ironmark war boar
+
+The verdant `ursine_guardian` and the ironmark `war_boar` were carrying the verdant `warbeast`'s files, and between them they closed the `ursine_guardian = warbeast = war_boar` triple on both surfaces (the wave-1 audit's REMAINING row R4). Two of the triple's three members are the placeholder COPIERS named in `design/arena-unit-sprites/roster-parity-placeholder-art.md` (both copy `warbeast`), so re-authoring the two copiers and leaving the original alone is both the set rule's "all but one" and the copiers rule's "never the originals".
+
+- The four replaced assets: `src/resources/units/arena/{ursine_guardian,war_boar}-idle.png` (one file, sha256 `553d8e6f3c0f5fc9…` — a copy of `arena/warbeast-idle.png`, now `42405fb5ce784a62…` and `cd3f6ecef0abce31…`) and `src/resources/units/icons/{ursine_guardian,war_boar}.png` (a copy of `icons/warbeast.png`, `8321dcdf8125d907…`, now `e09a9deccc0aade5…` and `6fadb84f2a5c3224…`). The original `warbeast` keeps its art, confirmed unchanged by content hash.
+- Three to four candidates per surface from different image models (`google/gemini-2.5-flash-image`, `google/gemini-3-pro-image`, `google/gemini-3.1-flash-image`, plus a `google/gemini-nano-banana-2.1` probe whose output is JPEG), each with the placeholder being replaced AND a same-faction non-placeholder (`forest_scout`, `shield_bearer`) attached as references. Unlike waves 1 and 2 the pro model did NOT sweep the picks: it won only the war boar icon. Its ursine idle left a white background block the border-seeded flood fill cannot reach and its war boar idle a detached ember puff kept as a second connected component; the war boar icon candidate from 3.1-flash clips at the right edge. Three picks are `google/gemini-3.1-flash-image`.
+- Cut with wave 1's helper, unchanged, so both arena sprites land with the base on the canvas' last row (the hex's south vertex, `bottomPad 0`) and a clean 2px ring. The footprint test now covers the two new arena sprites, per-asset: 0.50 for the quadruped waves (the hounds measure 0.17/0.13, this wave's bear and boar 0.22/0.31), 0.85 for wave 2's robed pair.
+- The ledger in `test/data/factionCombatUnitDifferentiation.test.ts` loses the two rows this closes — arena and icon `[ursine_guardian, warbeast, war_boar]`, 20 rows → 18 — and gains a cluster test asserting every pair inside each closed group is a distinct file, naming both asset paths when it is not.
+
 ## [0.53.23] - 2026-11-07
 
 feat(art): the ironmark ram pens get their own building sprite, closing the one cross-faction building collision
