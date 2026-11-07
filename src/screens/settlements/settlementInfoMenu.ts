@@ -19,7 +19,7 @@ import { warehouseCapMessage, warehouseResourceCapped } from "./warehouseCap";
 import { dailyRateTitle, foodBalanceTitle, formatDailyRate, populationCapTitle, resourceLabel, settlementDailyRates } from "./panelRates";
 import type { HorseVariant } from "../../state/settings";
 import { WAREHOUSE_RESOURCES, type WarehouseResource } from "@heroes/contracts";
-import { districtPopulationBonus, POP_BY_LEVEL, settlementPopulationCap, UPGRADE_POPULATION_GATE, effectiveSettlementIncome, settlementTreasuryCap } from "@heroes/engine";
+import { districtPopulationBonus, POP_BY_LEVEL, settlementPopulationCap, UPGRADE_POPULATION_GATE, projectedSettlementIncome, settlementTreasuryCap } from "@heroes/engine";
 import { workforceRowText } from "./workforceRowText";
 import { pickHeroName } from "../../data/heroNames";
 import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
@@ -565,11 +565,7 @@ export class SettlementInfoMenu {
     // makes no progress, and this is the one surface that says so without the
     // player opening every building.
     this.workforceEl.textContent = workforceRowText(settlement);
-    this.incomeEl.textContent = `${effectiveSettlementIncome(
-      settlement,
-      state.heroes,
-      settlement.ownerId === null ? undefined : state.players?.[settlement.ownerId],
-    ).toLocaleString()}g`;
+    this.incomeEl.textContent = `${projectedSettlementIncome(state, settlement).toLocaleString()}g`;
     this.updateTreasuryRow(settlement, state);
     this.moraleEl.textContent = `${Math.round(settlement.morale ?? 100)}%${settlement.autoTrade ? " · auto" : ""}`;
 

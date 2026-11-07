@@ -2,9 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { BuildingDef } from "@heroes/contracts";
 import {
+  applyEndOfTurnDetailed,
   buildingSettlementEffects,
-  effectiveSettlementIncome,
   playerEffectiveSettlementIncome,
+  projectedSettlementIncome,
 } from "@heroes/engine";
 import { updateHud, type PathCostReadout } from "../../../src/screens/shared/hud";
 import { emptyWarehouse, makeHero, makeSettlement, makeState } from "../../charter/_helpers";
@@ -51,7 +52,11 @@ test("hud: economy pills carry round, wealth, income, population, upkeep and mor
   const h = render(economyState());
   assert.equal(h.round.textContent, "1");
   assert.equal(h.wealth.textContent, "0");
-  assert.equal(h.income.textContent, "940");
+  // This fixture's settlement is SHORT of food (4 of 10), so the next day tick
+  // decays its morale 90 -> 84 before it pays the tax: 1,000 pop-tax x 0.84 =
+  // 840, plus the market's 40g. Ledger #9's disagreement, measured: the pill is
+  // what the tick will credit, not what the current morale would pay.
+  assert.equal(h.income.textContent, "880");
   assert.equal(h.population.textContent, "1000");
   assert.equal(h.upkeepGold.textContent, "0");
   assert.equal(h.upkeepFood.textContent, "0");
@@ -101,12 +106,15 @@ test("hud: economy breakdown title explains income scaling, upkeep, and the next
   const { title } = render(economyState()).root;
   const lines = title.split("\n");
   assert.equal(lines.length, 4);
-  assert.match(lines[0], /Income: settlements 1000g pop-tax \+ 40g buildings → morale 90% on tax → 940g\/round to treasuries/);
+  assert.match(
+    lines[0],
+    /Income: settlements 1000g pop-tax \+ 40g buildings → 880g\/round to treasuries \(the tax is paid at the morale this turn's step leaves behind/,
+  );
   assert.match(
     lines[1],
     /Upkeep: troops 0g \+ 0 food\/wk \(hero purse; larder first, then your own settlements' food while standing on one\) · buildings 1 wood \+ 1 stone\/wk · food 4\/10 → morale −6\/round/,
   );
-  assert.match(lines[2], /40g building gold is morale-stable and counted in both Empire Income \(940g\) and next-turn gold \(1040g\)/);
+  assert.match(lines[2], /40g building gold is morale-stable and counted in both Empire Income \(880g\) and next-turn gold \(1040g\)/);
   assert.match(lines[3], /^Wealth: 0g — 0g on heroes \+ 0g in settlement treasuries$/);
 });
 
@@ -156,10 +164,15 @@ test("hud: no owned settlements degrades to a plain explanation", () => {
 const SEAT_TAX_TOTAL = 500 * 1 + 1500 * 2;
 
 function twoSeatState(overrides: Parameters<typeof makeState>[0] = {}) {
+  // Fed settlements (a stocked larder): this fixture is about the pill reading
+  // the LOADED state, and a settlement with no food at all is a starving one
+  // whose next-day projection is legitimately below its pop-tax. The projection
+  // that applies the tick's morale step is pinned separately below.
+  const fed = () => emptyWarehouse({ food: 100, wood: 50, stone: 50 });
   return makeState({
     settlements: [
-      makeSettlement("castle-1-11-8", 0, 11, 8, { population: 500, goldTax: 1 }),
-      makeSettlement("castle-2-18-13", 0, 18, 13, { population: 1500, goldTax: 2 }),
+      makeSettlement("castle-1-11-8", 0, 11, 8, { population: 500, goldTax: 1, warehouse: fed() }),
+      makeSettlement("castle-2-18-13", 0, 18, 13, { population: 1500, goldTax: 2, warehouse: fed() }),
     ],
     heroes: [makeHero("p0-hero", 0, 11, 8)],
     ...overrides,
@@ -187,7 +200,9 @@ test("hud: two consecutive renders with no command in between are identical, and
 test("hud: the pill is the empire total, so it never equals one settlement's own Income/turn row", () => {
   const state = twoSeatState();
   const h = render(state);
-  const ownRow = effectiveSettlementIncome(state.settlements["castle-1-11-8"], state.heroes);
+  // The panel's row is the SAME projection for one settlement (they cannot
+  // disagree); the pill is the sum across the seat.
+  const ownRow = projectedSettlementIncome(state, state.settlements["castle-1-11-8"]);
   assert.equal(h.income.textContent, String(SEAT_TAX_TOTAL));
   assert.equal(ownRow, 500, "the settlement panel's Income/turn row is that settlement alone");
   assert.notEqual(h.income.textContent, String(ownRow), "the HUD sums every owned settlement");
@@ -195,11 +210,12 @@ test("hud: the pill is the empire total, so it never equals one settlement's own
 
 test("hud: the 40g a district market adds is the state's, and the pill follows it", () => {
   const market = buildingSettlementEffects("market", 1).goldPerTurn;
+  const fed = () => emptyWarehouse({ food: 100, wood: 50, stone: 50 });
   const withMarket = twoSeatState({
     settlements: [
-      makeSettlement("castle-1-11-8", 0, 11, 8, { population: 500, goldTax: 1 }),
+      makeSettlement("castle-1-11-8", 0, 11, 8, { population: 500, goldTax: 1, warehouse: fed() }),
       {
-        ...makeSettlement("castle-2-18-13", 0, 18, 13, { population: 1500, goldTax: 2 }),
+        ...makeSettlement("castle-2-18-13", 0, 18, 13, { population: 1500, goldTax: 2, warehouse: fed() }),
         districts: { "18,12": { q: 18, r: 12, citySpots: [], buildings: [{ gx: 0, gy: 0, kind: "market", level: 1, style: "classic" }] } },
       },
     ],
@@ -215,14 +231,77 @@ test("hud: a round advance re-reads the state, so a real income change does show
   const after = render(twoSeatState({ round: 2, day: 1, selectedHeroId: "p0-hero" }));
   assert.equal(after.income.textContent, before.income.textContent, "moving the selection is not an economy change");
 
+  const fed = () => emptyWarehouse({ food: 100, wood: 50, stone: 50 });
   const taxed = render(
     twoSeatState({
       round: 2,
       settlements: [
-        makeSettlement("castle-1-11-8", 0, 11, 8, { population: 500, goldTax: 2 }),
-        makeSettlement("castle-2-18-13", 0, 18, 13, { population: 1500, goldTax: 2 }),
+        makeSettlement("castle-1-11-8", 0, 11, 8, { population: 500, goldTax: 2, warehouse: fed() }),
+        makeSettlement("castle-2-18-13", 0, 18, 13, { population: 1500, goldTax: 2, warehouse: fed() }),
       ],
     }),
   );
   assert.equal(taxed.income.textContent, String(500 * 2 + 1500 * 2), "a real tax change is reported");
+});
+
+// ── Ledger #9, measured: the pill is the CREDIT, not one morale step of it ──
+//
+// The ledger's four playthrough passes all saw the HUD's INCOME disagree with
+// the gold a settlement was actually credited, by exactly the morale step the
+// day tick takes before it pays the tax. These two runs run the ENGINE's own
+// payment pass over the fixture and compare it with the pill, so the claim is
+// measured rather than argued.
+
+test("hud: the INCOME pill equals what the next End Turn actually credits (a starving settlement)", () => {
+  // popTax 500 at morale 100, short of food: the tick decays to 90 first, so it
+  // pays 450. Population is under 100, so the daily wage is 0 and the whole gold
+  // delta IS the income half.
+  const state = makeState({
+    settlements: [
+      makeSettlement("s0", 0, 2, 2, {
+        population: 50,
+        goldTax: 10,
+        morale: 100,
+        warehouse: emptyWarehouse({ food: 0 }),
+      }),
+    ],
+    heroes: [makeHero("h0", 0, 2, 2)],
+  });
+  const before = state.settlements["s0"].gold;
+  const after = applyEndOfTurnDetailed(state).state.settlements["s0"];
+  const credited = after.gold - before;
+  assert.equal(credited, 450, "the tick pays the tax at the morale its own step leaves behind");
+  assert.equal(
+    render(state).income.textContent,
+    String(credited),
+    "the pill must be the credit, not one morale step of it",
+  );
+});
+
+test("hud: …and the projection produces FIRST, so a farm-fed settlement is not projected a decay it never takes", () => {
+  // The larder is empty AT THE MOMENT OF READING, but the settlement's own food
+  // rate covers its mouths on the tick (production runs before the morale step),
+  // so the tick is fully supplied and pays the pop-tax in full. A projection
+  // that skipped production would invent a 10-point decay and read 450.
+  const state = makeState({
+    settlements: [
+      makeSettlement("s0", 0, 2, 2, {
+        population: 50,
+        goldTax: 10,
+        morale: 100,
+        resourceRates: { food: 1 },
+        warehouse: emptyWarehouse({ food: 0 }),
+      }),
+    ],
+    heroes: [makeHero("h0", 0, 2, 2)],
+  });
+  const before = state.settlements["s0"].gold;
+  const after = applyEndOfTurnDetailed(state).state.settlements["s0"];
+  // Wage is 0 at population 50, so the whole delta is the income half again.
+  assert.equal(after.gold - before, 500, "the tick produced its own food, so morale held and the tax paid in full");
+  assert.equal(
+    render(state).income.textContent,
+    String(after.gold - before),
+    "the projection must not read the pre-production larder as a deficit",
+  );
 });
