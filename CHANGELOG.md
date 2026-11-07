@@ -12,7 +12,7 @@ the version has not already been bumped in that changeset.
 
 ## [0.53.18] - 2026-11-07
 
-test(data): pin the faction building-set differences that hold, and report the building-art gap
+test(visual): re-cut the four settlement-panel baselines, measured by region; district-map reported as a moved subject
 
 ## [0.53.17] - 2026-11-07
 
