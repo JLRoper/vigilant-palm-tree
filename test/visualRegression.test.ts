@@ -721,6 +721,39 @@ async function run(): Promise<void> {
     // back it: 2,426 px of a 1,024,000 px whole-canvas capture is 0.24%, which
     // is a weak instrument for a ground layer -- road work still wants the
     // engine-level tests plus a scoped capture.
+    //
+    // RE-CUT 2026-11-07 (github/main ff9927e, 0.53.12). The baseline above had
+    // gone stale on main and read RED: 10,387 px = 1.014% against the 5,120 px
+    // a 0.5% budget allows over 1,024,000 px, and it was the suite's ONLY red
+    // scene. Measured by REGION before the re-cut (suite tolerance 24, so the
+    // region sum equals the failure count with 0 px uncovered): toolbar 0, GRID
+    // 190, right rail 0, build palette 0, City Design box 0, left settlement
+    // panel 10,197. Chrome was 98.2% of the failure and the movers are named:
+    // 9,778 px is 0.53.10's tier-upgrade row (F-5 15b057b pins it outside the
+    // scrolling body, F-3 11f8272 names each amount -- it reads "Upgrade to L2 /
+    // Needs: TH L2, Gold 100/5000"); 342 px is the workforce line "12 bldgs
+    // (26 slots)" -> "11 bldgs (26 slots), pool 1 - 1 site stalled"; 75 px is
+    // the Treasury row "100 / 1,500g" -> "100 / 5,000g" (0.51.3 149add3, the L1
+    // cap is now its own tier cost); 2 px the panel's bottom border.
+    //
+    // The GRID's 190 px is NOT the subject moving -- it is ONE mover, the 0.50.0
+    // construction build crews (da5c600, released by b76c8ba), which deleted the
+    // `if (b.construction) continue;` skip so buildersOnSite(b) draws 4 builder
+    // people on a site being built. da5c600 is not an ancestor of this baseline's
+    // own commit b7177d2 -- `git show b7177d2:src/render/scene/sceneBuilder/
+    // cityScene.ts` still carries the skip and HEAD does not -- so the old capture
+    // encodes a state no revision on main can reproduce. Restoring just that line
+    // measures GRID 0 px (left panel 10,197, total 10,197): the Farmhouse at (2,2)
+    // and the 2x2 Farm Field at (0,0) are exactly where this fixture puts them.
+    // The crew wave had already moved this scene 607 px -- UNDER the budget, so
+    // it read OK and nobody looked -- and 0.53.10 pushed it over.
+    //
+    // Proven still to catch its subject, after the re-cut: dropping the 2x2
+    // producer from a district's city scene (`if (input.district && b.kind ===
+    // "farmField") continue;` in buildCityScene) reads 8,470 px = 0.827%, FAIL;
+    // restored, 0. The four baselines the update run also rewrote were restored
+    // and left stale-and-green (city-view-* 2,610 px, district-map 1,455 px --
+    // under budget, other cards' movers).
     await withPageRetry(context, "district-map", async (page) => {
       await dismissHomeAndCreateGame(page, `${GAME_NAME}-district-map`, SEED);
       await selectHero(page);
