@@ -326,6 +326,20 @@ prompt folders (`prompts/`, `pose-prompts/`, `ashen-prompts/`, `ironmark-prompts
 scripts … not repo tooling". Output drops into `src/resources/units/arena/` or
 `icons/`; arena files resolve with **zero descriptor code** via the glob.
 
+**Faction-collision waves** (from 2026-11-07) replace the byte-identical
+placeholder art the 2026-10-22 roster expansion shipped. One committed helper,
+`collision-cut.mjs`, does the whole cut for these (border flood fill over the
+model's fake-transparency background — one tone or a two-tone checkerboard — then
+a floater drop, a crop to the alpha bbox, a smoothed draw into 128×128 and a
+2px-ring zero), its prompts live in `prompts/collision-<id>-<surface>.txt`, and
+each wave records model ids, prompt and reference hashes and the measured
+acceptance numbers in `collision-fix/MANIFEST.md`. Arena idle art for these waves
+is cut with the figure's base on the canvas' **last row**: the shared
+`unit.<id>.<pose>` descriptor is bottom-anchored with no `anchorOffsetY`, so that
+row is the hex's south vertex, and a transparent bottom pad floats the unit above
+it. Measurement, per-candidate verdicts and the still-colliding groups:
+`analysis/2026-11-07-give-the-colliding-seat-factions-their-own-unit-art.md`.
+
 ### 4.5 Pipeline E — skybox
 
 See §4.2: `flux-skybox.mjs` → `npm run skybox:split` → `src/resources/skybox/`;
