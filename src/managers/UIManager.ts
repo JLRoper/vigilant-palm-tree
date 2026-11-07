@@ -14,6 +14,7 @@ import { setMinimapReserve } from "@screens/shared/panelRail";
 import { getMinimapReserveHeight } from "../render/minimap";
 import { RESOURCE_PILE_SMOL_SPRITES } from "../render/assetDescriptors";
 import type { CityView, CitySelectionSnapshot } from "@screens/settlements/cityView/cityView";
+import type { CityGridDebug } from "@screens/settlements/cityView/cityGridDebug";
 import type { WorkforcePanel } from "@screens/settlements/cityView/workforcePanel";
 import type { RecruitmentPanel } from "@screens/settlements/cityView/recruitmentPanel";
 import type { HeroTradePanel } from "@screens/heroes/heroTradePanel";
@@ -771,6 +772,15 @@ export class UIManager {
 
   getToolbar(): Toolbar | undefined { return this.toolbar; }
   getCityView(): CityView | undefined { return this.cityView ?? undefined; }
+
+  /**
+   * The open city view's LIVE grid geometry (playthrough ledger #22), for the
+   * `__gameDebug.cityGrid()` hook. Null while no city view is open — the view
+   * itself answers null then, so a probe cannot read a stale grid.
+   */
+  getCityGridDebug(): CityGridDebug | null {
+    return this.cityView?.gridDebug() ?? null;
+  }
 
   // Breathing room between the panel rail's hard stop and the minimap's own
   // drawn box, so the rail doesn't sit flush against it.

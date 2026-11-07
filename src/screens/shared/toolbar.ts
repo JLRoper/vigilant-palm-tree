@@ -6,6 +6,8 @@ import { openNewGameModal, type NewGameHandler } from "./newGameModal";
 import { openConfirmDialog } from "@screens/shared/confirmDialog";
 import { openLoadGameModal, type LoadGameHandler } from "./loadGameModal";
 import { openHotkeysModal, attachHotkeysShortcut } from "./hotkeysModal";
+import { showToast } from "./toast";
+import { stampPlainLabel } from "./plainLabel";
 import { makeStatPill } from "./statPill";
 import { APP_VERSION, BUILD_TIME, BUILD_COMMIT, formatBuildTime } from "../../core/version";
 
@@ -39,6 +41,15 @@ const CHARTER_BUTTON_LABEL = "⚒ Charter Settlement";
 // while End Turn is actionable, so a disabled button never glows.
 const PRIMARY_READY_SHADOW =
   "var(--tb-shadow-ready, inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 8px rgba(0,0,0,0.35), 0 0 0 3px rgba(242,185,60,0.16))";
+
+// DROPPED END TURN PRESSES (playthrough ledger #13): a click that cannot end
+// the turn used to be swallowed silently -- the button was disabled while the
+// previous turn was still in flight, so the click produced no event at all, and
+// a player who saw nothing happen clicked again and lost that one too. The
+// button is now pressable whenever a game is loaded and answers with one of
+// these instead of staying mute.
+const END_TURN_BUSY_NOTICE = "Still ending the previous turn — one moment";
+const END_TURN_NOT_YOUR_TURN_NOTICE = "It is not your turn yet";
 
 type ButtonVariant = "primary" | "secondary" | "ghost";
 
@@ -283,11 +294,7 @@ export class Toolbar {
     this.endTurnBtn = this.makeButton("▶ End Turn", "primary");
     this.endTurnBtn.appendChild(makeKbdHint("E", true));
     this.endTurnBtn.addEventListener("click", () => {
-      if (this.busy) return;
-      if (!this.opts.state.canEndTurnNow()) return;
-      void this.runAsync(async () => {
-        await this.opts.callbacks.onEndTurn();
-      });
+      this.requestEndTurn();
     });
     makeGroup(true).appendChild(this.endTurnBtn);
 
@@ -350,6 +357,7 @@ export class Toolbar {
     this.charterBtnLabel = document.createElement("span");
     this.charterBtnLabel.textContent = CHARTER_BUTTON_LABEL;
     this.charterBtn.appendChild(this.charterBtnLabel);
+    stampPlainLabel(this.charterBtn, CHARTER_BUTTON_LABEL);
     this.charterBtn.appendChild(makeKbdHint("C"));
     this.charterBtn.addEventListener("click", () => {
       if (this.busy) return;
@@ -364,6 +372,8 @@ export class Toolbar {
     const gear = document.createElement("button");
     gear.textContent = "⚙";
     gear.title = "Menu";
+    // The whole visible text is the icon, so the plain name is stated.
+    stampPlainLabel(gear, "⚙", "Menu");
     Object.assign(gear.style, {
       width: "30px",
       height: "30px",
@@ -417,9 +427,10 @@ export class Toolbar {
       if (e.key === "Escape") closeDropdown();
     });
 
-    const makeMenuItem = (label: string): HTMLButtonElement => {
+    const makeMenuItem = (label: string, plain?: string): HTMLButtonElement => {
       const item = document.createElement("button");
       item.textContent = label;
+      stampPlainLabel(item, label, plain);
       Object.assign(item.style, {
         display: "block",
         width: "100%",
@@ -539,7 +550,13 @@ export class Toolbar {
     this.setEnabled(this.newBtn, ok && !this.busy);
     this.setEnabled(this.loadBtn, ok && !this.busy);
     this.setEnabled(this.saveBtn, ok && active && !this.busy);
-    this.setEnabled(this.endTurnBtn, endTurnOk && !this.busy);
+    // Ledger #13: End Turn is pressable whenever a game is loaded, so a press
+    // that cannot act yet still answers instead of being swallowed (a disabled
+    // control produces no event at all). The ready ring keeps its old meaning --
+    // it marks the press that WILL end the turn.
+    const endTurnLive = endTurnOk && !this.busy;
+    this.setEnabled(this.endTurnBtn, active);
+    this.endTurnBtn.style.boxShadow = endTurnLive ? PRIMARY_READY_SHADOW : SECONDARY_SHADOW;
     this.setEnabled(this.heroesBtn, hasGameState && !this.busy);
     this.setEnabled(this.settlementsBtn, hasGameState && !this.busy);
     const logisticsOk = hasGameState && !this.busy && (this.opts.state.canOpenLogistics?.() ?? true);
@@ -558,7 +575,11 @@ export class Toolbar {
       // copy byte-identical.
       const copy = this.opts.callbacks.charterButtonCopy?.() ?? null;
       if (this.charterBtnLabel) {
-        this.charterBtnLabel.textContent = copy?.label ?? CHARTER_BUTTON_LABEL;
+        const labelText = copy?.label ?? CHARTER_BUTTON_LABEL;
+        this.charterBtnLabel.textContent = labelText;
+        // The button renames itself per mode (charter -> found), so its plain
+        // name is re-stamped with it (ledger #21).
+        stampPlainLabel(this.charterBtn, labelText);
       }
       this.charterBtn.title = !hasGameState
         ? "No active game"
@@ -572,7 +593,13 @@ export class Toolbar {
     this.newBtn.title = !ok ? "Backend unavailable" : active ? "New game (current game will be lost)" : "Start a new game";
     this.loadBtn.title = !ok ? "Backend unavailable" : "Open a saved game";
     this.saveBtn.title = !ok ? "Backend unavailable" : active ? "Save current game" : "No active game to save";
-    this.endTurnBtn.title = endTurnOk ? "End the current turn" : "Not your turn or action in progress";
+    this.endTurnBtn.title = this.busy
+      ? END_TURN_BUSY_NOTICE
+      : endTurnOk
+        ? "End the current turn"
+        : active
+          ? END_TURN_NOT_YOUR_TURN_NOTICE
+          : "No active game";
     this.heroesBtn.title = hasGameState ? "View and manage heroes" : "No active game";
     this.settlementsBtn.title = hasGameState ? "View and manage settlements" : "No active game";
 
@@ -606,23 +633,52 @@ export class Toolbar {
     this.refresh();
   }
 
-  private makeButton(label: string, variant: ButtonVariant): HTMLButtonElement {
+  private makeButton(label: string, variant: ButtonVariant, plain?: string): HTMLButtonElement {
     const b = document.createElement("button");
     b.textContent = label;
+    // Ledger #21: the visible label wears an emoji prefix (`▶ End Turn`), so an
+    // exact `textContent.trim() === "End Turn"` never matches. The plain name
+    // rides `data-label` for a driver to match exactly; the visible text is
+    // untouched.
+    stampPlainLabel(b, label, plain);
     styleHeaderButton(b, variant);
     return b;
   }
 
   private press(btn: HTMLButtonElement): void {
+    // The End Turn control owns its own explanation of a press that did not end
+    // the turn; route the hotkey through it so the keyboard is never silent
+    // where the mouse is not (ledger #13).
+    if (btn === this.endTurnBtn) {
+      this.requestEndTurn();
+      return;
+    }
     if (this.busy || btn.disabled) return;
     btn.click();
   }
 
+  /**
+   * One End Turn request, whatever asked for it (the button, or the `E` hotkey
+   * routed through `press`). A request that cannot run SAYS WHY instead of
+   * returning silently: an in-flight turn and a not-yet-your-turn seat are both
+   * answered, and the turn itself only starts when the toolbar's gate allows it.
+   */
+  private requestEndTurn(): void {
+    if (this.busy) {
+      showToast(END_TURN_BUSY_NOTICE, "info");
+      return;
+    }
+    if (!this.opts.state.canEndTurnNow()) {
+      showToast(END_TURN_NOT_YOUR_TURN_NOTICE, "info");
+      return;
+    }
+    void this.runAsync(async () => {
+      await this.opts.callbacks.onEndTurn();
+    });
+  }
+
   private setEnabled(b: HTMLButtonElement, enabled: boolean): void {
     b.disabled = !enabled;
-    if (b === this.endTurnBtn) {
-      b.style.boxShadow = enabled ? PRIMARY_READY_SHADOW : SECONDARY_SHADOW;
-    }
   }
 
   private async runAsync(fn: () => Promise<void>): Promise<void> {

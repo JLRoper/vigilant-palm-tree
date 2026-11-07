@@ -1,6 +1,7 @@
 import { FloatingPanel, styleButton, createPanel, panelTheme } from "@screens/shared/panel";
 import { loadPanelGeometry } from "@screens/shared/panelLayout";
 import { toolbarHeight } from "@screens/shared/panelRail";
+import { stampPlainLabel } from "@screens/shared/plainLabel";
 import {
   DESIGN_BOX_INSET,
   collectPanelRects,
@@ -115,6 +116,7 @@ export class CityDesignBoxManager {
     const btn = document.createElement("button");
     btn.textContent = label;
     btn.title = title;
+    stampPlainLabel(btn, label);
     styleButton(btn);
     btn.style.width = "100%";
     btn.addEventListener("click", () => onClick());
@@ -138,6 +140,7 @@ export class CityDesignBoxManager {
   setBuildPaletteOpen(isOpen: boolean): void {
     if (!this.buildBtn) return;
     this.buildBtn.textContent = isOpen ? "✖ Close" : "⚒ Build";
+    stampPlainLabel(this.buildBtn, this.buildBtn.textContent);
     this.buildBtn.style.background = isOpen ? "rgba(120,40,40,0.7)" : "rgba(0,0,0,0.6)";
   }
 

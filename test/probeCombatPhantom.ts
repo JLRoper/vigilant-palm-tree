@@ -18,7 +18,7 @@ import type { GameDebugApi } from "../src/io/debugCommands";
 //      Click Quick Resolve on it and record what the server answers.
 //  (b) does hovering a hex open the Tile info panel at all? (adjudicates the
 //      two "panel did not show Unexplored / terrain" minor findings -- NB the
-//      panel is CLICK-driven: hover updates debug.hover only, so this check
+//      panel is CLICK-driven: hover updates debug.hover() only, so this check
 //      alone cannot distinguish "no panel" from "wrong gesture")
 //
 // Opt-in, run by hand (nothing registers this file):
@@ -206,13 +206,13 @@ async function main(): Promise<void> {
     // (b) hover adjudication, before any AI turn: hover a plain visible tile.
     const hoverInfo = await page.evaluate(() => {
       const d = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug;
-      return d ? JSON.stringify(d.hover) : "(no debug api)";
+      return d ? JSON.stringify(d.hover()) : "(no debug api)";
     });
     const pt = await page.evaluate(() => {
       const d = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug;
       return JSON.stringify(d?.screenFor(8, 7));
     });
-    console.log(`HOVER screenFor(8,7)=${pt} debug.hover(before)=${hoverInfo}`);
+    console.log(`HOVER screenFor(8,7)=${pt} debug.hover() before=${hoverInfo}`);
     await page.mouse.move(700, 450);
     await wait(400);
     await page.mouse.move(760, 470);
@@ -223,7 +223,7 @@ async function main(): Promise<void> {
         .filter((el) => (el as HTMLElement).offsetParent !== null)
         .map((el) => (el.textContent ?? "").trim())
         .filter((t) => t.startsWith("Tile") && t.length < 40);
-      return JSON.stringify({ hover: d?.hover ?? null, tilePanels: [...new Set(panelTitles)] });
+      return JSON.stringify({ hover: d?.hover() ?? null, tilePanels: [...new Set(panelTitles)] });
     });
     console.log(`HOVER after mousemove: ${hoverAfter}`);
     await page.screenshot({ path: `${SHOTS}/probe-hover-tile.png` });

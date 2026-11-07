@@ -3,10 +3,27 @@ import assert from "node:assert/strict";
 import { settlementIncome, playerIncome, playerPopulation, playerWealth, effectiveSettlementIncome, playerEffectiveSettlementIncome } from "@heroes/engine";
 import type { BuildingDef } from "@heroes/contracts";
 import { createInitialState, type GameState, type PlayerId, type SettlementState } from "../../src/state/gameState";
-import { makeHero, makeSettlement as makeBaseSettlement } from "../charter/_helpers";
+import { emptyWarehouse, makeHero, makeSettlement as makeBaseSettlement } from "../charter/_helpers";
 
-function makeSettlement(id: string, ownerId: PlayerId | null, population: number, goldTax: number, gold = 0): SettlementState {
-  return makeBaseSettlement(id, ownerId, 0, 0, { level: 1, population, goldTax, gold });
+function makeSettlement(
+  id: string,
+  ownerId: PlayerId | null,
+  population: number,
+  goldTax: number,
+  gold = 0,
+  stocked = false,
+): SettlementState {
+  return makeBaseSettlement(id, ownerId, 0, 0, {
+    level: 1,
+    population,
+    goldTax,
+    gold,
+    // A settlement with an empty larder is a STARVING one: the day tick's
+    // morale step would land before its tax and the projection would read below
+    // the pop-tax. These fixtures are about the income arithmetic, so the ones
+    // that read a projection are fed (see the last test).
+    ...(stocked ? { warehouse: emptyWarehouse({ food: 100, wood: 50, stone: 50 }) } : {}),
+  });
 }
 
 const MARKET_L1: BuildingDef = { gx: 0, gy: 0, kind: "market", level: 1 };
@@ -174,13 +191,16 @@ test("playerWealth ignores unowned (other-player or neutral) entities", () => {
        makeHero("h0", 0, 0, 0),
        makeHero("h1", 1, 0, 0),
      ],
-     seedSettlements: [
-       { ...makeSettlement("s0", 0, 1000, 1), morale: 90, buildings: [MARKET_L1] },
-       makeSettlement("s1", 0, 500, 1),
-       makeSettlement("s2", 1, 5000, 3),
-     ],
-   });
-   // s0: 900 (tax) + 40 (market) = 940; s1: 500 (tax, full morale). s2 is not owned.
-   assert.equal(playerEffectiveSettlementIncome(state, 0), 940 + 500);
-   assert.equal(playerEffectiveSettlementIncome(state, 1), 15000);
+    seedSettlements: [
+      { ...makeSettlement("s0", 0, 1000, 1, 0, true), morale: 90, buildings: [MARKET_L1] },
+      makeSettlement("s1", 0, 500, 1, 0, true),
+      makeSettlement("s2", 1, 5000, 3, 0, true),
+    ],
+  });
+  // The figure is what the NEXT day tick pays, so the tax is read at the morale
+  // that tick's own step leaves behind: s0's 90 RECOVERS +4 to 94 (it is fully
+  // supplied) -> 1,000 × 1 × 94% = 940, plus the market's 40 = 980; s1's 500 is
+  // paid in full at morale 100, where the +4 clamps. s2 is not owned.
+  assert.equal(playerEffectiveSettlementIncome(state, 0), 980 + 500);
+  assert.equal(playerEffectiveSettlementIncome(state, 1), 15000);
  });

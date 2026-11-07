@@ -11,6 +11,17 @@
 
 const unchartedGames = new Set<string>();
 
+/**
+ * What a NEW GAME form starts its "Uncharted mode" checkbox at (playthrough
+ * ledger #33). It is OFF: a fresh game starts on the map as it is, and hidden
+ * exploration is something the player opts into on the form (the checkbox says
+ * what it does beside it). Both new-game surfaces read this one value —
+ * `screens/home/newGameScreen.ts` (the landing page's form) and
+ * `screens/shared/newGameModal.ts` (the toolbar's dialog) — so they cannot
+ * disagree about what a player gets when they do not touch the row.
+ */
+export const UNCHARTED_DEFAULT = false;
+
 export function isUnchartedGame(gameName: string | null | undefined): boolean {
   return gameName != null && unchartedGames.has(gameName);
 }

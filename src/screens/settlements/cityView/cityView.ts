@@ -38,6 +38,7 @@ import { claimEscapeBeforePanels } from "@screens/shared/panelManager";
 import { loadPanelGeometry } from "@screens/shared/panelLayout";
 import { resolvePanelPlacement, type PanelRect } from "@screens/shared/panelPlacement";
 import { toolbarHeight } from "@screens/shared/panelRail";
+import { cityGridDebug, type CityGridDebug } from "./cityGridDebug";
 import { settings } from "../../../state/settings";
 import type { SettlementState } from "../../../state/gameState";
 import type { BuildingUpgradeRequest } from "../../../state/gameState";
@@ -433,6 +434,25 @@ export class CityView {
 
   getOpenDistrict(): { q: number; r: number } | null {
     return this.openDistrict;
+  }
+
+  /**
+   * The LIVE grid geometry, for a driver (playthrough ledger #22): the same
+   * `cityLayout(size, innerWidth, innerHeight, toolbarHeight())` that every
+   * paint and every pick in this view builds, plus the conversions the painters
+   * and the picker use. A probe can then click a cell it names instead of
+   * re-implementing the projection from `src/core/cityGrid.ts`. Null while no
+   * city view is open.
+   */
+  gridDebug(): CityGridDebug | null {
+    return cityGridDebug({
+      open: this.isOpen(),
+      settlementId: this.openSettlementId,
+      size: this.size,
+      viewportW: window.innerWidth,
+      viewportH: window.innerHeight,
+      topInset: toolbarHeight(),
+    });
   }
 
   draw(ctx: CanvasRenderingContext2D, viewportW: number, viewportH: number): void {

@@ -261,13 +261,13 @@ async function selectHeroByClick(page: Page, at: Axial): Promise<void> {
  * Move a hero by clicking its destination -- the map's own gesture, the one
  * `src/screens/adventure/adventureView.ts`'s click handler turns into
  * `requestMove`. `__gameDebug.requestMove` is NOT used: the move is the click's
- * own effect, and the client's own `lastClick.moved` (read, never invoked) is
- * the record that the CLICK produced it.
+ * own effect, and the client's own `lastClick().moved` (a readout, never an
+ * action) is the record that the CLICK produced it.
  */
 async function moveByClick(page: Page, dest: Axial): Promise<void> {
   await clickHex(page, dest);
   const clicked = await page.evaluate(() =>
-    (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.lastClick,
+    (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.lastClick(),
   );
   assert.equal(
     (clicked as { moved?: boolean } | null)?.moved,

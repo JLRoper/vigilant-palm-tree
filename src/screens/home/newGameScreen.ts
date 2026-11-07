@@ -13,6 +13,7 @@ import type { FactionId, GameMode } from "@heroes/contracts";
 import { seatFactionChoices } from "@screens/shared/factionChoices";
 import { MAP_SIZE_ORDER, mapSizeLabel, resolveMapSize, type MapSize } from "../../map/gameMap";
 import { gameModeHint, gameModeOptions, settings } from "../../state/settings";
+import { UNCHARTED_DEFAULT } from "../../io/unchartedGames";
 
 export type NewGameFormValues = {
   name: string;
@@ -276,8 +277,10 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
   );
 
   const unchartedField = makeFieldRow("Uncharted mode");
-  // Default on: a fresh game starts hidden and reveals as you explore.
-  let selectedUncharted = true;
+  // Ledger #33: the default is OFF (one shared constant, read by both new-game
+  // surfaces). A fresh game used to start fully hidden, which read as missing
+  // map rather than as a mode; the checkbox beside the hint turns it on.
+  let selectedUncharted = UNCHARTED_DEFAULT;
   const unchartedWrap = document.createElement("label");
   Object.assign(unchartedWrap.style, {
     display: "flex",
@@ -287,7 +290,7 @@ export function createNewGameScreen(opts: NewGameScreenOptions): NewGameScreen {
   });
   const unchartedCheck = document.createElement("input");
   unchartedCheck.type = "checkbox";
-  unchartedCheck.checked = true;
+  unchartedCheck.checked = UNCHARTED_DEFAULT;
   unchartedCheck.addEventListener("change", () => {
     selectedUncharted = unchartedCheck.checked;
   });
