@@ -308,10 +308,13 @@ function normalizeLedger(groups: readonly (readonly string[])[]): string[][] {
 
 /**
  * The duplicate groups this repository still ships, measured 2026-11-07 against
- * main 0.53.14 and since reduced by the two art waves that have landed: wave 1
+ * main 0.53.14 and since reduced by the three art waves that have landed: wave 1
  * closed `grave_hound = warhound` on both surfaces, wave 2 closed the
  * druid / hearth_priest cluster (arena `druid = hearth_priest = runesmith`, and
- * the icons `druid = mage` and `hearth_priest = runesmith`). Every remaining one
+ * the icons `druid = mage` and `hearth_priest = runesmith`), and wave 3 closed
+ * the `ursine_guardian = warbeast = war_boar` triple on both surfaces by
+ * re-authoring its two COPIERS (ursine_guardian, war_boar) and leaving the
+ * original (warbeast) alone. Every remaining one
  * is placeholder art copied from another unit
  * (design/arena-unit-sprites/roster-parity-placeholder-art.md): closing a group
  * means authoring that unit its own PNG, which is per-unit art work.
@@ -336,7 +339,6 @@ const OUTSTANDING_DUPLICATE_GROUPS: Record<SpriteSurface, readonly (readonly str
     ["lich", "necromancer"],
     ["sproutling", "treant_elder"],
     ["thorn_archer", "wildwood_ranger"],
-    ["ursine_guardian", "warbeast", "war_boar"],
   ],
   icon: [
     ["axe_thrower", "dwarf_axeman", "tunnel_levy"],
@@ -348,7 +350,6 @@ const OUTSTANDING_DUPLICATE_GROUPS: Record<SpriteSurface, readonly (readonly str
     ["lich", "necromancer"],
     ["sproutling", "treant_elder"],
     ["thorn_archer", "wildwood_ranger"],
-    ["ursine_guardian", "warbeast", "war_boar"],
   ],
 };
 
@@ -419,20 +420,54 @@ test("the druid / hearth_priest cluster this change differentiated ships unique 
   }
 });
 
+// Wave 3 replaced the two placeholder COPIERS of this cluster and left the
+// original alone: roster-parity-placeholder-art.md has ursine_guardian icon and
+// arena idle <- warbeast, and war_boar icon and arena idle <- warbeast. The
+// original (warbeast) keeps its art, so every group below is pinned by the paths
+// of the assets this change rewrote.
+const WAVE_3_DIFFERENTIATED_GROUPS: readonly { surface: SpriteSurface; ids: readonly string[] }[] = [
+  { surface: "arena", ids: ["ursine_guardian", "warbeast", "war_boar"] },
+  { surface: "icon", ids: ["ursine_guardian", "warbeast", "war_boar"] },
+];
+
+test("the ursine_guardian / war_boar cluster this change differentiated ships unique art on every surface", () => {
+  // Every pair is asserted, not just each group's members against the new file:
+  // a re-collision between ANY two named paths has to fail and name both.
+  for (const { surface, ids } of WAVE_3_DIFFERENTIATED_GROUPS) {
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        assert.notEqual(
+          contentHash(spriteBytes(surface, ids[i])),
+          contentHash(spriteBytes(surface, ids[j])),
+          `${spritePath(surface, ids[i])} and ${spritePath(surface, ids[j])} are still one file — ` +
+            `the ${surface} group [${ids.join(", ")}] must not share bytes`,
+        );
+      }
+    }
+  }
+});
+
 // The arena sprites authored to the footprint contract (wave 1's pair, and
 // wave 2's). The rest of the family still ships 2-19 rows of transparent bottom
 // pad, which the shared `unit.<id>.<pose>` descriptor (bottom anchor, no
 // anchorOffsetY) floats above the hex's south vertex; normalising the family is
 // follow-up art work, so the contract is pinned per authored asset rather than
 // family-wide.
-const FOOTPRINT_EXACT_ARENA_IDS = ["grave_hound", "warhound", "druid", "hearth_priest"] as const;
+const FOOTPRINT_EXACT_ARENA_IDS = [
+  "grave_hound",
+  "warhound",
+  "druid",
+  "hearth_priest",
+  "ursine_guardian",
+  "war_boar",
+] as const;
 
 /**
  * A plinth reads as a base band nearly as wide as the whole figure. The ceiling
  * is per authored asset because the band a figure stands on is a property of its
  * silhouette: wave 1's hounds stand on four thin paws, while a robed upright
  * figure stands on its own hem — the shipped runesmith measures 0.63 and
- * shield_bearer 0.77 (the lich's hem reaches 1.00). The wave-2 pair is pinned
+ * shield_bearer 0.77 (the lich's hem reaches 1.00). Each wave's pair is pinned
  * just above its own measured band, so a slab that swallows the stance still
  * trips it.
  */
@@ -441,6 +476,8 @@ const MAX_BASE_BAND_RATIO: Record<(typeof FOOTPRINT_EXACT_ARENA_IDS)[number], nu
   warhound: 0.5,
   druid: 0.85,
   hearth_priest: 0.85,
+  ursine_guardian: 0.5,
+  war_boar: 0.5,
 };
 
 /**
