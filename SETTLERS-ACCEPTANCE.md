@@ -294,7 +294,7 @@ row driven by the same option list (`src/state/settings.ts`'s
 | Playwright e2e | `test/settlers.e2e.ts`, entry `settlers` | `tools/run-test.mjs`'s `ENTRIES.settlers`, in `ALL_ORDER` before `visual`, in the usage string; `npm run test:settlers` |
 | Game row | `GET /api/games/:name`, `GET /api/games/:name/tiles` | `lobby.gameMode`; `heroes` (the wagon); `players[].heroIds`; `settlements` |
 | Event stream | `game_events` | `kind = 'SettlementFounded'`, and `kind = 'BuildingsPlaced'` for the city-view case |
-| Client state | `__gameDebug.getState()`, `.getHeroes()`, `.getSettlements()`, `.screenFor(q, r)`, `.lastClick`, `.endTurn()`, `.setSelectedHero(id)`, `.requestMove(id, q, r)`, `.activeGameName` | `src/io/debugCommands.ts` — the wagon appears in `.getHeroes()` as id `p<seat>-wagon`; there is **no** `getWagons()`, and no founding-hex accessor |
+| Client state | `__gameDebug.getState()`, `.getHeroes()`, `.getSettlements()`, `.screenFor(q, r)`, `.lastClick()`, `.endTurn()`, `.setSelectedHero(id)`, `.requestMove(id, q, r)`, `.activeGameName()` | `src/io/debugCommands.ts` — the wagon appears in `.getHeroes()` as id `p<seat>-wagon`; there is **no** `getWagons()`, and no founding-hex accessor |
 | DOM hooks | `button[data-mode="classic"]` / `button[data-mode="settlers"]` on both new-game surfaces, and the settle button's label/title text | the map is one canvas, so map observables are asserted through `__gameDebug`, never through DOM |
 
 Run on this branch's tip, 2026-10-25, with Postgres up on `127.0.0.1:5432`, a

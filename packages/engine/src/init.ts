@@ -247,7 +247,7 @@ function defaultSettlements(): Record<SettlementId, SettlementState> {
  *
  * Before this, the client booted onto a LOCALLY GENERATED world: day 1, three
  * seats, five named settlements and three heroes that match no database row --
- * while `__gameDebug.activeGameName` was null and no `/api/games` request had
+ * while `__gameDebug.activeGameName()` was null and no `/api/games` request had
  * been issued (the client had never loaded anything). Reloading the browser then
  * showed a world the player was not playing, and any command issued against it
  * described a game that did not exist.
