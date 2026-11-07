@@ -3,6 +3,7 @@ import type { CityViewSize } from "@heroes/engine";
 import type { BuildingDef, BuildingKind, CastleLevel, FactionId } from "@heroes/contracts";
 import { FloatingPanel, styleButton, panelTheme, createPanel } from "@screens/shared/panel";
 import { toolbarHeight } from "@screens/shared/panelRail";
+import { stampPlainLabel } from "@screens/shared/plainLabel";
 import {
   buildingPlacementCost,
   buildingLabel,
@@ -394,6 +395,7 @@ export class BuildingPlacer {
 
     const confirmBtn = document.createElement("button");
     confirmBtn.textContent = "\u2713 Confirm";
+    stampPlainLabel(confirmBtn, confirmBtn.textContent);
     styleButton(confirmBtn, this.canAfford());
     if (!this.canAfford()) {
       confirmBtn.style.opacity = "0.4";
@@ -414,6 +416,7 @@ export class BuildingPlacer {
 
     const cancelBtn = document.createElement("button");
     cancelBtn.textContent = "\u2715 Cancel";
+    stampPlainLabel(cancelBtn, cancelBtn.textContent);
     styleButton(cancelBtn);
     cancelBtn.addEventListener("click", () => {
       this.cancelPlacement();
@@ -443,6 +446,7 @@ export class BuildingPlacer {
   private makeModeButton(label: string, mode: PaletteMode): HTMLButtonElement {
     const btn = document.createElement("button");
     btn.textContent = label;
+    stampPlainLabel(btn, label);
     const isActive = this.paletteMode === mode;
     Object.assign(btn.style, {
       flex: "1",

@@ -217,7 +217,7 @@ function getEconomyHudSnapshot(state: GameState, ownerId: PlayerId): EconomyHudS
     const decay = ownedSettlements.reduce((acc, s) => acc + moraleDecay(s), 0);
     const moraleTrend = decay > 0 ? `morale −${fmtNum(decay)}/round` : "morale stable";
     breakdownTitle = [
-      `Income: settlements ${fmtNum(popTax)}g pop-tax + ${fmtNum(buildingGold)}g buildings → morale ${moraleAvg}% on tax → ${fmtNum(eff)}g/round to treasuries`,
+      `Income: settlements ${fmtNum(popTax)}g pop-tax + ${fmtNum(buildingGold)}g buildings → ${fmtNum(eff)}g/round to treasuries (the tax is paid at the morale this turn's step leaves behind, so a decaying settlement is projected below its pop-tax)`,
       `${empireUpkeepTitleClause(upkeepBill)} · buildings ${fmtNum(upkeep.wood)} wood + ${fmtNum(upkeep.stone)} stone/wk · food ${fmtNum(foodHave)}/${fmtNum(foodNeed)} → ${moraleTrend}`,
       `${fmtNum(buildingGold)}g building gold is morale-stable and counted in both Empire Income (${fmtNum(eff)}g) and next-turn gold (${fmtNum(nextGold)}g)`,
       wealthLine,
