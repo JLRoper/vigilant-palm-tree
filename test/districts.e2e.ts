@@ -217,8 +217,8 @@ async function run(): Promise<void> {
       const d = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug as GameDebugApi;
       const gs = d.getState() as any;
       return {
-        name: d.activeGameName,
-        id: d.activeGameId,
+        name: d.activeGameName(),
+        id: d.activeGameId(),
         settlements: Array.isArray(gs.settlements) ? gs.settlements : Object.values(gs.settlements),
         heroes: d.getHeroes(),
       };

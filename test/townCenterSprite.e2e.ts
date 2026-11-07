@@ -379,7 +379,7 @@ async function openGame(page: Page, name: string, gameId: number): Promise<void>
     assert(clicked, `no Open row matched ${name}`);
   }
   await page.waitForFunction(
-    (n) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === n,
+    (n) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() === n,
     name,
     { timeout: 30000 },
   );

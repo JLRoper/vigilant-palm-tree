@@ -270,7 +270,7 @@ async function runNewLoadSaveFlow(
   await createBtn.click();
   await wait(800);
 
-  const activeAfterNew = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName);
+  const activeAfterNew = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName());
   if (activeAfterNew !== TEST_NEW_NAME) {
     throw new Error(`New Game failed: activeGameName=${activeAfterNew}`);
   }
@@ -333,7 +333,7 @@ async function runNewLoadSaveFlow(
   let reloadedName: string | null = null;
   const loadDeadline = Date.now() + 10_000;
   while (Date.now() < loadDeadline) {
-    reloadedName = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName);
+    reloadedName = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName());
     if (reloadedName === openFor) break;
     await wait(250);
   }
@@ -626,7 +626,7 @@ async function run() {
       throw new Error(`home Load Game modal did not list the starter game the server holds (${starterOnServer.name}), ${openCount} row(s) offered`);
     }
     await page.waitForFunction(
-      () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName != null,
+      () => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() != null,
       null,
       { timeout: 30_000 }
     );
@@ -646,7 +646,7 @@ async function run() {
     if (spawnInfo.aiSpawn) AI_SPAWN = spawnInfo.aiSpawn;
     console.log(`>> dynamic spawns: player=${JSON.stringify(PLAYER_SPAWN)} ai=${JSON.stringify(AI_SPAWN)}`);
 
-    const bootName = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName);
+    const bootName = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName());
     if (typeof bootName !== "string" || !bootName.startsWith("starter-")) {
       throw new Error(`Expected starter game, got activeGameName=${bootName}`);
     }
@@ -670,7 +670,7 @@ async function run() {
     if (reloadedSpawn) PLAYER_SPAWN = reloadedSpawn;
     console.log(`>> home dismissed, starter game reloaded: ${bootName}`);
 
-    const activeName = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName);
+    const activeName = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName());
     if (typeof activeName !== "string" || !activeName.startsWith("starter-")) {
       throw new Error(`Expected starter game, got activeGameName=${activeName}`);
     }

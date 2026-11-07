@@ -173,6 +173,14 @@ test("member types match the contract", () => {
     "lastClick",
     "isPassable",
     "getMoveDurationMs",
+    // Ledger #20's residual: the five scalar readouts are CALLS too, so the
+    // surface has ONE shape and a driver never has to know which spelling a
+    // member uses.
+    "phase",
+    "round",
+    "activeGameId",
+    "activeGameName",
+    "eventLog",
   ];
   for (const key of functions) {
     assert.equal(typeof (api as unknown as Record<string, unknown>)[key], "function", `${key} must be a function`);
@@ -184,11 +192,11 @@ test("member types match the contract", () => {
   assert.equal(api.hover(), null);
   assert.equal(typeof api.lastClick, "function");
   assert.deepEqual(api.lastClick(), { q: 5, r: 6, moved: true });
-  assert.deepEqual(api.phase, fakeState.phase);
-  assert.equal(api.round, 3);
-  assert.equal(api.activeGameId, 7);
-  assert.equal(api.activeGameName, "contract-test-game");
-  assert.equal(api.eventLog, null);
+  assert.deepEqual(api.phase(), fakeState.phase);
+  assert.equal(api.round(), 3);
+  assert.equal(api.activeGameId(), 7);
+  assert.equal(api.activeGameName(), "contract-test-game");
+  assert.equal(api.eventLog(), null);
 });
 
 test("snapshot getters map the engine's visual entities", () => {
@@ -305,6 +313,10 @@ test("debug commands delegate to the engine", () => {
 const SCAN_ROOTS = ["src", "test", "scripts", "tools"];
 const SKIP_DIRS = new Set(["node_modules", "dist", ".git", "local"]);
 const LOOSE_CAST_NEEDLES = ["(window as any).__gameDebug", "__gameDebug?: {"];
+// The readouts that used to be PROPERTIES. Each is a call now, so a bare
+// `__gameDebug.<name>` (no parentheses) is the shape coming back.
+const READOUT_NAMES = ["phase", "round", "activeGameId", "activeGameName", "eventLog"];
+const READOUT_PROPERTY_FORM = new RegExp(`\\.__gameDebug\\??\\.(?:${READOUT_NAMES.join("|")})\\b(?!\\s*\\()`);
 
 function collectSourceFiles(root: string): string[] {
   const files: string[] = [];
@@ -342,5 +354,28 @@ test("no loose window.__gameDebug casts survive outside the typed GameDebugApi s
     offenders.length,
     0,
     `loose __gameDebug casts must go through (window as unknown as { __gameDebug: GameDebugApi }):\n${offenders.join("\n")}`,
+  );
+});
+
+test("no readout is a property: every readout on the surface is called", () => {
+  const self = resolve(fileURLToPath(import.meta.url));
+  const repoRoot = resolve(self, "..", "..", "..");
+  const offenders: string[] = [];
+  for (const root of SCAN_ROOTS) {
+    for (const file of collectSourceFiles(join(repoRoot, root))) {
+      // This file carries the pattern itself.
+      if (resolve(file) === self) continue;
+      const text = readFileSync(file, "utf8");
+      for (const [index, line] of text.split(/\r?\n/).entries()) {
+        if (READOUT_PROPERTY_FORM.test(line)) {
+          offenders.push(`${file}:${index + 1}: ${line.trim()}`);
+        }
+      }
+    }
+  }
+  assert.equal(
+    offenders.length,
+    0,
+    `the readouts ${READOUT_NAMES.join("/")} are CALLS (playthrough ledger #20) -- add the parentheses:\n${offenders.join("\n")}`,
   );
 });

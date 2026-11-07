@@ -175,7 +175,7 @@ async function dismissHomeAndCreateGame(page: Page, name: string, seed: number):
   await page.locator("button", { hasText: "Create Game" }).click();
   await wait(1000);
 
-  const active = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName);
+  const active = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName());
   if (active !== name) throw new Error(`New Game failed: activeGameName=${active}`);
 }
 
@@ -614,7 +614,7 @@ async function run(): Promise<void> {
       // nor a regression. Assert the documented boot contract instead (#307:
       // with games on the server, an empty profile lands on the home overlay
       // with activeGameName still null).
-      const bootedInto = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName ?? null);
+      const bootedInto = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() ?? null);
       if (bootedInto != null) {
         throw new Error(
           `the page booted into "${bootedInto}" before this scene created anything: the boot account was empty, so the client started its own game and consumed the one-time first-turn hint this capture pins`,
@@ -841,7 +841,7 @@ async function run(): Promise<void> {
       await page.locator("button", { hasText: "New Game" }).last().waitFor({ state: "visible", timeout: 20_000 });
       await wait(300);
       await loadGameFromHome(page, name);
-      const loaded = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName ?? null);
+      const loaded = await page.evaluate(() => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() ?? null);
       if (loaded !== name) throw new Error(`Load path did not open the game: activeGameName=${loaded}`);
       // The load camera's contract (src/game/loadCamera.ts): a loaded game opens
       // framed on the seat's hero. Assert it so a camera regression cannot pass

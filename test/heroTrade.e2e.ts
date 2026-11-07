@@ -240,7 +240,7 @@ async function openGame(page: Page, name: string, gameId: string): Promise<void>
     }, name);
     assert(clicked, `no Open row matched ${name}`);
   }
-  await page.waitForFunction((n) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === n, name, { timeout: 30000 });
+  await page.waitForFunction((n) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() === n, name, { timeout: 30000 });
   await wait(700);
   await page.keyboard.press("Escape").catch(() => {});
   await wait(300);
