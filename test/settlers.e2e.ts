@@ -21,8 +21,12 @@ import type { GameDebugApi } from "../src/io/debugCommands";
 //      wilderness: no settlement of ANY kind (no seat town, no neutral castle)
 //      and therefore no seeded buildings anywhere, one covered wagon per seat;
 //  (B) the client loads that game and the toolbar tells the truth about the
-//      mode: the button reads "Found Settlement", it is dead until the seat's
-//      own wagon is selected, and the classic charter copy does not exist;
+//      mode: the button reads "Found Settlement", it is LIVE while the seat
+//      still owns a wagon that could be selected, its title names the missing
+//      subject ("Select one of your covered wagons first"), and a click with
+//      none selected answers with that sentence as a toast and plants nothing
+//      -- a dead control that explains nothing was the ledger-#7 defect. The
+//      classic charter copy does not exist;
 //  (C) NO MAP CLICK CAN FOUND ANYTHING: clicking the wagon's own hex selects it
 //      (the founding is not armed by anything), and the settlement count stays
 //      zero -- the mode has no tile-selection step at all;
@@ -53,6 +57,7 @@ const HERO_ID = seatHeroIdFor(0);
 const FOUND_BUTTON_LABEL = "Found Settlement";
 const CLASSIC_BUTTON_LABEL = "Charter Settlement";
 const FOUND_TITLE = "Plant your covered wagon's settlement where it stands (one per wagon)";
+const FOUND_NO_WAGON_TITLE = "Select one of your covered wagons first";
 
 interface Axial { q: number; r: number }
 interface Tile extends Axial { terrain: string }
@@ -334,8 +339,36 @@ async function main(): Promise<void> {
         0,
         "a settlers game must not offer the classic charter copy",
       );
-      assert.equal(await foundBtn.getAttribute("title"), FOUND_TITLE, "the button says what it does");
-      assert.equal(await foundBtn.isDisabled(), true, "nothing selected: the founding action has no subject");
+      // Ledger #7: with no wagon selected the button is LIVE. A control that is
+      // dead AND explains nothing is the defect -- the player clicked and the
+      // game said nothing at all. Now the click reaches openFoundFlow's own
+      // sentence, and the same sentence rides the control's title for anyone
+      // who hovers first. It goes dead only when there is no wagon left to
+      // select (asserted after the founding below).
+      assert.equal(
+        await foundBtn.getAttribute("title"),
+        FOUND_NO_WAGON_TITLE,
+        "nothing selected: the title names the requirement",
+      );
+      assert.equal(
+        await foundBtn.isDisabled(),
+        false,
+        "nothing selected: the button is live so a click can explain itself",
+      );
+      await foundBtn.click();
+      await wait(600);
+      const notice = page.locator("#toast-container [role='alert']").filter({ hasText: FOUND_NO_WAGON_TITLE });
+      assert.equal(
+        await notice.count(),
+        1,
+        "a click with no wagon selected answers with the requirement sentence, not silence",
+      );
+      assert.deepEqual(
+        Object.values((await clientState(page)).settlements),
+        [],
+        "…and the refused click planted nothing",
+      );
+      await page.evaluate(() => document.getElementById("toast-container")?.remove());
 
       // (C) A MAP CLICK CAN NEVER FOUND ANYTHING. The wagon is selected by a
       // real click on its own hex and nothing is planted; there is no armed
@@ -344,6 +377,11 @@ async function main(): Promise<void> {
       assert.equal(await lastClickReason(page), "select", "clicking the wagon's hex SELECTS it -- a map click is never a founding");
       assert.equal(await selectedHeroId(page), WAGON_ID, "the covered wagon is the selected entity");
       assert.equal(await foundBtn.isDisabled(), false, "the button goes live with the seat's own wagon selected");
+      assert.equal(
+        await foundBtn.getAttribute("title"),
+        FOUND_TITLE,
+        "…and its title describes the action again, not the requirement it just satisfied",
+      );
       assert.deepEqual(
         Object.values((await clientState(page)).settlements),
         [],

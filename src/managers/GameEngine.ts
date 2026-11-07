@@ -27,7 +27,7 @@ import { shouldDriveAi } from "../io/serverDrivenGames";
 import { isUnchartedGame } from "../io/unchartedGames";
 import { isSettlersGame } from "../io/gameModes";
 import { foundSettlementRefusalToast, districtEntryRefusalToast } from "@screens/adventure/clickIntent";
-import { isCoveredWagonId, type HeroId } from "@heroes/contracts";
+import { isCoveredWagonId, coveredWagonIdFor, type HeroId } from "@heroes/contracts";
 import { attachCommandFailureToasts, showToast } from "@screens/shared/toast";
 import { attachMpPresenceHint } from "@screens/shared/mpPresenceHint";
 import { attachAiThinkingHint } from "@screens/shared/aiThinkingHint";
@@ -390,16 +390,32 @@ export class GameEngine {
     const gs = this.state.getState();
     const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;
     if (!gs || gs.phase.kind !== "PLAYER_TURN" || gs.activePlayerId !== localId) return false;
-    // Settlers mode: the button IS the founding action (one gesture, in place),
-    // so it is live exactly when that action can run -- the seat's own covered
-    // wagon selected. A converted founder is `p<seat>-hero`, which can never
-    // found again, so the button goes quiet the moment its town exists instead
-    // of offering an action the rule refuses.
+    // Settlers mode: the button IS the founding action (one gesture, in
+    // place). It stays LIVE while the seat still has the covered wagon that
+    // could be selected -- clicking it with no wagon selected reaches
+    // openFoundFlow's own sentence ("Select one of your covered wagons
+    // first") instead of a dead control that explains nothing (ledger #7).
+    // It goes quiet only once the wagon HAS become the town: there is then no
+    // wagon left to found with, so `openFoundFlow` would have nothing to say.
     if (isSettlersGame(this.session.getActiveGameName())) {
-      return this.selectedWagonId(gs) != null;
+      return this.unconvertedWagonId(gs) != null;
     }
     const selectedId = gs.selectedHeroId;
     return selectedId != null && gs.heroes[selectedId] != null;
+  }
+
+  /**
+   * The seat's covered wagon while it is still a wagon (GameEngine.canOpenCharterFlow's
+   * subject test): the seat's own wagon id is `p<seat>-wagon`, and founding
+   * renames that entity to `p<seat>-hero`, so its presence in `state.heroes`
+   * IS "this seat can still found". Read through the same `coveredWagonIdFor`
+   * convention the engine and the server use rather than re-spelling the
+   * suffix here.
+   */
+  private unconvertedWagonId(gs: import("../state/gameState").GameState): string | null {
+    const localId = getInMemoryLocalPlayerId(this.session.getActiveGameName() ?? "") ?? 0;
+    const wagonId = coveredWagonIdFor(localId);
+    return gs.heroes[wagonId] != null ? wagonId : null;
   }
 
   private openCharterRequirements(): void {
@@ -466,9 +482,17 @@ export class GameEngine {
    */
   private settleButtonCopy(): { label: string; title: string } | null {
     if (!isSettlersGame(this.session.getActiveGameName())) return null;
+    const gs = this.state.getState();
+    const wagonSelected = gs != null && this.selectedWagonId(gs) != null;
     return {
       label: "⛺ Found Settlement",
-      title: "Plant your covered wagon's settlement where it stands (one per wagon)",
+      // Ledger #7: the requirement the click would refuse names itself here as
+      // well as in openFoundFlow's toast -- the button is live (so the click
+      // explains) and the sentence is on the control for anyone who hovers
+      // first. With a wagon selected the title describes the action again.
+      title: wagonSelected
+        ? "Plant your covered wagon's settlement where it stands (one per wagon)"
+        : "Select one of your covered wagons first",
     };
   }
 
