@@ -12,7 +12,17 @@ the version has not already been bumped in that changeset.
 
 ## [0.53.16] - 2026-11-07
 
-refactor(debug): every __gameDebug readout is a call, so the surface has one shape
+the colliding seat factions get their own unit art — wave 1: the ashen grave hound and the crown warhound
+
+The faction differentiation card measured units of DIFFERENT factions shipping byte-identical sprites — 12 duplicate groups in the arena idle set, 13 in the icons, three of the six seat-faction pairs colliding — so the Ashen Court's undead hound was literally the Crownlands' living dog. This lands the FIRST of those 25 groups; the other 23 are listed as one card each in the audit.
+
+- The four replaced assets: `src/resources/units/arena/{grave_hound,warhound}-idle.png` (one file, sha256 `c79a9bc143f2a053…`, now `5acafdd107c61eaa…` and `400995e719afd321…`) and `src/resources/units/icons/{grave_hound,warhound}.png` (one file, `5b39d394caaa6055…`, now `4854d78cd14c3802…` and `411e85a84ae61b4c…`).
+- Three to four candidates per unit per surface from different image models (`google/gemini-2.5-flash-image`, `google/gemini-3-pro-image`, `google/gemini-3.1-flash-image`, `google/gemini-nano-banana-2.1`), each with a shipped sprite attached as the style reference; all four picks are `gemini-3-pro-image` outputs, the model the sprite skill predicts resolves more new detail where flash flattens it. OpenAI's image models 502 on this date (`Complexity 'none' is not supported for this image model`; `gpt-image-1` retired).
+- `design/arena-unit-sprites/collision-cut.mjs` is the committed cut: a border flood fill over the model's fake-transparency background (one uniform tone or a two-tone checkerboard), a tight halo, detached floaters dropped by connected component, a crop to the alpha bbox, a smoothed draw into 128×128 — the wave's own `downscale-arena.mjs` convention — and the 2px edge ring zeroed.
+- Cut to the iso footprint: the base sits on the canvas' LAST row, which is the hex's south vertex for the bottom-anchored `unit.<id>.<pose>` descriptor, with a base band of 0.17 and 0.13 against the widest row (the shipped hound it replaces measures 0.17) and a background-clean ring. The other 49 arena idle sprites still float above their hex on 2–19 rows of transparent bottom pad; normalising them is follow-up art work.
+- `test/data/factionCombatUnitDifferentiation.test.ts` goes from 9 tests to 13: the duplicate groups are pinned as a LEDGER (the measured set must equal the declared list, so a row can only be deleted, and two units shipping one file's bytes again fails with both asset paths named), plus the pair's own distinctness and the footprint contract. The new PNG read is a local 8-bit decoder, not an untyped `pngjs` import, so the type gate stays at its baseline.
+- Verified: the extended suite 13/13; `tsc` and `test:types` clean (302 known test-tree errors, unchanged); `test:unit` 3015/3015; `lint:deps`, `docs:check` and `build` green; `test:visual` 13/13 scenes at 0.000% mismatch — the arena scenes render unit count badges rather than sprites, so no baseline moves.
+- `docs/sprite-pipelines.md` §4.4 and `docs/asset-provenance.md` record the wave; per-candidate verdicts, prompt and reference hashes, and the remaining groups as one card each are in `analysis/2026-11-07-give-the-colliding-seat-factions-their-own-unit-art.md` and `design/arena-unit-sprites/collision-fix/MANIFEST.md`. No game code changed, so patch.
 
 ## [0.53.15] - 2026-11-07
 
