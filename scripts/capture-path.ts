@@ -47,7 +47,7 @@ async function main() {
     await sleep(250);
     await page.mouse.click(screen.x, screen.y);
     await sleep(250);
-    const lastClick = await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.lastClick);
+    const lastClick = await page.evaluate(() => (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.lastClick());
     console.log('tried', t.q, t.r, 'lastClick', lastClick);
     if (lastClick?.moved) {
       dest = t;

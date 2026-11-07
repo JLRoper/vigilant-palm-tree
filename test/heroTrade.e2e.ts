@@ -310,7 +310,7 @@ async function selectedHeroIdOf(page: Page): Promise<string | null> {
 
 async function lastClickReason(page: Page): Promise<string | undefined> {
   return page.evaluate(() => {
-    const c = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.lastClick as
+    const c = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.lastClick() as
       | { reason?: string }
       | null;
     return c?.reason;

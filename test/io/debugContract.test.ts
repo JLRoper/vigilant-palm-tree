@@ -169,6 +169,8 @@ test("member types match the contract", () => {
     "getHeroes",
     "getSettlements",
     "cityGrid",
+    "hover",
+    "lastClick",
     "isPassable",
     "getMoveDurationMs",
   ];
@@ -176,9 +178,12 @@ test("member types match the contract", () => {
     assert.equal(typeof (api as unknown as Record<string, unknown>)[key], "function", `${key} must be a function`);
   }
   assert.equal(typeof api.screenFor, "function");
-  assert.equal(typeof api.hover, "object");
-  assert.equal(api.hover, null);
-  assert.deepEqual(api.lastClick, { q: 5, r: 6, moved: true });
+  // Ledger #20: the pointer readouts are calls now, like every other readout on
+  // this surface -- a driver never has to know which spelling a member uses.
+  assert.equal(typeof api.hover, "function");
+  assert.equal(api.hover(), null);
+  assert.equal(typeof api.lastClick, "function");
+  assert.deepEqual(api.lastClick(), { q: 5, r: 6, moved: true });
   assert.deepEqual(api.phase, fakeState.phase);
   assert.equal(api.round, 3);
   assert.equal(api.activeGameId, 7);

@@ -137,8 +137,8 @@ export interface GameDebugApi {
    * geometry used to have to be re-implemented from `src/core/cityGrid.ts`).
    */
   cityGrid(): CityGridDebug | null;
-  readonly hover: DebugPointerInfo | null;
-  readonly lastClick: DebugPointerInfo | null;
+  readonly hover: () => DebugPointerInfo | null;
+  readonly lastClick: () => DebugPointerInfo | null;
   readonly phase: GameState["phase"];
   readonly round: GameState["round"];
   readonly activeGameId: number | null;
@@ -300,8 +300,13 @@ export function attachDebugApi(engine: AttachDebugApiEngine): void {
 
     cityGrid: () => engine.getCityGrid?.() ?? null,
 
-    get hover() { return engine.view.view?.hover ?? null; },
-    get lastClick() { return engine.view.view?.lastClickDebug ?? null; },
+    // The pointer readouts are CALLS, like `getState`/`getHeroes` above
+    // (playthrough ledger #20): they were getters while every other readout on
+    // this surface is a function, so a driver had to know which spelling each
+    // member used. Both are live per-frame state, so reading them through a
+    // call also makes it plain that the value is taken when you ask for it.
+    hover: () => engine.view.view?.hover ?? null,
+    lastClick: () => engine.view.view?.lastClickDebug ?? null,
     get phase() { return engine.state.getState().phase; },
     get round() { return engine.state.getState().round; },
     get activeGameId() { return engine.session.getActiveGameId(); },

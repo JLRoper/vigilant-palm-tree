@@ -211,7 +211,7 @@ function clientState(page: Page): Promise<ClientState> {
 
 function lastClickReason(page: Page): Promise<string | undefined> {
   return page.evaluate(() => {
-    const c = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.lastClick as { reason?: string } | null;
+    const c = (window as unknown as { __gameDebug: GameDebugApi }).__gameDebug.lastClick() as { reason?: string } | null;
     return c?.reason;
   });
 }
