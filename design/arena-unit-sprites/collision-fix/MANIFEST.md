@@ -430,3 +430,166 @@ Validation commands:
 Raw output of the named OpenRouter-hosted models. No per-asset licence or
 attribution restriction was supplied with the response; training-data provenance
 is not exposed. Nothing was copied from third-party art.
+
+## Wave 3 — the verdant ursine guardian and the ironmark war boar (the unit-sprite track)
+
+(Numbering note: the section above is the building-surface track's wave 3 — a
+different audit, `analysis/2026-11-07-faction-building-differentiation.md`, on the
+building sprite set. The two tracks number independently; both landed on the same
+day.)
+
+Per-wave manifest for the four assets landed by
+`analysis/2026-11-07-collision-art-wave-3-the-ursine-guardian-and-the-war-boar.md`:
+the `ursine_guardian = warbeast = war_boar` triple on BOTH surfaces — the wave-1
+audit's REMAINING row R4 — closed with four PNGs.
+
+The two units re-authored are the placeholder COPIERS of that cluster; the
+original keeps its art (`roster-parity-placeholder-art.md`): ursine_guardian icon
+and arena idle ← warbeast, war_boar icon and arena idle ← warbeast. Two of the
+three members are rewritten, which is the set rule's "all but one".
+
+### Final assets
+
+| asset path | family key | sha256 | dimensions |
+|---|---|---|---|
+| `src/resources/units/arena/ursine_guardian-idle.png` | `unit.ursine_guardian.idle` (glob) | `42405fb5ce784a62e17650a1e2a6dada74cdac7394b8cf6b59eb4433475f9623` | 128×128 RGBA |
+| `src/resources/units/arena/war_boar-idle.png` | `unit.war_boar.idle` (glob) | `cd3f6ecef0abce31fb17320882dd2185ce502f62672ab7c138516dd2f5661943` | 128×128 RGBA |
+| `src/resources/units/icons/ursine_guardian.png` | `unitImages.ts` KNOWN map | `e09a9deccc0aade5c781e2f97b28a01536ccd321f6e97ead91cbb26c3a515242` | 128×128 RGBA |
+| `src/resources/units/icons/war_boar.png` | `unitImages.ts` KNOWN map | `6fadb84f2a5c3224489bd0b5dfe52a3babb0749dd6b066774ac2347b8fd8bdf4` | 128×128 RGBA |
+
+Replaced (the placeholder copies the 2026-10-22 roster expansion shipped), all
+still on disk unchanged after the copy:
+
+| replaced path | sha256 (before) | it was a copy of |
+|---|---|---|
+| `src/resources/units/arena/ursine_guardian-idle.png` | `553d8e6f3c0f5fc93e061f7d4d1a00f54902de63de454131ba68aeffd221d9cf` | `arena/warbeast-idle.png` (identical) |
+| `src/resources/units/arena/war_boar-idle.png` | `553d8e6f3c0f5fc93e061f7d4d1a00f54902de63de454131ba68aeffd221d9cf` | `arena/warbeast-idle.png` (identical) |
+| `src/resources/units/icons/ursine_guardian.png` | `8321dcdf8125d90789a085cdbba52265158cfd0578c6db57ebb713063c25bf70` | `icons/warbeast.png` (identical) |
+| `src/resources/units/icons/war_boar.png` | `8321dcdf8125d90789a085cdbba52265158cfd0578c6db57ebb713063c25bf70` | `icons/warbeast.png` (identical) |
+
+The original is therefore the before-image: `arena/warbeast-idle.png`
+`553d8e6f…`, `icons/warbeast.png` `8321dcdf…`, both confirmed unchanged after the
+copy. The `warbeast` art is itself a bear (a brown-grey bear with a wooden back
+plate and a yellow flower garland), which is why the re-authored ursine guardian
+is pushed to a deep moss-green palette and an oak-leaf mantle — see the report's
+§5 self-critique.
+
+### Generation
+
+- Date: 2026-11-07.
+- Provider: OpenRouter (`POST /api/v1/chat/completions`, `modalities: ["image","text"]`).
+- Models: `google/gemini-2.5-flash-image`, `google/gemini-3-pro-image`,
+  `google/gemini-3.1-flash-image` (and `google/gemini-nano-banana-2.1`, whose
+  output is JPEG and was not used — the same fourth model waves 1 and 2 probed).
+  Three picks are `google/gemini-3.1-flash-image`; the **war_boar icon pick is
+  `google/gemini-3-pro-image`**. Unlike waves 1 and 2, the pro model did NOT win
+  the arena idle surfaces: its ursine idle output left a white background block
+  the flood fill could not reach, and its war_boar idle carried a detached ember
+  puff (a second connected component). Per-candidate verdicts are in the report's
+  §3. Request/job IDs and seeds are **not exposed** by the API.
+- Not usable on this date: no OpenAI id was probed this wave (waves 1 and 2
+  recorded `openai/gpt-5.4-image-2` / `gpt-5-image-mini` returning HTTP 502
+  `Complexity 'none' is not supported for this image model`, and
+  `openai/gpt-5-image` 502ing on a retired `gpt-image-1`).
+
+### Prompts
+
+Committed, one per unit per surface; the exact text sent, no placeholders.
+Both hashes are given because `core.autocrlf=true` makes the on-disk sha256
+line-ending dependent: the sha256 is of the file as written (and as such is the
+committed blob), the git blob hash is what the repository holds either way.
+
+| prompt file | sha256 (as written) | git blob | used for |
+|---|---|---|---|
+| `design/arena-unit-sprites/prompts/collision-ursine_guardian-idle.txt` | `b443aa3e2b681758c4bc743f81bb55b78ceaf58bae02427b1b252089cca56eca` | `be71a636badba344f453dc72f253223a5cf90109` | ursine_guardian idle (all candidates) |
+| `design/arena-unit-sprites/prompts/collision-ursine_guardian-icon.txt` | `b64429473aba43ed062e04ae284cf843b7f503723f4cca9d5f69a12d6388496c` | `61420091010a82d41123b569822832b7d7b0d28f` | ursine_guardian icon |
+| `design/arena-unit-sprites/prompts/collision-war_boar-idle.txt` | `2943e9ded119c778ae86c0c5b681a267e8de3789be08b580084e2daeba7c6f3c` | `3e7ffbc65e63cf40463b83c85c91a8329db76392` | war_boar idle |
+| `design/arena-unit-sprites/prompts/collision-war_boar-icon.txt` | `7214d6547eacba40a7c9326727913f08521049d340b53e375f166d399e265c97` | `4c4df3770d97286f671de3fdf631c2762532edda` | war_boar icon |
+
+Each prompt names its references positionally ("the FIRST attached image", "the
+SECOND attached image") because two are attached; see below.
+
+### Reference images (the model received these)
+
+| asset | reference (as it was at generation time) | sha256 | role |
+|---|---|---|---|
+| ursine_guardian idle | FIRST `src/resources/units/arena/ursine_guardian-idle.png` (the placeholder being replaced), SECOND `src/resources/units/arena/forest_scout-idle.png` | `553d8e6f3c0f5fc93e061f7d4d1a00f54902de63de454131ba68aeffd221d9cf`, `b1525749c0d16d9efc9f43abbfc51e5ffd740e06645c01eaf63cdd45bc802bb0` | pixel size / outline weight / canvas framing, then Verdant Wild palette and rendering (NOT the subject) |
+| ursine_guardian icon | FIRST `src/resources/units/icons/ursine_guardian.png` (the placeholder being replaced), SECOND `src/resources/units/icons/forest_scout.png` | `8321dcdf8125d90789a085cdbba52265158cfd0578c6db57ebb713063c25bf70`, `e264ed9ebfad90b9b59207741f2061bf55e174d41aefc0b4b7c42a57c6bfe378` | bust framing, then Verdant icon style |
+| war_boar idle | FIRST `src/resources/units/arena/war_boar-idle.png` (the placeholder being replaced), SECOND `src/resources/units/arena/shield_bearer-idle.png` | `553d8e6f3c0f5fc93e061f7d4d1a00f54902de63de454131ba68aeffd221d9cf`, `d82f7bdc432962a3d2b8be4a9ce9a40ba042641c153187f08f13712b9d628711` | pixel size / outline weight / canvas framing, then Ironmark palette and rendering |
+| war_boar icon | FIRST `src/resources/units/icons/war_boar.png` (the placeholder being replaced), SECOND `src/resources/units/icons/shield_bearer.png` | `8321dcdf8125d90789a085cdbba52265158cfd0578c6db57ebb713063c25bf70`, `5534c0994244fb6a207a6a6a7338216201a786e1a6bfd7694c7ce05966c40f9b` | bust framing, then Ironmark icon style |
+
+The second reference in each pair is a same-faction unit whose own art is **not**
+a placeholder (`forest_scout`, `shield_bearer`), so it carries the faction's real
+palette and pixel-art rendering rather than another unit's copied bytes.
+
+### Source masters
+
+The raw model outputs (1024²) are **not committed**, per the same convention waves
+1 and 2 followed: they were written to a session scratch directory
+(`%LOCALAPPDATA%/Temp/wag/d808a677/raw`), and
+`design/arena-unit-sprites/*-1024/` is gitignored. Reproducibility rests on the
+committed prompt + model id + reference above, not on the master. No model
+returned usable transparency: candidate backgrounds this wave were black
+(`ursine_guardian-idle-A`, `ursine_guardian-icon-A`, `war_boar-icon-A`), a
+grey/white checkerboard, or flat white — all handled by the helper's border-tone
+flood fill. `google/gemini-nano-banana-2.1` returned JFIF/JPEG rather than PNG on
+all four surfaces and its output was discarded.
+
+### Post-processing
+
+The wave-1 helper, unchanged (no second pipeline):
+
+```
+node design/arena-unit-sprites/collision-cut.mjs <raw.png> <out.png> idle|icon
+```
+
+- `design/arena-unit-sprites/collision-cut.mjs` — git blob
+  `90a062f13223e4d46f3a6497cdde2bca2abd696e` (== `HEAD`, unmodified by this
+  change); sha256 on disk in this checkout
+  `4d6dc46d66e7fb1aff1b07145adaddc8212190c65d5082cfe5f151e21b5b6b67`.
+- Run under Node v24.18.0 with pngjs 7.0.0 and Playwright 1.61.1 (bundled
+  Chromium); enabled devDependencies, no install performed by this wave.
+- **Provenance note (carried, not re-litigated).** Wave 1's section above records
+  sha256 `6073599b1a1a673907292f5a00656bba16d88834c27501e9ae8132fa91bbbc07` for
+  this same path; wave 2 recorded `4d6dc46d…` and the git blob. This wave
+  re-measured the file it actually has: git blob `90a062f1…` (unchanged since
+  wave 1 committed it) and sha256 `4d6dc46d…` — the same pair wave 2 recorded, so
+  wave 1's `6073599b…` is the outlier (most likely a line-ending difference at
+  hash time, `core.autocrlf=true` here). The helper's bytes are the ones measured
+  here, not wave 1's recorded helper hash.
+
+### Acceptance
+
+Measured by the helper's own report, then asserted by
+`test/data/factionCombatUnitDifferentiation.test.ts`:
+
+| check | ursine_guardian idle | war_boar idle |
+|---|---|---|
+| dimensions | 128×128 | 128×128 |
+| transparent rows under the feet | **0** | **0** |
+| opaque content rows | 35–127 | 34–127 |
+| content height | 93 / 128 (73%) | 94 / 128 (73%) |
+| x extent | 4–123, centre 63.5 | 6–122, centre 64.0 |
+| widest row | 115 | 117 |
+| base band / widest row | 25/115 = **0.22** | 36/117 = **0.31** |
+| opaque pixels in the 2px top/left/right ring | **0** | **0** |
+
+Icons: `ursine_guardian` drawn 120×119 at (4,4), content rows 4–123, x 10–118,
+centre 64.0, widest 109, ring clear; `war_boar` drawn 120×119 at (4,4), content
+rows 4–123, x 9–118, centre 63.5, widest 110, ring clear.
+
+The base-band ceiling in the footprint test is per authored asset: 0.50 for the
+quadruped waves (wave 1's hounds measure 0.17/0.13 and this wave's bear and boar
+0.22/0.31, all standing on four thin limbs), and 0.85 for wave 2's robed pair
+whose hem IS the stance. See the report's §4.
+
+Validation commands:
+
+- `npx tsx --env-file=.env.test --test --test-concurrency=1 test/data/factionCombatUnitDifferentiation.test.ts` → **15/15 green** (4 red before the art landed; the red transcript is in the report's §5).
+- `npm run build`, `npm run lint:deps`, `npm run test:types`, `npm run docs:check`, `npm run test:unit` (3031/3031), `npm run test:visual` (13/13 scenes), and the repo's own gate `npm run test:all` (**`run-test OK` — 18 passed, 0 failed**, then `test:unit` 3041/3041) → green; the full table is in the report's §7.
+
+### Attribution / licence
+
+Raw output of the named OpenRouter-hosted models. No per-asset licence or
+attribution restriction was supplied with the response; training-data provenance
+is not exposed. Nothing was copied from third-party art.
