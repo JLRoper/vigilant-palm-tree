@@ -7,6 +7,7 @@ import { openConfirmDialog } from "@screens/shared/confirmDialog";
 import { openLoadGameModal, type LoadGameHandler } from "./loadGameModal";
 import { openHotkeysModal, attachHotkeysShortcut } from "./hotkeysModal";
 import { showToast } from "./toast";
+import { stampPlainLabel } from "./plainLabel";
 import { makeStatPill } from "./statPill";
 import { APP_VERSION, BUILD_TIME, BUILD_COMMIT, formatBuildTime } from "../../core/version";
 
@@ -356,6 +357,7 @@ export class Toolbar {
     this.charterBtnLabel = document.createElement("span");
     this.charterBtnLabel.textContent = CHARTER_BUTTON_LABEL;
     this.charterBtn.appendChild(this.charterBtnLabel);
+    stampPlainLabel(this.charterBtn, CHARTER_BUTTON_LABEL);
     this.charterBtn.appendChild(makeKbdHint("C"));
     this.charterBtn.addEventListener("click", () => {
       if (this.busy) return;
@@ -370,6 +372,8 @@ export class Toolbar {
     const gear = document.createElement("button");
     gear.textContent = "⚙";
     gear.title = "Menu";
+    // The whole visible text is the icon, so the plain name is stated.
+    stampPlainLabel(gear, "⚙", "Menu");
     Object.assign(gear.style, {
       width: "30px",
       height: "30px",
@@ -423,9 +427,10 @@ export class Toolbar {
       if (e.key === "Escape") closeDropdown();
     });
 
-    const makeMenuItem = (label: string): HTMLButtonElement => {
+    const makeMenuItem = (label: string, plain?: string): HTMLButtonElement => {
       const item = document.createElement("button");
       item.textContent = label;
+      stampPlainLabel(item, label, plain);
       Object.assign(item.style, {
         display: "block",
         width: "100%",
@@ -570,7 +575,11 @@ export class Toolbar {
       // copy byte-identical.
       const copy = this.opts.callbacks.charterButtonCopy?.() ?? null;
       if (this.charterBtnLabel) {
-        this.charterBtnLabel.textContent = copy?.label ?? CHARTER_BUTTON_LABEL;
+        const labelText = copy?.label ?? CHARTER_BUTTON_LABEL;
+        this.charterBtnLabel.textContent = labelText;
+        // The button renames itself per mode (charter -> found), so its plain
+        // name is re-stamped with it (ledger #21).
+        stampPlainLabel(this.charterBtn, labelText);
       }
       this.charterBtn.title = !hasGameState
         ? "No active game"
@@ -624,9 +633,14 @@ export class Toolbar {
     this.refresh();
   }
 
-  private makeButton(label: string, variant: ButtonVariant): HTMLButtonElement {
+  private makeButton(label: string, variant: ButtonVariant, plain?: string): HTMLButtonElement {
     const b = document.createElement("button");
     b.textContent = label;
+    // Ledger #21: the visible label wears an emoji prefix (`▶ End Turn`), so an
+    // exact `textContent.trim() === "End Turn"` never matches. The plain name
+    // rides `data-label` for a driver to match exactly; the visible text is
+    // untouched.
+    stampPlainLabel(b, label, plain);
     styleHeaderButton(b, variant);
     return b;
   }

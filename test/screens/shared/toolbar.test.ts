@@ -292,3 +292,38 @@ test("ledger #13: a press that is not the seat's turn answers too", () => {
   assert.equal(seen[0].textContent, "It is not your turn yet");
   assert.equal(ended, 0, "…and no turn was ended");
 });
+
+// ── Ledger #21: an exact, emoji-free handle on every command control ────────
+
+test("ledger #21: toolbar controls carry an emoji-free data-label an exact selector can match", () => {
+  const parent = new MockElement("div");
+  const settlersCopy: ToolbarCallbacks = {
+    ...callbacks,
+    canStartCharter: () => true,
+    charterButtonCopy: () => ({ label: "\u26fa Found Settlement", title: "Plant it where it stands" }),
+  };
+  new Toolbar({ parent: parent as unknown as HTMLElement, state, callbacks: settlersCopy });
+
+  // The visible words keep their icon; the exact match is the plain name.
+  const endTurn = findButton(parent, "▶ End Turn");
+  assert.ok(endTurn);
+  assert.equal(endTurn.getAttribute("data-label"), "End Turn");
+  assert.notEqual(endTurn.textContent.trim(), "End Turn", "…because the visible text is NOT exactly 'End Turn'");
+
+  // An exact selector (what the ledger's driver wanted) lands.
+  const found = parent.querySelector('[data-label="Found Settlement"]');
+  assert.ok(found, "an exact data-label selector must find the settlers copy of the charter button");
+  assert.equal(found.tagName, "BUTTON", "…and it is the control, not a label span");
+  assert.equal(found.getAttribute("data-label"), "Found Settlement");
+  // The visible words keep their icon: the mode copy is untouched. (The label
+  // lives in its own span, so read it there rather than off the button node.)
+  assert.equal(found.children[0].textContent, "\u26fa Found Settlement");
+
+  // The classic default, with no mode copy at all, is stamped the same way.
+  const classicParent = new MockElement("div");
+  new Toolbar({ parent: classicParent as unknown as HTMLElement, state, callbacks });
+  assert.equal(
+    classicParent.querySelector('[data-label="Charter Settlement"]')?.children[0].textContent,
+    "\u2692 Charter Settlement",
+  );
+});
