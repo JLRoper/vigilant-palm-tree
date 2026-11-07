@@ -130,8 +130,20 @@ function findButton(root: MockElement, label: string): MockElement | null {
   return null;
 }
 
+/** Every rendered toast (role=alert), in document order. */
+function toasts(root: MockElement): MockElement[] {
+  const out: MockElement[] = [];
+  const walk = (el: MockElement): void => {
+    if (el.getAttribute("role") === "alert") out.push(el);
+    for (const child of el.children) walk(child);
+  };
+  walk(root);
+  return out;
+}
+
 const savedDocument = (globalThis as { document?: unknown }).document;
 const savedWindow = (globalThis as { window?: unknown }).window;
+const savedDivClass = (globalThis as { HTMLDivElement?: unknown }).HTMLDivElement;
 
 function installDom(): { root: MockElement } {
   const root = new MockElement("body");
@@ -140,6 +152,9 @@ function installDom(): { root: MockElement } {
       return new MockElement(tag);
     },
     body: root,
+    // showToast's container lookup: the mock has no id index, so every toast
+    // opens its own container -- which is what the assertions below walk.
+    getElementById: () => null,
     addEventListener: () => {},
     removeEventListener: () => {},
   };
@@ -148,7 +163,14 @@ function installDom(): { root: MockElement } {
     innerHeight: 720,
     addEventListener: () => {},
     removeEventListener: () => {},
+    // showToast schedules its auto-dismiss.
+    setTimeout: () => 0,
+    clearTimeout: () => {},
   };
+  // showToast's container guard is `existing instanceof HTMLDivElement`; a bare
+  // node:test global has no DOM classes at all, so the `instanceof` itself
+  // throws. Nothing in this file is a real div.
+  (globalThis as { HTMLDivElement?: unknown }).HTMLDivElement = class {};
   return { root };
 }
 
@@ -157,6 +179,8 @@ function restoreDom(): void {
   else (globalThis as { document: unknown }).document = savedDocument;
   if (savedWindow === undefined) delete (globalThis as { window?: unknown }).window;
   else (globalThis as { window: unknown }).window = savedWindow;
+  if (savedDivClass === undefined) delete (globalThis as { HTMLDivElement?: unknown }).HTMLDivElement;
+  else (globalThis as { HTMLDivElement?: unknown }).HTMLDivElement = savedDivClass;
 }
 
 const state: ToolbarState = {
@@ -213,4 +237,58 @@ test("gear click toggles the dropdown open/closed", () => {
   assert.equal(dropdown.style.display, "flex", "first gear click opens the dropdown");
   gear.dispatchEvent("click");
   assert.equal(dropdown.style.display, "none", "second gear click closes the dropdown");
+});
+
+// ── Ledger #13: a dropped End Turn press must say why it was dropped ────────
+//
+// Measured in the ledger's playthrough: `day` went 4 -> 13 across 17 clicks,
+// because a press during the in-flight turn was swallowed by a disabled button
+// (which fires no event at all) and the repeat press was swallowed too. These
+// two runs pin both halves of the new contract.
+
+test("ledger #13: a press while a turn is in flight answers instead of vanishing", () => {
+  const { root } = installDom();
+  const parent = new MockElement("div");
+  let ended = 0;
+  const tb = new Toolbar({
+    parent: parent as unknown as HTMLElement,
+    state,
+    callbacks: { ...callbacks, onEndTurn: async () => { ended += 1; } },
+  });
+  const btn = findButton(parent, "▶ End Turn");
+  assert.ok(btn, "the End Turn button must exist");
+  assert.equal(btn.disabled, false, "a loaded game leaves the button pressable");
+
+  // An in-flight turn is exactly what runAsync does around the request.
+  tb.setBusy(true);
+  assert.equal(btn.disabled, false, "busy must not disable it -- a disabled control swallows the press entirely");
+  assert.equal(btn.title, "Still ending the previous turn — one moment");
+
+  btn.dispatchEvent("click");
+  const seen = toasts(root);
+  assert.equal(seen.length, 1, "the dropped press produced exactly one notice");
+  assert.equal(seen[0].textContent, "Still ending the previous turn — one moment");
+  assert.equal(ended, 0, "…and it did not start a second turn");
+});
+
+test("ledger #13: a press that is not the seat's turn answers too", () => {
+  const { root } = installDom();
+  const parent = new MockElement("div");
+  let ended = 0;
+  const notMyTurn: ToolbarState = { ...state, canEndTurnNow: () => false };
+  new Toolbar({
+    parent: parent as unknown as HTMLElement,
+    state: notMyTurn,
+    callbacks: { ...callbacks, onEndTurn: async () => { ended += 1; } },
+  });
+  const btn = findButton(parent, "▶ End Turn");
+  assert.ok(btn, "the End Turn button must exist");
+  assert.equal(btn.disabled, false, "a loaded game keeps it pressable so the press can be explained");
+  assert.equal(btn.title, "It is not your turn yet");
+
+  btn.dispatchEvent("click");
+  const seen = toasts(root);
+  assert.equal(seen.length, 1, "one notice, not silence");
+  assert.equal(seen[0].textContent, "It is not your turn yet");
+  assert.equal(ended, 0, "…and no turn was ended");
 });
