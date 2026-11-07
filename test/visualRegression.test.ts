@@ -848,6 +848,73 @@ async function run(): Promise<void> {
     // reported instead (the settle-and-decompose report's district-map section).
     // The district sprite half of the subject is unmoved; every mismatching pixel
     // is the road layer.
+    //
+    // SETTLED 2026-11-07 (github/main 73b08df, 0.53.19; re-measured on the
+    // rebased tree, 0.53.22) -- the note above is right about the pixels and
+    // WRONG about the mover: it is TWO movers, not one, and the second one MASKS
+    // the first. The 1,455 px is now fully attributed by reverting ONLY one
+    // behaviour at a time on this tree, and the frame reproduces the suite's own
+    // number to the pixel (the 8 px toolbar glyph residual at
+    // [666,15 -> 1259,19] is the instrument, quoted apart):
+    //
+    //   state                                              px vs the baseline
+    //   HEAD (one cased leg)                               1,463 = 1,455 + 8
+    //   road stack reverted to pre-0.49.0 (one hairline)     446 =   438 + 8
+    //   engine staffing rule reverted (three cased legs)   2,426 (exact)
+    //   BOTH reverted (three hairline legs)                      0 (byte-identical)
+    //
+    // 2,426 is to the pixel the number d9e741a's own commit recorded for the road
+    // landing on its merge base, and 0 px with both reverted is the proof that
+    // the committed baseline is EXACTLY "pre-0.49.0 art + pre-0.51.1 client
+    // staffing": the two movers account for the whole surface with 0 px
+    // uncovered. The clusters, read against the legs they are:
+    //
+    //   1,017 px  [541,227 -> 604,310]  the ONE leg both frames draw (up, to the
+    //                                   first district at (9,6)): 0.49.0's cased
+    //                                   3.55-4.50 px band vs the baseline's
+    //                                   sub-pixel hairline. 0.49.0's mover.
+    //     171 px  [486,360 -> 524,367]  the LEFT leg (district (8,7)): in the
+    //                                   baseline, NOT DRAWN at HEAD. 0.51.1's.
+    //     253 px  [539,391 -> 572,445]  the DOWN-LEFT leg (district (8,8)): the
+    //                                   same. 0.51.1's.
+    //      14 px  [534,362 -> 537,365]  a band edge at the junction.
+    // 1,017 + 438 (171 + 253 + 14) = 1,455, uncovered 0.
+    //
+    // WHY THE LEGS ARE ABSENT, MEASURED ON A RUNNING SETTLEMENT (not read off
+    // the code): the fixture founds three districts on the passable hexes around
+    // its home tile, and the FIRST is placed while the settlement has no district
+    // at all, so it takes the bootstrap auto crew (`workers` absent -> 100% ->
+    // 20 tracks -> drawn). Districts 2 and 3 are placed into a settlement that
+    // already HAS one, and `freshPlacementWorkers` (the 0.43.0 workforce
+    // rebalance, f15a912) gives a fresh placement an explicit `workers: 0` -- and
+    // the client's own row agrees with the server's, which is what 0.51.1
+    // (8a0e09d) fixed. `districtWorkforcePercent` then reads 0.0%,
+    // `roadsForWorkforce(0)` is 0, and `roadNetwork.ts`'s
+    // `if (route.roads <= 0) continue;` skips the route: the district is still
+    // CONNECTED (it has a route to the settlement) but nothing is drawn.
+    //
+    // IT IS INTENDED, AND THE LEG COMES BACK WHEN THE DISTRICT IS STAFFED.
+    // docs/settlements.md states the rule three times ("0 workforce is no road at
+    // all"), so the absence is the documented workforce display rather than an
+    // accident. Staffing one district through the real AssignWorkers command (1
+    // worker on a 4-builder site = 25% = 5 tracks) takes the network from 1 drawn
+    // segment to 3 -- `settlementRoadNetwork` over the server's own settlement,
+    // before and after -- and the leg is visibly back on the map after the state
+    // commit. A classic L1 town's worker pool is exactly 1 (floor(500 /
+    // WORKFORCE_PER_POPULATION 300)), so of three districts a player can light
+    // exactly one at L1: the second AssignWorkers is refused `pool_exhausted`.
+    //
+    // DO NOT RE-CUT THIS BASELINE TO ABSORB THE MOVE, and do not "fix" the two
+    // readings the measurement rules out: pricing the hex off the DRAWN segments
+    // would remove a discount the player has today, and drawing a leg with no
+    // workforce would change a rule the docs state three times. Three follow-ups
+    // are REPORTED, unfixed, each with its own measurement, in
+    // analysis/2026-11-07-district-map-road-leg-attribution.md: (a) the engine and
+    // the renderer disagree about what a road is -- `roadNetworkTiles` reads
+    // ROUTES while the renderer draws SEGMENTS, so an unstaffed district's hex is
+    // priced at 0.75x terrain with no road on screen; (b) the docs promise a
+    // harbour's pier is "drawn in the same two-tone hairline as every land road",
+    // which a 0-workforce harbour route cannot keep; (c) the L1 pool of 1 above.
     await withPageRetry(context, "district-map", async (page) => {
       await dismissHomeAndCreateGame(page, `${GAME_NAME}-district-map`, SEED);
       await selectHero(page);
