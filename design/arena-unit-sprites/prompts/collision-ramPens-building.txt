@@ -1,0 +1,11 @@
+Isometric pixel art game asset for a medieval city-builder, matching the FIRST attached image exactly in style and framing: same chunky pixel size (large visible pixels — avoid fine-grained pixel noise), same 2:1 dimetric isometric projection with the lot shown as a diamond, same thick dark outlines around every shape, same square 1:1 canvas, and the same lot geometry — keep the FIRST image's lot diamond at the same width, at the same horizontal position, with its own front two edges as the sprite's lowest rows.
+
+The MATERIALS and PALETTE come from the SECOND attached image, which is the same faction's real art: cool blue-grey stone blocks with warm brass and gold trim, dark iron fittings, a small warm orange forge accent. Do not copy the FIRST image's warm brown wood-and-thatch palette.
+
+Subject: mountain ram pens for that stone-and-brass mountain faction — an oval enclosure of thick low blue-grey stone walls with a wide timber and brass-banded gate, inside it four or five shaggy mountain rams with curled horns standing on straw bedding beside a stone feeding trough and a hay bale; outside the gate a brass-bound water barrel, a small stack of cut stone blocks and a wooden bucket.
+
+Plot: a square lot shown as a diamond, topped with light sandy ground with darker speckles and a few tiny grass tufts. The building and its pens cover roughly half of the footprint.
+
+The lot's own front two edges are the LAST visible rows of the sprite: NO side wall, NO soil slab, NO plinth, NO pedestal and NO cast shadow below the lot's lower edges — those two sandy edges simply end the image.
+
+Single centered asset, nothing outside the plot, plain uniform solid light-gray background with absolutely no checkerboard pattern anywhere, clean pixel-art shading, no anti-aliasing halos, no checkerboard pattern anywhere on the canvas, no text, no watermark.
