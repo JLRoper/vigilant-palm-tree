@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.53.18] - 2026-11-07
+
+test(visual): re-cut the four settlement-panel baselines, measured by region; district-map reported as a moved subject
+
 ## [0.53.17] - 2026-11-07
 
 refactor(debug): every __gameDebug readout is a call, so the surface has one shape
