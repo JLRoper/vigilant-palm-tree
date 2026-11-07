@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.53.20] - 2026-11-07
+
+test(data): pin the faction building-set differences that hold, and report the building-art gap
+
 ## [0.53.19] - 2026-11-07
 
 the colliding seat factions get their own unit art — wave 2: the verdant druid and the ironmark hearth priest
