@@ -10,6 +10,8 @@ import {
   type DebugSettlementSnapshot,
 } from "../../src/io/debugCommands";
 import { axialToPixel } from "../../src/core/hex";
+import { cityGridDebug } from "../../src/screens/settlements/cityView/cityGridDebug";
+import { cityLayout, cellsInDrawOrder } from "../../src/core/cityGrid";
 
 const calls: Record<string, number> = {};
 const args: Record<string, unknown[]> = {};
@@ -99,7 +101,20 @@ const fakeEngine = {
   eventLog: null,
   consoleHandle: null,
   setConsoleHandle: () => {},
+  // Ledger #22: the city-view grid provider, mirroring CityView.gridDebug().
+  // `cityGridOpen` is flipped by the closed-view test below.
+  getCityGrid: () =>
+    cityGridDebug({
+      open: cityGridOpen,
+      settlementId: "s1",
+      size: 5,
+      viewportW: 1280,
+      viewportH: 800,
+      topInset: 40,
+    }),
 };
+
+let cityGridOpen = true;
 
 // attachDebugApi assigns to `window`, which does not exist under bare node:test.
 (globalThis as unknown as { window: unknown }).window = globalThis;
@@ -110,6 +125,7 @@ const EXPECTED_KEYS = [
   "activeGameId",
   "activeGameName",
   "captureSettlement",
+  "cityGrid",
   "console",
   "debugInjectCharter",
   "endTurn",
@@ -134,7 +150,7 @@ const EXPECTED_KEYS = [
   "teleportHero",
 ];
 
-test("the attached surface has exactly the documented 25 keys", () => {
+test("the attached surface has exactly the documented 26 keys", () => {
   assert.deepEqual(Object.keys(api).sort(), [...EXPECTED_KEYS].sort());
 });
 
@@ -152,6 +168,7 @@ test("member types match the contract", () => {
     "debugInjectCharter",
     "getHeroes",
     "getSettlements",
+    "cityGrid",
     "isPassable",
     "getMoveDurationMs",
   ];
@@ -197,6 +214,32 @@ test("snapshot getters map the engine's visual entities", () => {
 
   assert.equal(api.isPassable(0, 0), true);
   assert.equal(api.getMoveDurationMs(), 220);
+});
+
+test("ledger #22: cityGrid() hands a driver the view's own layout, and null while it is closed", () => {
+  const grid = api.cityGrid();
+  assert.ok(grid, "an open city view must report its grid");
+
+  // The layout IS the view's own call (`cityLayout(size, innerWidth,
+  // innerHeight, toolbarHeight())`), not a second solve, and the cell list is
+  // the paint order -- so a driver never re-derives the projection.
+  assert.deepEqual(grid!.layout, cityLayout(5, 1280, 800, 40));
+  assert.deepEqual(grid!.cells, cellsInDrawOrder(5));
+  assert.equal(grid!.settlementId, "s1");
+  assert.equal(grid!.size, 5);
+  assert.equal(grid!.viewport.width, 1280);
+  assert.equal(grid!.viewport.height, 800);
+  assert.equal(grid!.topInset, 40);
+
+  // A named cell maps to a screen point and back to itself: what a driver needs
+  // to click one cell rather than a guess.
+  const pt = grid!.cellToScreen(1, 2);
+  assert.deepEqual(grid!.screenToCell(pt.x, pt.y), { gx: 1, gy: 2 });
+  assert.equal(grid!.screenToCell(-5000, -5000), null, "off the grid is null, never a wrapped cell");
+
+  cityGridOpen = false;
+  assert.equal(api.cityGrid(), null, "a closed city view has no geometry to report");
+  cityGridOpen = true;
 });
 
 test("the events nested surface matches the contract", () => {

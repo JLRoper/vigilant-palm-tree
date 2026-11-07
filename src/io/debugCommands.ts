@@ -3,6 +3,7 @@ import { findPath } from "../map/pathfinding";
 import { axialToPixel } from "../core/hex";
 import type { EventLog, LogEntry, LogQuery, LogStats } from "../debug/eventLog";
 import type { DevConsoleHandle } from "../debug/devConsole";
+import type { CityGridDebug } from "@screens/settlements/cityView/cityGridDebug";
 import { settings, updateSettings, DEFAULT_SETTINGS, type GameSettings } from "../state/settings";
 import type { GameState } from "../state/gameState";
 
@@ -35,6 +36,12 @@ export interface AttachDebugApiEngine {
   eventLog?: EventLog | null;
   consoleHandle?: DevConsoleHandle | null;
   setConsoleHandle?: (handle: DevConsoleHandle | null) => void;
+  /**
+   * The live city-view grid geometry, or null when no city view is open
+   * (playthrough ledger #22). Optional so the contract test's fake engine and
+   * any catalog-less caller keep working; `cityGrid()` answers null without it.
+   */
+  getCityGrid?: () => CityGridDebug | null;
 }
 
 export interface DebugHeroSnapshot {
@@ -123,6 +130,13 @@ export interface GameDebugApi {
   ): boolean;
   getHeroes(): DebugHeroSnapshot[];
   getSettlements(): DebugSettlementSnapshot[];
+  /**
+   * The open city view's LIVE grid geometry — its layout, its cells in paint
+   * order, and the same cell<->screen conversions the view paints and picks
+   * with — or null while no city view is open (playthrough ledger #22: the
+   * geometry used to have to be re-implemented from `src/core/cityGrid.ts`).
+   */
+  cityGrid(): CityGridDebug | null;
   readonly hover: DebugPointerInfo | null;
   readonly lastClick: DebugPointerInfo | null;
   readonly phase: GameState["phase"];
@@ -283,6 +297,8 @@ export function attachDebugApi(engine: AttachDebugApiEngine): void {
       id: c.id, q: c.tile.q, r: c.tile.r, level: c.level, ownerId: c.ownerId,
       buildings: buildingSnapshots(c),
     })),
+
+    cityGrid: () => engine.getCityGrid?.() ?? null,
 
     get hover() { return engine.view.view?.hover ?? null; },
     get lastClick() { return engine.view.view?.lastClickDebug ?? null; },

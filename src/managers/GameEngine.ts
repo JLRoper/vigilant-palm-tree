@@ -265,6 +265,9 @@ export class GameEngine {
       eventLog: this.eventLog,
       consoleHandle: this.consoleHandle,
       setConsoleHandle: (handle: DevConsoleHandle | null) => { this.consoleHandle = handle; },
+      // The open city view's live grid geometry (ledger #22), so a probe asks
+      // for a city cell instead of re-deriving the projection.
+      getCityGrid: () => this.ui.getCityGridDebug(),
     });
   }
 
