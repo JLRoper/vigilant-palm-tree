@@ -1,0 +1,9 @@
+Pixel art portrait icon of a single fantasy battle unit, in a dramatic tabletop-miniature style: chunky readable pixels, rich saturated colors with strong three-tone shading ramps and bright rim highlights, bold dark outlines, high contrast that stays readable at small size, fully transparent background, square 1:1 canvas.
+
+Subject: an ASHEN COURT GRAVE HOUND — a skeletal undead hunting hound. A gaunt skull-like head with hollow eye sockets lit by a faint ember-orange glow, a long muzzle with bared fangs, ears rotted to tattered flaps, bare pale bone showing at the cheek and brow, tattered ash-grey and bog-green hide stretched over the shoulders, and a corroded black-iron spiked collar with small spikes at the throat. Palette is bone white, ash grey and bog green with ember-orange only in the eye sockets — NOT brown, NOT brindle, no living fur coat.
+
+This is a creature portrait, not a building — no walls, roofs, doors, towers, or architecture of any kind.
+
+Head-and-shoulders bust portrait facing slightly right, cropped at mid-chest, filling about 80% of the canvas height, centered, clear readable silhouette, no frame, no border, no background elements, no scenery, no ground shadow, no pedestal. Clean pixel-art shading, no anti-aliasing halos, no text, no watermark, no checkerboard pattern.
+
+The attached reference image defines ONLY the pixel-art rendering style (pixel size, shading ramp, outline weight) — NOT the subject. The output must be ONLY the grave hound bust described above.
