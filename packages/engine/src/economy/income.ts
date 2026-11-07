@@ -1,8 +1,9 @@
 import type { GameState, PlayerId, SettlementState } from "@heroes/contracts";
 import { buildingSettlementEffects } from "../buildingRegistry";
+import { produceSettlementResources } from "../settlement/produceResources";
 import { isDistrictBlockedByHero } from "../settlement/producers";
 import { effortFraction } from "../settlement/workforce";
-import { effectiveIncome } from "./consumption";
+import { applyMoraleDecay, effectiveIncome } from "./consumption";
 import { factionOutputScale, type FactionEconomySeat } from "./factionEconomy";
 
 /**
@@ -67,13 +68,17 @@ export function playerPopulation(state: GameState, playerId: PlayerId): number {
 }
 
 /**
- * The total gold a settlement actually receives per turn: the morale-scaled
- * population tax (via `effectiveIncome`) PLUS building goldPerTurn scaled by
- * each building's staffing effort. This mirrors what `applyEndOfTurn` pays —
- * `produceSettlementResources` credits building goldPerTurn scaled by effort
- * the same way, while `applyEffectiveIncome` credits the morale-scaled tax.
- * Unlike `settlementIncome` (gross, no morale), this function applies morale
- * scaling to the population-tax half only.
+ * The total gold a settlement pays per turn AT ITS OWN morale: the
+ * morale-scaled population tax (via `effectiveIncome`) PLUS building
+ * goldPerTurn scaled by each building's staffing effort. Unlike
+ * `settlementIncome` (gross, no morale), this applies morale scaling to the
+ * population-tax half only.
+ *
+ * Deliberately a pure function of the settlement: "what will the day tick
+ * actually pay THIS settlement" is `projectedSettlementIncome`, which runs the
+ * tick's own morale step first. Reading the tax at the current morale where the
+ * tick pays it after the step was ledger #9 (500 projected against 495
+ * credited); the callers that DISPLAY income go through the projection.
  */
 export function effectiveSettlementIncome(
   s: SettlementState,
@@ -97,15 +102,40 @@ export function effectiveSettlementIncome(
 }
 
 /**
- * Sum of `effectiveSettlementIncome` across all settlements owned by `playerId`.
- * This is the player-facing "Empire Income" figure: the gold their settlements
- * actually pay per turn (morale-scaled tax + building income), at their own
- * faction's economy modifier.
+ * The gold a settlement's next day tick will credit it, run through the
+ * payment pass's OWN steps in its own order (`turn/endTurn.ts`): produce
+ * first -- which refills the larder and the upkeep stock the morale step
+ * reads -- then the morale step, then the morale-scaled tax, plus the building
+ * gold that pass pays.
+ *
+ * The production half is not optional. The pass evaluates the shortfall on the
+ * POST-production settlement, so a projection that skipped it would charge a
+ * farm-fed settlement a decay the tick never applies: the same defect, mirrored.
+ * `state` supplies the seed, the hero positions and the seat faction the pass
+ * reads, so this is the pass's own arithmetic rather than a second rule.
+ */
+export function projectedSettlementIncome(state: GameState, s: SettlementState): number {
+  const seat = s.ownerId === null || s.ownerId === undefined ? undefined : state.players?.[s.ownerId];
+  const produced =
+    produceSettlementResources({ [s.id]: s }, state.castleSeed, state.heroes, state.players)[s.id] ?? s;
+  // The tick's own morale step, reused rather than re-derived: one rule, so the
+  // projection cannot drift from the payment.
+  return effectiveSettlementIncome(applyMoraleDecay(produced), state.heroes, seat);
+}
+
+/**
+ * Sum of `projectedSettlementIncome` across all settlements owned by
+ * `playerId`. This is the player-facing "Empire Income" figure: the gold their
+ * settlements will actually pay on the next day tick (morale-scaled tax +
+ * building income), at their own faction's economy modifier. Before, it read
+ * the tax at each settlement's CURRENT morale while the tick pays it after the
+ * morale step had run, so a decaying settlement was advertised above its credit
+ * (ledger #9: 500 projected against 495 credited).
  */
 export function playerEffectiveSettlementIncome(state: GameState, playerId: PlayerId): number {
   let total = 0;
   for (const s of Object.values(state.settlements)) {
-    if (s.ownerId === playerId) total += effectiveSettlementIncome(s, state.heroes, state.players?.[playerId]);
+    if (s.ownerId === playerId) total += projectedSettlementIncome(state, s);
   }
   return total;
 }

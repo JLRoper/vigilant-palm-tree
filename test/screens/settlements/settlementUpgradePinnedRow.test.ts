@@ -68,7 +68,7 @@ test("the settlement tier-upgrade control is on screen at 1258x566, not below th
       menu.show(settlement, state);
 
       const btn = Array.from(document.querySelectorAll("button"))
-        .find((b) => /^Upgrade to L/.test(b.textContent?.trim() ?? "")) as HTMLButtonElement | undefined;
+        .find((b) => /^Upgrade settlement to L/.test(b.textContent?.trim() ?? "")) as HTMLButtonElement | undefined;
       const body = document.querySelector("[data-panel-body]") as HTMLElement | null;
       if (!btn || !body) return null;
       // The finding's own reading: the body at the top, then where the control
@@ -103,7 +103,7 @@ test("the settlement tier-upgrade control is on screen at 1258x566, not below th
     );
     assert.equal(
       facts!.hit,
-      "BUTTON: Upgrade to L2",
+      "BUTTON: Upgrade settlement to L2",
       "a hit test at the control's centre must land on it, not on the map canvas",
     );
     assert.equal(

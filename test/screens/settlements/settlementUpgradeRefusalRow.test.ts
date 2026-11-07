@@ -69,7 +69,7 @@ test("the settlement tier-upgrade refusal line carries an amount for every resou
       menu.show(settlement, state);
 
       const upgradeBtn = () =>
-        Array.from(document.querySelectorAll("button")).find((b) => /^Upgrade to L/.test(b.textContent?.trim() ?? "")) as HTMLButtonElement | undefined;
+        Array.from(document.querySelectorAll("button")).find((b) => /^Upgrade settlement to L/.test(b.textContent?.trim() ?? "")) as HTMLButtonElement | undefined;
       const line = () =>
         Array.from(document.querySelectorAll("div,span"))
           .map((el) => (el.textContent ?? "").trim())

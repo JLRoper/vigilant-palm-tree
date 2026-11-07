@@ -19,8 +19,9 @@ import { warehouseCapMessage, warehouseResourceCapped } from "./warehouseCap";
 import { dailyRateTitle, foodBalanceTitle, formatDailyRate, populationCapTitle, resourceLabel, settlementDailyRates } from "./panelRates";
 import type { HorseVariant } from "../../state/settings";
 import { WAREHOUSE_RESOURCES, type WarehouseResource } from "@heroes/contracts";
-import { districtPopulationBonus, POP_BY_LEVEL, settlementPopulationCap, UPGRADE_POPULATION_GATE, effectiveSettlementIncome, settlementTreasuryCap } from "@heroes/engine";
+import { districtPopulationBonus, POP_BY_LEVEL, settlementPopulationCap, UPGRADE_POPULATION_GATE, projectedSettlementIncome, settlementTreasuryCap } from "@heroes/engine";
 import { workforceRowText } from "./workforceRowText";
+import { settlementUpgradeLabel } from "./upgradeLabels";
 import { pickHeroName } from "../../data/heroNames";
 import { HORSE_VARIANT_REGISTRY } from "@heroes/engine";
 
@@ -565,11 +566,7 @@ export class SettlementInfoMenu {
     // makes no progress, and this is the one surface that says so without the
     // player opening every building.
     this.workforceEl.textContent = workforceRowText(settlement);
-    this.incomeEl.textContent = `${effectiveSettlementIncome(
-      settlement,
-      state.heroes,
-      settlement.ownerId === null ? undefined : state.players?.[settlement.ownerId],
-    ).toLocaleString()}g`;
+    this.incomeEl.textContent = `${projectedSettlementIncome(state, settlement).toLocaleString()}g`;
     this.updateTreasuryRow(settlement, state);
     this.moraleEl.textContent = `${Math.round(settlement.morale ?? 100)}%${settlement.autoTrade ? " · auto" : ""}`;
 
@@ -671,7 +668,8 @@ export class SettlementInfoMenu {
           this.upgradeBtn.style.cursor = "not-allowed";
           this.upgradeBtn.disabled = true;
           const nextLevel = settlement.level + 1;
-          this.upgradeBtn.textContent = `Upgrade to L${nextLevel}`;
+          this.upgradeBtn.textContent = settlementUpgradeLabel(nextLevel);
+          this.upgradeBtn.setAttribute("aria-label", settlementUpgradeLabel(nextLevel));
           const goldCost = cost?.gold ?? 0;
           // F-2/F-6: a gold price above the treasury cap is not a shortfall --
           // income is discarded at the cap, so the settlement can never hold it
@@ -693,8 +691,8 @@ export class SettlementInfoMenu {
           this.upgradeBtn.style.cursor = "pointer";
           this.upgradeBtn.disabled = false;
           const nextLevel = settlement.level + 1;
-          const costStr = cost ? `${cost.gold}g` : "";
-          this.upgradeBtn.textContent = `Upgrade to L${nextLevel} — ${costStr}`;
+          this.upgradeBtn.textContent = settlementUpgradeLabel(nextLevel, cost?.gold);
+          this.upgradeBtn.setAttribute("aria-label", settlementUpgradeLabel(nextLevel, cost?.gold));
           this.upgradeInfo.textContent = "";
           // The panel is long-lived and reused across settlements: a refusal
           // title left over from the blocked frame would describe a control the
