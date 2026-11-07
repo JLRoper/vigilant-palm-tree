@@ -139,14 +139,14 @@ export interface GameDebugApi {
   cityGrid(): CityGridDebug | null;
   readonly hover: () => DebugPointerInfo | null;
   readonly lastClick: () => DebugPointerInfo | null;
-  readonly phase: GameState["phase"];
-  readonly round: GameState["round"];
-  readonly activeGameId: number | null;
-  readonly activeGameName: string | null;
+  readonly phase: () => GameState["phase"];
+  readonly round: () => GameState["round"];
+  readonly activeGameId: () => number | null;
+  readonly activeGameName: () => string | null;
   readonly screenFor: (q: number, r: number) => { x: number; y: number };
   isPassable(q: number, r: number): boolean;
   getMoveDurationMs(): number;
-  readonly eventLog: EventLog | null;
+  readonly eventLog: () => EventLog | null;
   readonly events: GameDebugEvents;
   readonly console: GameDebugConsole;
   readonly settings: GameDebugSettings;
@@ -300,17 +300,16 @@ export function attachDebugApi(engine: AttachDebugApiEngine): void {
 
     cityGrid: () => engine.getCityGrid?.() ?? null,
 
-    // The pointer readouts are CALLS, like `getState`/`getHeroes` above
-    // (playthrough ledger #20): they were getters while every other readout on
-    // this surface is a function, so a driver had to know which spelling each
-    // member used. Both are live per-frame state, so reading them through a
-    // call also makes it plain that the value is taken when you ask for it.
+    // Every readout on this surface is a CALL, not a getter (playthrough
+    // ledger #20): a driver must not have to know which spelling each member
+    // uses, and a call makes it plain that the value is taken when you ask for
+    // it. The pointer pair moved first, then the five scalars below.
     hover: () => engine.view.view?.hover ?? null,
     lastClick: () => engine.view.view?.lastClickDebug ?? null,
-    get phase() { return engine.state.getState().phase; },
-    get round() { return engine.state.getState().round; },
-    get activeGameId() { return engine.session.getActiveGameId(); },
-    get activeGameName() { return engine.session.getActiveGameName(); },
+    phase: () => engine.state.getState().phase,
+    round: () => engine.state.getState().round,
+    activeGameId: () => engine.session.getActiveGameId(),
+    activeGameName: () => engine.session.getActiveGameName(),
 
     get screenFor() {
       return (q: number, r: number) => {
@@ -322,7 +321,7 @@ export function attachDebugApi(engine: AttachDebugApiEngine): void {
     isPassable: (q: number, r: number) => engine.state.getGameMap().isPassable(q, r),
     getMoveDurationMs: () => engine.state.getHeroes()[0]?.moveDurationMs ?? 0,
 
-    eventLog: engine.eventLog ?? null,
+    eventLog: () => engine.eventLog ?? null,
 
     events: (() => {
       const log: EventLog | null | undefined = engine.eventLog;

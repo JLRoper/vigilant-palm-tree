@@ -318,7 +318,7 @@ async function openGame(page: Page, name: string, gameId: string): Promise<void>
   // One more chance: the debug API may already carry the game even if the
   // click path never rendered the list (keeps the browser phase about the
   // charter proof, not menu plumbing).
-  await page.waitForFunction((n) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === n, name, { timeout: 30000 });
+  await page.waitForFunction((n) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() === n, name, { timeout: 30000 });
 }
 
 /** The AI keep: the AI-owned settlement the AI hero starts on (the charter's provisioning city). */

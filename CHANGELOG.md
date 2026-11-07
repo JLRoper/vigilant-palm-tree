@@ -12,7 +12,36 @@ the version has not already been bumped in that changeset.
 
 ## [0.53.17] - 2026-11-07
 
-test(data): pin the faction building-set differences that hold, and report the building-art gap
+refactor(debug): every __gameDebug readout is a call, so the surface has one shape
+
+Re-measured on main (`7933049`): `phase`, `round`, `activeGameId`, `activeGameName` and
+`eventLog` were still PROPERTIES while every other readout a driver reaches for is a CALL, so
+the surface had two shapes and a driver had to know which spelling each member used. The pointer
+pair (`hover`, `lastClick`) moved to the call form first (playthrough ledger #20); this is that
+finding's residual, swept in ONE pass.
+
+- The five members of `GameDebugApi` are now `() => ...` — the same names in the call form,
+  exactly as the pointer pair kept theirs — and `attachDebugApi` defines them as arrow members
+  instead of getters.
+- Every call site moved with them, in the same changeset: 24 files / 35 readouts swept by one
+  scripted pass (21 e2e/browser suites, the two probe drivers, `test/smoke.ts` — which CI runs —
+  and `tools/doc-screenshots.mjs`), plus the three alias reads (`dbg?.activeGameId`,
+  `d.activeGameName`/`d.activeGameId`) and `src/screens/home/developerSettingsMenu.ts`'s
+  dev-console opener. `src/` is clean under `npm run test:types`.
+- `test/io/debugContract.test.ts` pins the shape two ways: the five names join the
+  `typeof === "function"` list, and a new source scan ("no readout is a property: every readout
+  on the surface is called") greps src/test/scripts/tools for the property spelling and fails
+  with the file:line. Proved loud: a scratch probe carrying `__gameDebug?.activeGameName` turned
+  the suite red and named the file, and it passed again with the probe removed.
+- `docs/dev-console.md`'s key table and `waitForFunction` example and `SETTLERS-ACCEPTANCE.md`'s
+  client-state row now state the call form; the rows for the already-call pointer pair were still
+  labelled "getter" on main and are corrected alongside the five, so the table states one shape.
+  `docs/dev-console.md`'s key count is corrected 25 → 26 (the city-view API landed without it).
+- Verified on this branch: `build`, `lint:deps` (547 modules / 1841 deps), `test:types`
+  (application clean; test tree 296 known / baseline 296), `docs:check` (4 owned docs fresh),
+  `test:unit` 3025/3025, `test:districts`, `test:cityview` and `test:visual` (13/13 scenes) all
+  PASS. The game-wiping global suites were not run locally while sibling worktrees are live —
+  CI's smoke covers them. A `src/` change, so patch.
 
 ## [0.53.16] - 2026-11-07
 

@@ -177,9 +177,9 @@ export function openDeveloperSettingsMenu(parent?: HTMLElement): void {
   devConsoleBtn.style.marginTop = "4px";
   devConsoleBtn.title = "Open the real-time event log console";
   devConsoleBtn.addEventListener("click", () => {
-    const log = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.eventLog ?? null;
+    const log = (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.eventLog() ?? null;
     if (!log) {
-      console.warn("[developerSettingsMenu] no __gameDebug.eventLog available; dev console disabled");
+      console.warn("[developerSettingsMenu] no __gameDebug.eventLog() available; dev console disabled");
       return;
     }
     modal.close();

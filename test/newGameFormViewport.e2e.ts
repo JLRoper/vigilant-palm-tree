@@ -273,7 +273,7 @@ async function run(): Promise<void> {
     await page.locator("button").filter({ hasText: /^Create Game$/ }).first().click();
 
     await page.waitForFunction(
-      (want: string) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === want,
+      (want: string) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() === want,
       gameName,
       { timeout: 30000 },
     );

@@ -193,7 +193,7 @@ async function run(): Promise<void> {
     // "some game is active" races the swap -- select the hero only after the
     // created game is the one actually loaded (same as the visual suite).
     await page.waitForFunction(
-      (name) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === name,
+      (name) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() === name,
       GAME_NAME,
       { timeout: 20_000 },
     );

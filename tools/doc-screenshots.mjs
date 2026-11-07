@@ -107,7 +107,7 @@ async function dismissHomeAndCreateGame(page) {
   await page.locator("input[type=number]").first().fill(GAME_SEED);
   await page.locator("button", { hasText: "Create Game" }).click();
   await page.waitForFunction(
-    (name) => !!(window.__gameDebug && window.__gameDebug.activeGameName === name),
+    (name) => !!(window.__gameDebug && window.__gameDebug.activeGameName() === name),
     GAME_NAME,
     { timeout: 30_000 },
   );

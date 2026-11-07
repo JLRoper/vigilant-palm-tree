@@ -148,7 +148,7 @@ async function openGame(page: Page, gameId: string): Promise<void> {
     }, NAME);
   }
   await page.waitForFunction(
-    (n) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === n,
+    (n) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() === n,
     NAME, { timeout: 30_000 },
   );
   await wait(700);

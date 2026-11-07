@@ -214,7 +214,7 @@ async function run() {
     // Step 1: fresh boot. This suite brings its own game. It used to rely on the
     // client: localStorage.clear() + reload left the game cache empty, and
     // initBackend silently started a `starter-*` game, which is what turned
-    // __gameDebug.activeGameName non-null. The load path no longer substitutes
+    // __gameDebug.activeGameName() non-null. The load path no longer substitutes
     // a game for a player who did not ask for one (test/loadSilentSubstitute.e2e.ts
     // pins its absence), so the game is created here -- before the client boots,
     // so the account is never empty -- and opened by name from home's Load Game
@@ -233,7 +233,7 @@ async function run() {
     );
     await loadGameFromHome(page, gameName);
     await page.waitForFunction(
-      (expected) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === expected,
+      (expected) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() === expected,
       gameName,
       { timeout: 30_000 },
     );
@@ -274,7 +274,7 @@ async function run() {
 
     await loadGameFromHome(page, gameName);
     await page.waitForFunction(
-      (expected) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName === expected,
+      (expected) => (window as unknown as { __gameDebug?: GameDebugApi }).__gameDebug?.activeGameName() === expected,
       gameName,
       { timeout: 30_000 },
     );
