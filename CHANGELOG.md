@@ -10,6 +10,10 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.53.15] - 2026-11-07
+
+test(visual): re-cut the three stale city-view baselines, measured by region; district-map reported as a moved subject
+
 ## [0.53.14] - 2026-11-07
 
 test(data): pin the faction combat-unit differences that hold, and measure the ones that do not

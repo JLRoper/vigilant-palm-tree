@@ -639,6 +639,58 @@ async function run(): Promise<void> {
       await captureAndCompare("charter-constructing", page);
     });
 
+    // ── The three settlement city-view scenes ────────────────────────────
+    // RE-CUT 2026-11-07 (github/main be2d030, 0.53.13). All three had gone
+    // STALE-AND-GREEN: parallax-on 2,610 px, parallax-off 2,611 px, diorama
+    // 2,610 px, each 0.255% against the 5,120 px a 0.5% budget allows, so the
+    // suite read OK and nobody decomposed them. Their baselines were written on
+    // 2026-11-03 at 0.43.0 (290f8e7 / f5c83ee / 493739a) by the f15a912 re-cut.
+    //
+    // Measured by REGION first (suite tolerance 24, so the region sum equals the
+    // failure count with 0 px uncovered), off the live DOM at capture time:
+    //
+    //   toolbar                0 px   left gutter            0 px
+    //   left settlement panel  2,610  panel bottom margin    0 px
+    //   right panel rail       0 px   below rail             0 px
+    //   City Design box        0 px
+    //   SUBJECT city scene     0 px   (all four quadrants)
+    //
+    // CHROME IS 100% OF THE FAILURE AND THE SUBJECT IS 0 px: the city scene these
+    // scenes exist to pin is byte-identical to the committed baseline, and the
+    // whole 2,610 px is the left settlement panel DOM overlay. The clusters, each
+    // named as a mover with the commit that moved it:
+    //
+    //   * 2,505 px [27,722 -> 246,776] -- the tier-upgrade row now reads
+    //     "Upgrade to L2 / Needs: TH L2, Gold 300/5000" where the baseline
+    //     recorded the panel's own bottom (COMMANDER'S ARMY). 0.53.10: F-5
+    //     15b057b pins the control to the panel ROOT outside the scrolling body,
+    //     F-3 11f8272 makes the refusal name each missing amount.
+    //   * 75 px [208,325 -> 222,333] -- the Treasury row "300 / 1,500g" ->
+    //     "300 / 5,000g". 0.51.3 149add3: BASE_TREASURY[1] 1500 -> 5000 so a
+    //     level-1 vault can hold its own tier upgrade's price.
+    //   * 28 px [217,449 -> 223,455] -- the Wood row "-4/day" -> "-6/day".
+    //     762b325 (CITY P6): house upkeepPerLevel.wood 1 -> 2, and the starter set
+    //     carries two houses, so the settlement's wood bill is +2/day.
+    //   * 1-2 px at y=776 -- the panel's own bottom border, a sub-pixel edge of
+    //     the same panel.
+    //
+    // The three movers are NOT ancestors of any of the three baselines
+    // (`git merge-base --is-ancestor <mover> <baseline-commit>` -> 1 for all nine
+    // pairs), i.e. each baseline encodes a panel state no revision at HEAD prints.
+    // Proven stale by RESTORING THE PRE-CHANGE LINE, as the district re-cut did:
+    // put the upgrade container back in the panel body (settlementInfoMenu.ts at
+    // 290f8e7), BASE_TREASURY[1] back to 1500, and the house's wood upkeep back to
+    // 1 -- each scene's panel region then reads 0 px (2,610 / 2,611 / 2,610 ->
+    // 6 / 6 / 0 px, the 6 px being the documented toolbar glyph residual at
+    // [666,16 -> 673,19] that rewrites adventure-overview roughly one run in
+    // three; that baseline was restored, never absorbed).
+    //
+    // The scenes still catch their subject after the re-cut: dropping every
+    // building from the city scene (a `continue` at the top of buildCityScene's
+    // cityBuilding loop) reads 52,041 px = 5.082% FAIL on parallax-on and
+    // 51,536 px = 5.033% FAIL on diorama -- 99.99% and 100% of it inside the
+    // SUBJECT city scene. Restored, 0 px. A re-cut that could no longer go red
+    // would be worthless; this one goes red on exactly what the scene pins.
     await withPageRetry(context, "city-view-parallax-on", async (page) => {
       await dismissHomeAndCreateGame(page, GAME_NAME, SEED);
       await selectHeroAndHover(page);
@@ -754,6 +806,37 @@ async function run(): Promise<void> {
     // restored, 0. The four baselines the update run also rewrote were restored
     // and left stale-and-green (city-view-* 2,610 px, district-map 1,455 px --
     // under budget, other cards' movers).
+    //
+    // DECOMPOSED 2026-11-07 (the decompose-and-settle card), and the follow-up
+    // note above guessed this scene's mover WRONG. Measured by region against the
+    // suite's own tolerance 24, off the live DOM at capture time, this scene
+    // reads 1,455 px = 0.142% and NOT ONE PIXEL OF IT IS CHROME:
+    //
+    //   toolbar 0 px · tile-info panel 0 px · left hero panel 0 px ·
+    //   right panel rail 0 px · SUBJECT map surface 1,455 px (sum 1,455,
+    //   uncovered 0)
+    //
+    // The guessed mover -- "the panel's cost line" -- is untouched. All four
+    // clusters (1,017 px [541,227 -> 604,310], 253 px [539,391 -> 572,445],
+    // 171 px [486,360 -> 524,367], 14 px [534,362 -> 537,365]) are the settlement
+    // ROAD NETWORK's own art, which is half of what this scene exists to pin
+    // ("the district sprite AND the settlement road network both render"): the
+    // band went from the old sub-pixel hairline (ROAD_WIDTH_BASE 0.55 ..
+    // ROAD_WIDTH_MAX 1.5, a curve per tile-centre pair) to a cased 3.55-4.50 px
+    // body stroked per tile from its own edge mask. One mover, and it is 0.49.0
+    // -- d9e741a "District roads: a per-tile road graph with welded junctions, at
+    // a legible width (#351)", released by the same commit's chore(release). It is
+    // NOT an ancestor of this baseline's commit 681c9ec
+    // (`git merge-base --is-ancestor d9e741a 681c9ec` -> 1), and that landing's own
+    // note recorded this scene moving 2,426 px on its merge base and deliberately
+    // not re-cutting.
+    //
+    // So the SUBJECT has moved and the baseline is NOT re-cut here: a green
+    // baseline whose subject moved is a regression hiding behind a budget, and
+    // re-cutting it would bless the drift this card exists to refuse. It is
+    // reported instead (the settle-and-decompose report's district-map section).
+    // The district sprite half of the subject is unmoved; every mismatching pixel
+    // is the road layer.
     await withPageRetry(context, "district-map", async (page) => {
       await dismissHomeAndCreateGame(page, `${GAME_NAME}-district-map`, SEED);
       await selectHero(page);
