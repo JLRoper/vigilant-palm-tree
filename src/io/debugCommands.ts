@@ -47,12 +47,30 @@ export interface DebugHeroSnapshot {
   gold: number;
 }
 
+export interface DebugBuildingSnapshot {
+  kind: string;
+  level: number;
+  /** Still under construction: it pays nothing yet (the rule the income passes share). */
+  construction: boolean;
+  /** The district this building stands in, or null for the settlement's own grid. */
+  district: { q: number; r: number } | null;
+}
+
 export interface DebugSettlementSnapshot {
   id: string;
   q: number;
   r: number;
   level: number;
   ownerId: number | null;
+  /**
+   * Every building the settlement holds, main city and districts, with its OWN
+   * level (playthrough ledger #11). `level` above is the SETTLEMENT's tier, so
+   * before this a town hall that had reached L2 while the settlement stayed L1
+   * was invisible to a probe: there was no way to read a building's level at
+   * all. District buildings are tagged with the district hex they stand in,
+   * because their `gx`/`gy` are local to that district's own grid.
+   */
+  buildings: DebugBuildingSnapshot[];
 }
 
 export interface DebugPointerInfo {
@@ -118,6 +136,40 @@ export interface GameDebugApi {
   readonly events: GameDebugEvents;
   readonly console: GameDebugConsole;
   readonly settings: GameDebugSettings;
+}
+
+/** One building, as much as the debug snapshot needs (structural, so this file stays contract-light). */
+interface BuildingLike {
+  kind: string;
+  level: number;
+  construction?: unknown;
+}
+
+/**
+ * Every building a settlement holds — its own city grid first, then each
+ * district's, tagged with the district hex those local `gx`/`gy` belong to.
+ * Ledger #11: the settlement's `level` is its TIER, so a probe could not see a
+ * town hall that had reached L2 while the settlement stayed L1.
+ */
+function buildingSnapshots(castle: {
+  buildings?: BuildingLike[];
+  districts?: Record<string, { q: number; r: number; buildings?: BuildingLike[] }>;
+}): DebugBuildingSnapshot[] {
+  const out: DebugBuildingSnapshot[] = [];
+  for (const b of castle.buildings ?? []) {
+    out.push({ kind: b.kind, level: b.level, construction: b.construction === true, district: null });
+  }
+  for (const d of Object.values(castle.districts ?? {})) {
+    for (const b of d.buildings ?? []) {
+      out.push({
+        kind: b.kind,
+        level: b.level,
+        construction: b.construction === true,
+        district: { q: d.q, r: d.r },
+      });
+    }
+  }
+  return out;
 }
 
 /**
@@ -229,6 +281,7 @@ export function attachDebugApi(engine: AttachDebugApiEngine): void {
 
     getSettlements: () => engine.state.getSettlements().map((c: any) => ({
       id: c.id, q: c.tile.q, r: c.tile.r, level: c.level, ownerId: c.ownerId,
+      buildings: buildingSnapshots(c),
     })),
 
     get hover() { return engine.view.view?.hover ?? null; },

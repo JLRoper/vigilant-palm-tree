@@ -61,6 +61,13 @@ const fakeVisualSettlement = {
   tile: { q: 3, r: 4 },
   level: 2,
   ownerId: 0,
+  buildings: [
+    { gx: 0, gy: 0, kind: "townHall", level: 2, w: 2, h: 2 },
+    { gx: 2, gy: 2, kind: "market", level: 1, construction: true },
+  ],
+  districts: {
+    "3,3": { q: 3, r: 3, buildings: [{ gx: 0, gy: 0, kind: "farmField", level: 1 }] },
+  },
 };
 
 const fakeEngine = {
@@ -167,7 +174,20 @@ test("snapshot getters map the engine's visual entities", () => {
     { id: "h1", q: 1, r: 2, ownerId: 0, movementRemaining: 5, trail: [{ q: 0, r: 1 }], gold: 10 },
   ];
   const expectedSettlements: DebugSettlementSnapshot[] = [
-    { id: "s1", q: 3, r: 4, level: 2, ownerId: 0 },
+    {
+      id: "s1",
+      q: 3,
+      r: 4,
+      level: 2,
+      ownerId: 0,
+      // Ledger #11: the settlement's own tier is `level`; each BUILDING carries
+      // its own, so a town hall at L2 under a still-L1 settlement is readable.
+      buildings: [
+        { kind: "townHall", level: 2, construction: false, district: null },
+        { kind: "market", level: 1, construction: true, district: null },
+        { kind: "farmField", level: 1, construction: false, district: { q: 3, r: 3 } },
+      ],
+    },
   ];
   assert.deepEqual(api.getHeroes(), expectedHeroes);
   assert.deepEqual(api.getSettlements(), expectedSettlements);
