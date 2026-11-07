@@ -8,11 +8,13 @@
 // migration-built rows in this worktree's own database.
 //
 // A surface where two factions are NOT distinguishable is deliberately NOT
-// asserted here — an assertion of sameness would freeze a gap as if it were
-// the design. The one such surface for buildings (buildings of different
-// factions that share byte-identical sprite bytes) is recorded in the
-// measurement report's ESCALATIONS section instead; see
-// analysis/2026-11-07-faction-building-differentiation.md.
+// asserted here as SAMENESS — an assertion of that kind would freeze a gap as
+// if it were the design. The one such surface for buildings (buildings of
+// different factions that share byte-identical sprite bytes) is pinned at the
+// foot of this file as a LEDGER instead: every duplicate group still
+// outstanding is declared there, the measured set must equal the declaration,
+// and a closed group's row is deleted. Source measurement:
+// analysis/2026-11-07-faction-building-differentiation.md (§E1).
 //
 // The recruit table is NOT re-measured here: #167 already pinned that each
 // faction's troop buildings recruit exactly its own registry roster,
@@ -23,10 +25,14 @@
 // fresh database's migration-built rows are present under plain tsx --test.
 
 import { test, before, after } from "node:test";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import assert from "node:assert/strict";
 import type { BuildingKind, FactionId } from "@heroes/contracts";
 import {
   BUILDING_SPRITE_COVERAGE,
+  BUILDING_SPRITE_FILES,
   STARTER_TROOP_BUILDING_BY_FACTION,
   buildStarterLayout,
   buildingAllowedForFaction,
@@ -211,5 +217,182 @@ test("the DB's faction axis is exactly the contracts FactionId set", async () =>
     present.rows.map((r) => r.faction_id),
     [...ALL_FACTIONS].sort(),
     "every faction in the vocabulary must have migration-built rows behind it",
+  );
+});
+
+// ── Sprites: the building art each faction is DRAWN with ──
+//
+// The measurement report's ESCALATION E1 is the buildings-side twin of the
+// units gap pinned in test/data/factionCombatUnitDifferentiation.test.ts:
+// buildings of two different factions shipping byte-identical PNGs, plus six
+// within-faction copies. Source of every copy and the placeholder convention:
+// design/arena-unit-sprites/roster-parity-placeholder-art.md §Buildings;
+// measurement: analysis/2026-11-07-faction-building-differentiation.md §E1.
+//
+// Same rule as the unit suite: this is a LEDGER, not one assertion. Every
+// duplicate group still outstanding is declared below and the measured set must
+// EQUAL the ledger, so the list can only shrink — landing unique art for a group
+// deletes its row, and a row may not be added back. Two buildings shipping one
+// file's bytes again fails these tests with both asset paths named.
+//
+// Scope is the REGISTERED pixel family (BUILDING_SPRITE_FILES): it is what the
+// client resolves, and the legacy building-classic-* / building-blocky-* /
+// *-raw / *-variant* files that sit in the same folder are deliberately not
+// shipped art.
+
+const BUILDINGS_DIR = resolve(process.cwd(), "src", "resources", "buildings");
+
+/** One registered building sprite: its key (`pixel.<kind>.<level>`), kind, faction and file. */
+const BUILDING_SPRITES: readonly {
+  key: string;
+  kind: BuildingKind;
+  faction: FactionId | undefined;
+  path: string;
+}[] = Object.entries(BUILDING_SPRITE_FILES).map(([key, file]) => {
+  const kind = key.split(".")[1] as BuildingKind;
+  // A farm STYLE key (`pixel.farmWheat.1`) and `pixel.underConstruction.1` are
+  // registered sprite keys whose "kind" is not a registry BuildingKind:
+  // getBuildingEffect returns undefined for them, and they are shared art.
+  const effect = getBuildingEffect(kind as BuildingKind) as { faction?: FactionId } | undefined;
+  return { key, kind, faction: effect?.faction, path: resolve(BUILDINGS_DIR, file) };
+});
+
+function buildingSpriteBytes(key: string): Buffer {
+  const sprite = BUILDING_SPRITES.find((s) => s.key === key);
+  assert.ok(sprite, `no registered building sprite "${key}"`);
+  return readFileSync(sprite.path);
+}
+
+function contentHash(buf: Buffer): string {
+  return createHash("sha256").update(buf).digest("hex");
+}
+
+/** A registered key's on-disk path, for failure messages. */
+function buildingSpritePath(key: string): string {
+  return BUILDING_SPRITES.find((s) => s.key === key)?.path ?? `(unregistered key ${key})`;
+}
+
+/**
+ * The duplicate-byte groups in the registered building family, measured by
+ * content hash. Members and groups are sorted, so the comparison against the
+ * ledger is order-independent.
+ */
+function buildingDuplicateGroups(): string[][] {
+  const byHash = new Map<string, string[]>();
+  for (const sprite of BUILDING_SPRITES) {
+    const hash = contentHash(readFileSync(sprite.path));
+    const bucket = byHash.get(hash);
+    if (bucket) bucket.push(sprite.key);
+    else byHash.set(hash, [sprite.key]);
+  }
+  return [...byHash.values()]
+    .filter((keys) => keys.length > 1)
+    .map((keys) => [...keys].sort())
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+}
+
+function normalizeBuildingLedger(groups: readonly (readonly string[])[]): string[][] {
+  return [...groups]
+    .map((keys) => [...keys].sort())
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+}
+
+/**
+ * The duplicate-byte groups this repository still ships in the registered
+ * building family, measured 2026-11-07 against main 0.53.21 and left as art work
+ * by the card that closed the cross-faction pair.
+ *
+ * Every remaining row is WITHIN a single faction — one sprite deliberately
+ * reused by two of that faction's own buildings, the same placeholder debt the
+ * 2026-10-22 roster expansion created (roster-parity-placeholder-art.md). Those
+ * are reuse, not a two-factions-look-alike gap: they are declared here and stay
+ * declared.
+ *
+ * The CROSS-faction row this ledger used to carry — `ramPens = stables`
+ * (`building-pixel-ramPens-1.png` byte-identical to
+ * `building-pixel-stables-1.png`, ironmark copying human) — was closed by giving
+ * the COPIER its own art, so its row is DELETED here. The measured set must
+ * equal this list, so that pair can no longer collide without failing these
+ * tests, and the distinctness tests below name both paths when it does.
+ */
+const OUTSTANDING_BUILDING_DUPLICATE_GROUPS: readonly (readonly string[])[] = [
+  // ashen: blackChapel copied spireOfAsh, dragonBoneyard copied ossuary
+  ["pixel.blackChapel.1", "pixel.spireOfAsh.1"],
+  ["pixel.dragonBoneyard.1", "pixel.ossuary.1"],
+  // ironmark: deepAnvil copied hearthTemple, delversHall copied forgeHall
+  ["pixel.deepAnvil.1", "pixel.hearthTemple.1"],
+  ["pixel.delversHall.1", "pixel.forgeHall.1"],
+  // verdant: druidCircle copied worldrootGrove, groveSanctum copied seedlingGrove
+  ["pixel.druidCircle.1", "pixel.worldrootGrove.1"],
+  ["pixel.groveSanctum.1", "pixel.seedlingGrove.1"],
+];
+
+test("every duplicate-byte group in the registered building family is declared in the ledger", () => {
+  const measured = buildingDuplicateGroups();
+  const declared = normalizeBuildingLedger(OUTSTANDING_BUILDING_DUPLICATE_GROUPS);
+
+  const declaredKeys = new Set(declared.map((keys) => keys.join("|")));
+  const measuredKeys = new Set(measured.map((keys) => keys.join("|")));
+
+  const regressions = measured.filter((keys) => !declaredKeys.has(keys.join("|")));
+  assert.deepEqual(
+    regressions.map((keys) => keys.map((key) => buildingSpritePath(key)).join(" == ")),
+    [],
+    "two buildings ship the same sprite bytes and no ledger row declares it — " +
+      "land one of them its own art, or the collision is a regression",
+  );
+
+  const closed = declared.filter((keys) => !measuredKeys.has(keys.join("|")));
+  assert.deepEqual(
+    closed.map((keys) => keys.join(" = ")),
+    [],
+    "the building ledger declares a group that is no longer a collision — " +
+      "delete its row here so the ledger keeps shrinking toward empty",
+  );
+});
+
+test("every remaining duplicate-byte group is within one faction, not a cross-faction collision", () => {
+  for (const keys of normalizeBuildingLedger(OUTSTANDING_BUILDING_DUPLICATE_GROUPS)) {
+    const factions = new Set(
+      keys.map((key) => BUILDING_SPRITES.find((s) => s.key === key)?.faction ?? "shared"),
+    );
+    assert.equal(
+      factions.size,
+      1,
+      `the declared group [${keys.join(", ")}] spans ${[...factions].join(" and ")} — ` +
+        "the ledger declares within-faction reuse only",
+    );
+  }
+});
+
+test("no two building kinds of different factions ship the same sprite bytes", () => {
+  // The assertion analysis/2026-11-07-faction-building-differentiation.md §E1
+  // deliberately deferred until unique art landed: with `ramPens = stables`
+  // differentiated, no two factions — and no faction against the shared,
+  // faction-less kinds — may share a building PNG.
+  for (let i = 0; i < BUILDING_SPRITES.length; i++) {
+    for (let j = i + 1; j < BUILDING_SPRITES.length; j++) {
+      const a = BUILDING_SPRITES[i];
+      const b = BUILDING_SPRITES[j];
+      if (a.faction === b.faction) continue;
+      assert.notEqual(
+        contentHash(readFileSync(a.path)),
+        contentHash(readFileSync(b.path)),
+        `${a.path} and ${b.path} are still one file — ${a.kind} (${a.faction ?? "shared"}) ` +
+          `and ${b.kind} (${b.faction ?? "shared"}) must not ship the same building art`,
+      );
+    }
+  }
+});
+
+// The one CROSS-faction pair this change closed, pinned by the paths of the
+// assets it rewrote: the COPIER (roster-parity-placeholder-art.md §Buildings —
+// ramPens's source is stables) got its own art and the ORIGINAL was left alone.
+test("the ironmark ramPens / human stables collision this change closed ships unique art", () => {
+  assert.notEqual(
+    contentHash(buildingSpriteBytes("pixel.ramPens.1")),
+    contentHash(buildingSpriteBytes("pixel.stables.1")),
+    `${buildingSpritePath("pixel.ramPens.1")} and ${buildingSpritePath("pixel.stables.1")} ` +
+      "are still one file — the ironmark ram pens must not ship the human stable's sprite",
   );
 });
