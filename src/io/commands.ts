@@ -110,6 +110,12 @@ export type EndTurnResult = {
   heroes: Record<string, HeroState>;
   settlements: Record<string, SettlementState>;
   tradeRoutes?: import("@heroes/contracts").TradeRouteState[];
+  // The turn's own charter list (the tradeRoutes rule): the day tick owns the
+  // countdown and the founding, so the response that founds a chartered
+  // settlement is also the one that says the charter is gone. Absent when the
+  // server could not see the charters table (JSONB-fallback hydration), which
+  // leaves the client's own list alone rather than wiping it.
+  activeCharters?: import("@heroes/contracts").CharterState[];
 };
 
 // The four logistics command responses (logistics interface fixes §5.7):

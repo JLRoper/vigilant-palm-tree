@@ -457,7 +457,19 @@ export function createHomeView(opts: HomeViewOptions): HomeView {
         const serverGame = entry.server;
         if (!serverGame) return;
         try {
-          await opts.onLoadGame(serverGame);
+          // The row this list rendered came from `GET /games`, which selects the
+          // games table and nothing joined to it -- so it carries no `charters`
+          // (server/routes.ts). Handing that row to the load path hydrated
+          // `activeCharters: []` while `heroes.<id>.isChartering` survived, and
+          // hydrateGameState's own unlockOrphanedCharteringHeroes then cleared
+          // the flag: the in-flight charter was silently dropped and a
+          // `traveling` row was left with nothing that would ever advance it.
+          // Fetch the full game, which carries the charters table, exactly as
+          // the in-game Load modal does (src/screens/shared/loadGameModal.ts).
+          // Games this account has no charters in are unaffected -- absent
+          // charters still hydrate as [].
+          const full = await api.getGame(serverGame.name);
+          await opts.onLoadGame(full);
           onLoaded();
           hide();
           opts.onEnterGame();
