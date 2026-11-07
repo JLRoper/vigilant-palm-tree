@@ -29,6 +29,7 @@ import {
 import type { Warehouse } from "@heroes/contracts";
 import { footprintLine } from "./footprint";
 import { townHallUpgradeScope, townHallUpgradeScopeLine } from "./upgradeScope";
+import { townHallUpgradeLabel } from "../upgradeLabels";
 import { upgradeRefusalTitle } from "../upgradeRefusal";
 
 function formatEffectLine(kind: BuildingKind, level: number, effort = 1): string[] {
@@ -327,7 +328,7 @@ export class BuildingMenu {
         row.style.marginBottom = "4px";
 
         const info = document.createElement("span");
-        info.textContent = `L${building.level + 1}: ${cost.gold}g ${cost.wood}w ${cost.stone}s / ${cost.days}d`;
+        info.textContent = townHallUpgradeLabel(building.level + 1, cost);
         info.style.fontSize = "10px";
         info.style.opacity = "0.75";
         row.appendChild(info);
