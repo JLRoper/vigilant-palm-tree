@@ -10,6 +10,18 @@ a bug fix, a chore, or housekeeping (docs, tooling, tests). The pre-commit gate
 chooses between them for you from the intended commit type, and only bumps when
 the version has not already been bumped in that changeset.
 
+## [0.53.19] - 2026-11-07
+
+the colliding seat factions get their own unit art — wave 2: the verdant druid and the ironmark hearth priest
+
+The wave-1 audit listed this cluster as three separate cards (its R1, R2 and R13). The verdant druid and the ironmark hearth priest were carrying other units' files, and between them they sat in three of the duplicate groups the ledger still declared: the arena idle triple `druid = hearth_priest = runesmith`, and the icon pairs `druid = mage` and `hearth_priest = runesmith`.
+
+- The card said "two assets, three groups"; measured, that cannot be done in two. New art for the druid NARROWS the arena triple to `[hearth_priest, runesmith]` rather than closing it, so the arena row needs two of its three members re-authored — four PNGs with one member of each icon pair. The estimate is recorded as falsified in the audit rather than worked around.
+- The four replaced assets: `src/resources/units/arena/{druid,hearth_priest}-idle.png` (one file, sha256 `3ce3a525c4fb8e5e…` — a copy of `arena/runesmith-idle.png`, now `01a3b2ca734ece48…` and `f94923ad95466045…`), `src/resources/units/icons/druid.png` (a copy of `icons/mage.png`, `412aa097fb33832c…`, now `9da1e5819f68e457…`) and `src/resources/units/icons/hearth_priest.png` (a copy of `icons/runesmith.png`, `bd86dad2c2e32aa8…`, now `4bb03527833d8af8…`). The originals keep their art — the copiers are the wrong side of the collision.
+- Three to four candidates per surface from different image models, each with the placeholder being replaced AND a same-faction non-placeholder (`forest_scout`, `shield_bearer`) attached as references. Three picks are `google/gemini-3-pro-image`; the druid ARENA pick is `google/gemini-2.5-flash-image`, whose stockier silhouette reads better at the drawn size than the pro model's thinner robed figure — the opposite of the trade wave 1 found on a hound. `openai/gpt-5.4-image-2` still 502s (`Complexity 'none' is not supported for this image model`).
+- Cut with wave 1's helper, unchanged, so both arena sprites land with the base on the canvas' last row (the hex's south vertex, `bottomPad 0`) and a clean 2px ring. The footprint test now covers the two new arena sprites, with a per-asset base-band ceiling: 0.50 for wave 1's hounds (thin paws), 0.85 for this wave's robed pair, whose hem is its stance (the shipped runesmith measures 0.63, shield_bearer 0.77).
+- The ledger loses the three rows this closes, and gains a cluster test that asserts every pair inside each closed group is a distinct file, naming both asset paths when it is not. Four tests were red before the art landed; 14/14 pass after.
+
 ## [0.53.18] - 2026-11-07
 
 test(visual): re-cut the four settlement-panel baselines, measured by region; district-map reported as a moved subject
