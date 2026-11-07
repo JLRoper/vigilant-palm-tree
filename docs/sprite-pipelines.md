@@ -340,6 +340,20 @@ row is the hex's south vertex, and a transparent bottom pad floats the unit abov
 it. Measurement, per-candidate verdicts and the still-colliding groups:
 `analysis/2026-11-07-give-the-colliding-seat-factions-their-own-unit-art.md`.
 
+The **building** twin of the same wave (2026-11-07) closed the one CROSS-faction
+building collision — ironmark `ramPens` and human `stables` shipped
+byte-identical PNGs, and the copier was re-authored. A building is cut on its own
+canvas: `design/arena-unit-sprites/collision-cut-building.mjs` runs
+`collision-cut.mjs`'s phases (border flood fill, floater drop) and then fits the
+LOT — the sand's own lower edges are measured from a mask and scaled vertically
+to the grid's dy/dx 0.5, everything below them is cleared (that is the soil slab
+the models add, which floats a lot above its cell), and the result is drawn into
+the 1024×1024 `building-pixel-*` canvas at the family's lot width with the
+sprite's own base ON the last row, so `gen-building-anchors.mjs` measures
+`anchorOffsetY 0`. Its provenance goes in the same
+[`collision-fix/MANIFEST.md`](../design/arena-unit-sprites/collision-fix/MANIFEST.md)
+and its audit is `analysis/2026-11-07-give-the-ironmark-ram-pens-their-own-art.md`.
+
 ### 4.5 Pipeline E — skybox
 
 See §4.2: `flux-skybox.mjs` → `npm run skybox:split` → `src/resources/skybox/`;
