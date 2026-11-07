@@ -25,6 +25,8 @@
 // fresh database's migration-built rows are present under plain tsx --test.
 
 import { test, before, after } from "node:test";
+import { inflateSync } from "node:zlib";
+import { BUILDING_ANCHOR_OVERRIDES } from "../../src/render/generated/buildingAnchorOverrides";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -394,5 +396,190 @@ test("the ironmark ramPens / human stables collision this change closed ships un
     contentHash(buildingSpriteBytes("pixel.stables.1")),
     `${buildingSpritePath("pixel.ramPens.1")} and ${buildingSpritePath("pixel.stables.1")} ` +
       "are still one file — the ironmark ram pens must not ship the human stable's sprite",
+  );
+});
+
+// ── The closed group's own footprint: cut to the iso lot, no plinth ──
+//
+// Uniqueness is not the only contract this change had to hit. The wave's cut
+// (`design/arena-unit-sprites/collision-cut-building.mjs`) authors the new
+// building on the same 1024x1024 `building-pixel-*` canvas as the family, and
+// the measurements below are the ones that make it land where the city grid
+// draws it:
+//
+//   - the sprite's own visible base IS the canvas' last row (bottom pad 0), so
+//     `tools/sprites/gen-building-anchors.mjs` measures `anchorOffsetY: 0` and
+//     `anchor: "bottom"` plants the lot's south vertex on its cell's south
+//     vertex — a bottom pad floats the building above its cell;
+//   - the lot's lower edges are fitted to the grid's dy/dx 0.5 (26.57 deg,
+//     src/core/cityGrid.ts) and everything below them is cleared, so no soil
+//     SLAB/plinth lifts the lot plane off its cell;
+//   - the lot keeps the family's footprint scale (the shipped 1x1 lots measure
+//     0.84-0.92 of the canvas width), so it draws at the same size as its
+//     neighbours' lots instead of spilling to the cell edge.
+//
+// The measured numbers are the shipped sprite's own (the cut helper prints
+// them); the tolerances are wide enough for a legitimate re-cut and narrow
+// enough to catch a plinth, a float or a mis-fitted lot.
+
+/**
+ * A minimal PNG reader: 8-bit, non-interlaced, RGB or RGBA — which is what the
+ * shipped building art is. It exists instead of a `pngjs` import because the
+ * test tree's type gate (`npm run test:types`) counts untyped module imports as
+ * debt, and a sprite-geometry assertion is not worth a baseline entry.
+ */
+function readPng(buf: Buffer): { width: number; height: number; alpha: (x: number, y: number) => number } {
+  assert.equal(buf.subarray(0, 8).toString("hex"), "89504e470d0a1a0a", "not a PNG file");
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let interlace = 0;
+  const idat: Buffer[] = [];
+  for (let offset = 8; offset + 8 <= buf.length; ) {
+    const length = buf.readUInt32BE(offset);
+    const type = buf.subarray(offset + 4, offset + 8).toString("ascii");
+    const body = buf.subarray(offset + 8, offset + 8 + length);
+    if (type === "IHDR") {
+      width = body.readUInt32BE(0);
+      height = body.readUInt32BE(4);
+      bitDepth = body[8];
+      colorType = body[9];
+      interlace = body[12];
+    } else if (type === "IDAT") {
+      idat.push(body);
+    } else if (type === "IEND") {
+      break;
+    }
+    offset += 12 + length;
+  }
+  assert.equal(bitDepth, 8, "building art is authored 8-bit");
+  assert.equal(interlace, 0, "building art is not interlaced");
+  assert.ok(colorType === 6 || colorType === 2, `unsupported PNG colour type ${colorType}`);
+  const channels = colorType === 6 ? 4 : 3;
+  const stride = width * channels;
+  const raw = inflateSync(Buffer.concat(idat));
+  assert.equal(raw.length, height * (stride + 1), "unexpected PNG payload length");
+  const pixels = Buffer.alloc(height * stride);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    const line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    const out = pixels.subarray(y * stride, (y + 1) * stride);
+    const prev = y === 0 ? Buffer.alloc(stride) : pixels.subarray((y - 1) * stride, y * stride);
+    for (let i = 0; i < stride; i++) {
+      const a = i >= channels ? out[i - channels] : 0;
+      const b = prev[i];
+      const c = i >= channels ? prev[i - channels] : 0;
+      let value = line[i];
+      if (filter === 1) value += a;
+      else if (filter === 2) value += b;
+      else if (filter === 3) value += (a + b) >> 1;
+      else if (filter === 4) {
+        const pp = a + b - c;
+        const pa = Math.abs(pp - a);
+        const pb = Math.abs(pp - b);
+        const pc = Math.abs(pp - c);
+        value += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      }
+      out[i] = value & 0xff;
+    }
+  }
+  return {
+    width,
+    height,
+    alpha: (x, y) => (channels === 4 ? pixels[y * stride + x * channels + 3] : 255),
+  };
+}
+
+const RAMPENS_LOT = {
+  canvas: 1024,
+  /** alpha above this counts as opaque — gen-building-anchors.mjs's own threshold. */
+  alphaThreshold: 10,
+  /** rows of fully transparent margin at the bottom: 0 means the base IS the last row. */
+  bottomPadRows: 0,
+  /** the grid's cell-edge slope, which the lot's lower edges are fitted to. */
+  lowerEdgeDydx: 0.5,
+  lowerEdgeTolerance: 0.02,
+  /** the family band for a 1x1 building lot's width, as a fraction of the canvas. */
+  lotWidthBand: [0.8, 0.9] as const,
+};
+
+test("the ramPens lot is cut to the iso footprint: base on the last row, 2:1 edges, no plinth", () => {
+  const png = readPng(readFileSync(buildingSpritePath("pixel.ramPens.1")));
+  const { width, height } = png;
+  assert.equal(width, RAMPENS_LOT.canvas, "the building-pixel family is authored on a 1024 canvas");
+  assert.equal(height, RAMPENS_LOT.canvas, "the building-pixel family canvas is square");
+
+  const opaque = (x: number, y: number): boolean => png.alpha(x, y) > RAMPENS_LOT.alphaThreshold;
+  const rowOpaque = (y: number): boolean => {
+    for (let x = 0; x < width; x++) if (opaque(x, y)) return true;
+    return false;
+  };
+
+  let bottom = height - 1;
+  while (bottom >= 0 && !rowOpaque(bottom)) bottom--;
+  assert.equal(
+    height - 1 - bottom,
+    RAMPENS_LOT.bottomPadRows,
+    "the sprite's own base must be the canvas' last row, or the rendered lot floats above its cell's south vertex",
+  );
+
+  assert.equal(
+    BUILDING_ANCHOR_OVERRIDES["pixel.ramPens.1"],
+    0,
+    "a lot whose base is the last row measures anchorOffsetY 0 — the generated anchor table must say so",
+  );
+
+  // The lot's lower edges, fitted over the bottom third of the sprite's CONTENT
+  // (the ground only: a fit that reaches the pen walls is contaminated by them,
+  // and reports a diamond far steeper than the lot is).
+  let top = 0;
+  while (top < height && !rowOpaque(top)) top++;
+  const bandTop = bottom - Math.round((bottom - top + 1) * 0.3);
+  const rows: { y: number; left: number; right: number }[] = [];
+  for (let y = bandTop; y <= bottom; y++) {
+    let left = -1;
+    let right = -1;
+    for (let x = 0; x < width; x++) {
+      if (!opaque(x, y)) continue;
+      if (left < 0) left = x;
+      right = x;
+    }
+    if (left >= 0) rows.push({ y, left, right });
+  }
+  assert.ok(rows.length > 50, `expected the lot's lower band to be measurable, got ${rows.length} rows`);
+  const edgeSlope = (side: "left" | "right"): number => {
+    const n = rows.length;
+    const my = rows.reduce((s, r) => s + r.y, 0) / n;
+    const mx = rows.reduce((s, r) => s + r[side], 0) / n;
+    let num = 0;
+    let den = 0;
+    for (const r of rows) {
+      num += (r.y - my) * (r[side] - mx);
+      den += (r.y - my) ** 2;
+    }
+    return Math.abs(num / den);
+  };
+  // `edgeSlope` is dx/dy (x per row); the grid talks in dy/dx, so invert each
+  // edge and average the two.
+  const dydx = (1 / edgeSlope("left") + 1 / edgeSlope("right")) / 2;
+  assert.ok(
+    Math.abs(dydx - RAMPENS_LOT.lowerEdgeDydx) <= RAMPENS_LOT.lowerEdgeTolerance,
+    `the lot's lower edges measure dy/dx ${dydx.toFixed(4)} (${((Math.atan(dydx) * 180) / Math.PI).toFixed(2)} deg) — ` +
+      `the city grid descends at ${RAMPENS_LOT.lowerEdgeDydx} (26.57 deg), so the lot must be fitted to it`,
+  );
+
+  // The widest row is the ground diamond's own width: the family footprint scale.
+  let widest = 0;
+  for (let y = 0; y < height; y++) {
+    let n = 0;
+    for (let x = 0; x < width; x++) if (opaque(x, y)) n++;
+    if (n > widest) widest = n;
+  }
+  const fraction = widest / width;
+  assert.ok(
+    fraction >= RAMPENS_LOT.lotWidthBand[0] && fraction <= RAMPENS_LOT.lotWidthBand[1],
+    `the lot spans ${fraction.toFixed(3)} of the canvas — a 1x1 building lot ships in ` +
+      `[${RAMPENS_LOT.lotWidthBand[0]}, ${RAMPENS_LOT.lotWidthBand[1]}] so it draws at its neighbours' scale`,
   );
 });
